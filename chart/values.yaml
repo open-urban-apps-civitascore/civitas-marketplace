@@ -1,0 +1,16 @@
+replicaCount: 1
+
+image:
+  repository: civitas-marketplace
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  host: marketplace.civitas.test

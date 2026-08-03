@@ -1,0 +1,6 @@
+apiVersion: v2
+name: civitas-marketplace
+description: Helm Chart for the CIVITAS/CORE (v2) Marketplace Addon
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
