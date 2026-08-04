@@ -1,0 +1,10 @@
+image:
+  repository: ghcr.io/open-urban-apps-civitascore/civitas-marketplace
+  tag: v1.0.0
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  className: nginx
+  host: marketplace.179.237.75.185.nip.io
+
