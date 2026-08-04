@@ -1,0 +1,37 @@
+{
+    "clientId": "marketplace",
+    "name": "Marketplace",
+    "enabled": true,
+    "clientAuthenticatorType": "client-secret",
+    "secret": "dev-only-marketplace-secret",
+    "redirectUris": [
+        "http://localhost:3001/*"
+    ],
+    "webOrigins": [
+        "http://localhost:3001"
+    ],
+    "bearerOnly": false,
+    "consentRequired": false,
+    "standardFlowEnabled": true,
+    "implicitFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "serviceAccountsEnabled": false,
+    "publicClient": false,
+    "frontchannelLogout": true,
+    "protocol": "openid-connect",
+    "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3001"
+    },
+    "fullScopeAllowed": true,
+    "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "basic",
+        "email"
+    ],
+    "optionalClientScopes": [
+        "offline_access"
+    ]
+}
