@@ -1,0 +1,10 @@
+{
+  "id": "urn:core:city:openurbanapps:datastructure:environment:airqualitystation:default",
+  "type": "datastructure",
+  "displayName": "Luftqualitäts-Messstation",
+  "description": "Datenmodell für stationäre Luftqualitätsmessung: Messstationen mit Standort und Messwerte für PM10, PM2.5 und NO2.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": ["umwelt", "luftqualitaet", "sensorik"]
+}
