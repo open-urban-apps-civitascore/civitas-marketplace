@@ -1,21 +1,28 @@
 'use server'
 
-import { findCatalogEntry } from '@/lib/mock-catalog'
+import { findCatalogEntry, isDataStructureEntry, type UseCaseEntry } from '@/lib/mock-catalog'
 import { getAccessToken } from '@/lib/session'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
-    /** Backend message (ProblemDetail.detail) or created model URN. */
+    /** Human-readable summary (created) or backend message (ProblemDetail.detail). */
     detail: string
     httpStatus: number
 }
 
+interface DataSetImportSummary {
+    dataSetId?: string
+    dataSetName?: string
+    dataStructures?: { name: string; urn: string; action: string }[]
+    dataSources?: { name: string }[]
+}
+
 /**
  * Installs a mock catalogue entry through the REAL install path: user token →
- * APISIX gateway → POST /v1/imports/datastructures. Only the payload source is
+ * APISIX gateway → the type's import endpoint. Only the payload source is
  * mocked; this action is the production install call.
  */
-export async function installDataStructure(
+export async function installEntry(
     _prev: InstallResult | null,
     formData: FormData,
 ): Promise<InstallResult> {
@@ -25,35 +32,76 @@ export async function installDataStructure(
         return { status: 'error', detail: `Unbekannter Katalog-Eintrag: ${String(entryId)}`, httpStatus: 0 }
     }
 
-    const accessToken = await getAccessToken()
-
-    const res = await fetch(
-        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/imports/datastructures`,
-        {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                name: entry.manifest.displayName,
-                description: entry.manifest.description,
-                model: entry.artifact,
-            }),
-            cache: 'no-store',
-        },
-    )
-
-    if (res.status === 201) {
-        const body = (await res.json()) as { modelUrn?: string }
-        return { status: 'created', detail: body.modelUrn ?? entry.manifest.id, httpStatus: 201 }
+    if (isDataStructureEntry(entry)) {
+        const res = await postImport('/v1/imports/datastructures', {
+            name: entry.manifest.displayName,
+            description: entry.manifest.description,
+            model: entry.artifact,
+        })
+        if (res.ok) {
+            const body = (await res.response.json()) as { modelUrn?: string }
+            return { status: 'created', detail: body.modelUrn ?? entry.manifest.id, httpStatus: 201 }
+        }
+        return res.failure
     }
 
+    const res = await postImport('/v1/imports/datasets', useCaseBundleBody(entry))
+    if (res.ok) {
+        const body = (await res.response.json()) as DataSetImportSummary
+        const structures = (body.dataStructures ?? [])
+            .map((s) => `${s.urn} (${s.action})`)
+            .join(', ')
+        const sources = body.dataSources?.length ?? 0
+        return {
+            status: 'created',
+            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)`,
+            httpStatus: 201,
+        }
+    }
+    return res.failure
+}
+
+function useCaseBundleBody(entry: UseCaseEntry) {
+    return {
+        name: entry.manifest.displayName,
+        description: entry.manifest.description,
+        dataStructures: entry.bundle.dataStructures.map((structure) => ({
+            name: structure.name,
+            description: structure.description,
+            model: structure.model,
+        })),
+        dataSources: entry.bundle.dataSources.map((source) => ({
+            name: source.name,
+            description: source.description,
+            dataStructureUrn: source.dataStructureUrn,
+        })),
+    }
+}
+
+type PostResult =
+    | { ok: true; response: Response }
+    | { ok: false; failure: InstallResult }
+
+async function postImport(path: string, body: unknown): Promise<PostResult> {
+    const accessToken = await getAccessToken()
+
+    const response = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}${path}`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+    })
+
+    if (response.status === 201) return { ok: true, response }
+
     // Backend errors arrive as RFC-9457 ProblemDetail: `detail` carries the
-    // actionable message our own guards wrote (400 $id guard, 409 turnstile).
-    const problem = (await res.json().catch(() => null)) as { detail?: string } | null
-    const detail = problem?.detail ?? `${res.status} ${res.statusText}`
-    if (res.status === 409) return { status: 'conflict', detail, httpStatus: 409 }
-    if (res.status === 400) return { status: 'invalid', detail, httpStatus: 400 }
-    return { status: 'error', detail, httpStatus: res.status }
+    // actionable message our own guards wrote (400 guards, 409 turnstile).
+    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
+    const detail = problem?.detail ?? `${response.status} ${response.statusText}`
+    const status =
+        response.status === 409 ? 'conflict' : response.status === 400 ? 'invalid' : 'error'
+    return { ok: false, failure: { status, detail, httpStatus: response.status } }
 }

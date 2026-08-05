@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:city:openurbanapps:datastructure:mobility:verkehrszaehlung:default",
+  "title": "Verkehrszählung",
+  "description": "Zählstellen und ihre Zählungen. Die Feldnamen entsprechen dem Geräteformat des Datenquellen-Simulators, damit der Passthrough-Pfad (PostGIS-Senke) ohne Mapping funktioniert.",
+  "$defs": {
+    "Zaehlstelle": {
+      "type": "object",
+      "properties": {
+        "counterId": { "type": "string", "description": "Eindeutige Kennung der Zählstelle" },
+        "name": { "type": "string", "description": "Anzeigename, z. B. Straße/Abschnitt" },
+        "lat": { "type": "number", "description": "Breitengrad (WGS84)" },
+        "lon": { "type": "number", "description": "Längengrad (WGS84)" }
+      },
+      "required": ["counterId", "lat", "lon"]
+    },
+    "Messung": {
+      "type": "object",
+      "properties": {
+        "counterId": { "type": "string", "description": "Kennung der zählenden Stelle" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "vehicleCount": { "type": "integer", "description": "Fahrzeuge im Messintervall" },
+        "avgSpeedKmh": { "type": "number", "description": "Durchschnittsgeschwindigkeit in km/h" },
+        "direction": { "type": "string", "description": "Fahrtrichtung, z. B. inbound/outbound" }
+      },
+      "required": ["counterId", "timestamp", "vehicleCount"]
+    }
+  }
+}

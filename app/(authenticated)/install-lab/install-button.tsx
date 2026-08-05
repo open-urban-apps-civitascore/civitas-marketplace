@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import { installDataStructure, type InstallResult } from './actions'
+import { installEntry, type InstallResult } from './actions'
 
 const FEEDBACK_STYLES: Record<InstallResult['status'], string> = {
     created: 'text-green-700 dark:text-green-400',
@@ -24,7 +24,7 @@ function feedbackText(result: InstallResult): string {
 }
 
 export function InstallButton({ entryId }: { entryId: string }) {
-    const [result, formAction, pending] = useActionState(installDataStructure, null)
+    const [result, formAction, pending] = useActionState(installEntry, null)
 
     return (
         <div className="flex flex-col gap-2">
