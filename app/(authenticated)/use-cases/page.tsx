@@ -3,22 +3,22 @@ import { InstallButton } from '@/components/catalog/install-button'
 import { mockCatalog } from '@/lib/mock-catalog'
 import { requireSession } from '@/lib/session'
 
-export default async function DataStructuresCatalogPage() {
+export default async function UseCasesPage() {
     await requireSession()
-    const structures = mockCatalog.filter((entry) => entry.manifest.type === 'datastructure')
+    const useCases = mockCatalog.filter((entry) => entry.manifest.type === 'usecase')
 
     return (
         <div className="flex flex-col gap-6">
             <div>
-                <h1>Datenstrukturen</h1>
+                <h1>Use Cases</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Wiederverwendbare Fachmodelle — einzeln installierbar und von mehreren Use
-                    Cases gemeinsam nutzbar.
+                    Vollständige Anwendungsfälle: Datenmodell, Datenquellen und – künftig –
+                    Pipeline und Dashboard, installierbar in einem Schritt.
                 </p>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {structures.map((entry) => (
+                {useCases.map((entry) => (
                     <CatalogCard
                         key={entry.manifest.id}
                         manifest={entry.manifest}

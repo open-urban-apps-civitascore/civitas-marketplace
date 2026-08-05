@@ -1,13 +1,15 @@
 'use client'
 
 import { useActionState } from 'react'
-import { installEntry, type InstallResult } from './actions'
+import { Download, Loader2 } from 'lucide-react'
+
+import { installEntry, type InstallResult } from '@/lib/install-actions'
 
 const FEEDBACK_STYLES: Record<InstallResult['status'], string> = {
-    created: 'text-green-700 dark:text-green-400',
-    conflict: 'text-amber-700 dark:text-amber-400',
-    invalid: 'text-red-700 dark:text-red-400',
-    error: 'text-red-700 dark:text-red-400',
+    created: 'text-success',
+    conflict: 'text-warn',
+    invalid: 'text-error',
+    error: 'text-error',
 }
 
 function feedbackText(result: InstallResult): string {
@@ -15,7 +17,7 @@ function feedbackText(result: InstallResult): string {
         case 'created':
             return `Installiert — ${result.detail}`
         case 'conflict':
-            return `Bereits installiert (409): ${result.detail}`
+            return `Bereits installiert: ${result.detail}`
         case 'invalid':
             return `Abgelehnt (400): ${result.detail}`
         default:
@@ -33,13 +35,20 @@ export function InstallButton({ entryId }: { entryId: string }) {
                 <button
                     type="submit"
                     disabled={pending}
-                    className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
+                    {pending ? (
+                        <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                        <Download className="size-4" />
+                    )}
                     {pending ? 'Installiere …' : 'Installieren'}
                 </button>
             </form>
             {result && (
-                <p className={`text-sm ${FEEDBACK_STYLES[result.status]}`}>{feedbackText(result)}</p>
+                <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
+                    {feedbackText(result)}
+                </p>
             )}
         </div>
     )

@@ -18,9 +18,9 @@ interface DataSetImportSummary {
 }
 
 /**
- * Installs a mock catalogue entry through the REAL install path: user token →
- * APISIX gateway → the type's import endpoint. Only the payload source is
- * mocked; this action is the production install call.
+ * Installs a catalogue entry through the REAL install path: user token → APISIX
+ * gateway → the type's import endpoint. Only the payload source is mocked;
+ * this action is the production install call.
  */
 export async function installEntry(
     _prev: InstallResult | null,
@@ -29,7 +29,11 @@ export async function installEntry(
     const entryId = formData.get('entryId')
     const entry = typeof entryId === 'string' ? findCatalogEntry(entryId) : undefined
     if (!entry) {
-        return { status: 'error', detail: `Unbekannter Katalog-Eintrag: ${String(entryId)}`, httpStatus: 0 }
+        return {
+            status: 'error',
+            detail: `Unbekannter Katalog-Eintrag: ${String(entryId)}`,
+            httpStatus: 0,
+        }
     }
 
     if (isDataStructureEntry(entry)) {
@@ -78,9 +82,7 @@ function useCaseBundleBody(entry: UseCaseEntry) {
     }
 }
 
-type PostResult =
-    | { ok: true; response: Response }
-    | { ok: false; failure: InstallResult }
+type PostResult = { ok: true; response: Response } | { ok: false; failure: InstallResult }
 
 async function postImport(path: string, body: unknown): Promise<PostResult> {
     const accessToken = await getAccessToken()
