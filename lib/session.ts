@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getToken } from 'next-auth/jwt'
 import { auth } from '@/auth'
+import { sessionCookieName } from '@/auth.config'
 
 /**
  * Guard for authenticated pages. Every protected page calls this itself — the
@@ -21,10 +22,14 @@ export async function requireSession() {
  */
 export async function getAccessToken(): Promise<string> {
     const requestHeaders = await headers()
+    const secureCookie = requestHeaders.get('x-forwarded-proto') === 'https'
     const token = await getToken({
         req: { headers: requestHeaders },
         secret: process.env.NEXTAUTH_SECRET,
-        secureCookie: requestHeaders.get('x-forwarded-proto') === 'https',
+        secureCookie,
+        // Must match the namespaced name from auth.config.ts — getToken looks the
+        // cookie up by name and would otherwise find nothing.
+        cookieName: sessionCookieName(secureCookie),
     })
     if (!token?.access_token) redirect('/login')
     return token.access_token

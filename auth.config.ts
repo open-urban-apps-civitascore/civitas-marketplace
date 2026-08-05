@@ -1,9 +1,48 @@
 import type { NextAuthConfig } from 'next-auth'
 import { isTokenExpired, refreshAccessToken } from '@/lib/tokenUtils'
 
+// The marketplace and the CIVITAS portal both run on `localhost` in dev.
+// Browser cookies are scoped by HOSTNAME, not port, so with the default names
+// the two apps overwrite each other's auth cookies — and since each app has its
+// own secret, neither can decrypt the other's, throwing both sessions out.
+// Server Components cannot write cookies, so this only bites on the first
+// action that can (a server action, e.g. the install button).
+const COOKIE_PREFIX = 'marketplace'
+const useSecureCookies = process.env.NODE_ENV === 'production'
+const cookieName = (name: string) =>
+    `${useSecureCookies ? '__Secure-' : ''}${COOKIE_PREFIX}.${name}`
+
+const baseCookieOptions = {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    path: '/',
+    secure: useSecureCookies,
+}
+
+/** The session cookie's name, for `getToken()` which looks it up by name. */
+export const sessionCookieName = (secure: boolean) =>
+    `${secure ? '__Secure-' : ''}${COOKIE_PREFIX}.session-token`
+
 export const authConfig = {
     session: { strategy: 'jwt', maxAge: 10 * 60 * 60 },
     pages: { signIn: '/login' },
+    cookies: {
+        sessionToken: { name: cookieName('session-token'), options: baseCookieOptions },
+        callbackUrl: { name: cookieName('callback-url'), options: baseCookieOptions },
+        csrfToken: {
+            name: `${useSecureCookies ? '__Host-' : ''}${COOKIE_PREFIX}.csrf-token`,
+            options: baseCookieOptions,
+        },
+        pkceCodeVerifier: {
+            name: cookieName('pkce.code_verifier'),
+            options: { ...baseCookieOptions, maxAge: 60 * 15 },
+        },
+        state: {
+            name: cookieName('state'),
+            options: { ...baseCookieOptions, maxAge: 60 * 15 },
+        },
+        nonce: { name: cookieName('nonce'), options: baseCookieOptions },
+    },
     callbacks: {
         async jwt({ token, account }) {
             if (account) {
