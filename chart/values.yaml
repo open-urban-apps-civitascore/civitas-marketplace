@@ -13,22 +13,9 @@ service:
   port: 80
   targetPort: 3000
 
-# The platform deployment serves the app through an APISIX route (like the
-# portal BFF) and disables this ingress; it stays for standalone installs.
-ingress:
-  enabled: true
-  className: nginx
-  host: marketplace.civitas.test
-  # NextAuth's chunked session cookies (three Keycloak tokens, encrypted) push
-  # the callback response headers past nginx's 4k default buffer; without this
-  # the login callback dies with 502 "upstream sent too big header".
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
-  # TLS is filled per environment (cluster: the selfsigned-ca issuer).
-  tls:
-    enabled: false
-    secretName: ""
-    clusterIssuer: ""
+# No ingress: the platform serves the app through an APISIX route (the
+# addon's apisix-routes.yaml fragment), which also provides the host and the
+# TLS SAN. The chart deploys only Deployment + Service.
 
 # The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
 publicUrl: "https://marketplace.civitas.test"
