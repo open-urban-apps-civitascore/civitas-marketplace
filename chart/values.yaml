@@ -13,8 +13,8 @@ service:
   port: 80
   targetPort: 3000
 
-# TODO: replace this dedicated ingress with an APISIX route soon, so the
-# marketplace enters the cluster the same way as the portal BFF.
+# The platform deployment serves the app through an APISIX route (like the
+# portal BFF) and disables this ingress; it stays for standalone installs.
 ingress:
   enabled: true
   className: nginx
