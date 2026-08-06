@@ -1,5 +1,8 @@
 replicaCount: 1
 
+# CPU/memory requests and limits; empty means none (fine for local dev).
+resources: {}
+
 image:
   repository: civitas-marketplace
   tag: latest
@@ -10,10 +13,17 @@ service:
   port: 80
   targetPort: 3000
 
+# TODO: replace this dedicated ingress with an APISIX route soon, so the
+# marketplace enters the cluster the same way as the portal BFF.
 ingress:
   enabled: true
   className: nginx
   host: marketplace.civitas.test
+  # NextAuth's chunked session cookies (three Keycloak tokens, encrypted) push
+  # the callback response headers past nginx's 4k default buffer; without this
+  # the login callback dies with 502 "upstream sent too big header".
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
   # TLS is filled per environment (cluster: the selfsigned-ca issuer).
   tls:
     enabled: false
@@ -23,6 +33,9 @@ ingress:
 # The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
 publicUrl: "https://marketplace.civitas.test"
 
+# Where "view in portal" links point (the portal frontend, browser-facing).
+portalUrl: "https://portal.civitas.test"
+
 keycloak:
   clientId: marketplace
   realm: core
@@ -31,6 +44,9 @@ keycloak:
   # Container-internal issuer (token/userinfo/jwks) — the dual-issuer trick.
   # Falls back to `issuer` in auth.ts when left empty.
   internalIssuer: ""
+  # Signature algorithm of the realm's id_tokens. Keycloak's default is RS256;
+  # the CIVITAS cluster realm is hardened to ES256 (TR-03187).
+  idTokenAlg: "RS256"
   # Secret holding the client secret, created by the deployment pipeline.
   clientSecret:
     secretName: keycloak-client-marketplace

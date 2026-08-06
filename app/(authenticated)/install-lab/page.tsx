@@ -4,7 +4,10 @@ import { InstallButton } from '@/components/catalog/install-button'
 import { mockCatalog } from '@/lib/mock-catalog'
 import { requireSession } from '@/lib/session'
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3000'
+// Server-side env, not NEXT_PUBLIC_: this page is a Server Component, and a
+// NEXT_PUBLIC_ value would be frozen at image build time instead of coming
+// from the deployment.
+const PORTAL_URL = process.env.PORTAL_URL ?? 'http://localhost:3000'
 
 /**
  * Dev tool, deliberately throwaway: every catalogue entry in one flat list with
@@ -20,7 +23,7 @@ export default async function InstallLabPage() {
                 <FlaskConical className="size-4 shrink-0" />
                 <span>
                     Install-Lab — Dev-Werkzeug: statische Payloads durch die echte
-                    Install-Kette. Wird in P2.2 durch den GitLab-Katalog ersetzt.
+                    Install-Kette. Wird später durch den GitLab-Katalog ersetzt.
                 </span>
             </div>
 

@@ -43,15 +43,25 @@ spec:
             - name: KEYCLOAK_INTERNAL_ISSUER
               value: {{ .Values.keycloak.internalIssuer | quote }}
             {{- end }}
+            {{- if .Values.keycloak.idTokenAlg }}
+            - name: KEYCLOAK_ID_TOKEN_ALG
+              value: {{ .Values.keycloak.idTokenAlg | quote }}
+            {{- end }}
             - name: API_BASE_URL
               value: {{ .Values.api.baseUrl | quote }}
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
+            - name: PORTAL_URL
+              value: {{ .Values.portalUrl | quote }}
             {{- if .Values.nodeTlsRejectUnauthorized }}
             # Self-signed cluster CA — see values.yaml note.
             - name: NODE_TLS_REJECT_UNAUTHORIZED
               value: {{ .Values.nodeTlsRejectUnauthorized | quote }}
             {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           # /login is a stable 200 that needs no session, so it is a clean
           # health signal; / redirects and depends on auth.
           livenessProbe:

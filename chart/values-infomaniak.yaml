@@ -14,12 +14,16 @@ ingress:
 
 publicUrl: "https://marketplace.179.237.75.185.nip.io"
 
+portalUrl: "https://portal.179.237.75.185.nip.io"
+
 keycloak:
   clientId: marketplace
   realm: core
   issuer: "https://idm.179.237.75.185.nip.io/realms/core"
   # Browser goes to idm.<domain>; the container reaches Keycloak internally.
   internalIssuer: "http://keycloak-app-keycloakx-http.core.svc.cluster.local/realms/core"
+  # The realm signs with ES256 (TR-03187 hardening in the realm template).
+  idTokenAlg: "ES256"
   clientSecret:
     secretName: keycloak-client-marketplace
     key: client-secret

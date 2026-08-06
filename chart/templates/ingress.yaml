@@ -3,9 +3,13 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Release.Name }}
+  {{- $annotations := .Values.ingress.annotations | default dict }}
   {{- if .Values.ingress.tls.enabled }}
+  {{- $annotations = merge (dict "cert-manager.io/cluster-issuer" .Values.ingress.tls.clusterIssuer) $annotations }}
+  {{- end }}
+  {{- with $annotations }}
   annotations:
-    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
