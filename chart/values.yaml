@@ -14,3 +14,39 @@ ingress:
   enabled: true
   className: nginx
   host: marketplace.civitas.test
+  # TLS is filled per environment (cluster: the selfsigned-ca issuer).
+  tls:
+    enabled: false
+    secretName: ""
+    clusterIssuer: ""
+
+# The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
+publicUrl: "https://marketplace.civitas.test"
+
+keycloak:
+  clientId: marketplace
+  realm: core
+  # Browser-facing issuer (redirects, id_token validation).
+  issuer: "https://idm.civitas.test/realms/core"
+  # Container-internal issuer (token/userinfo/jwks) — the dual-issuer trick.
+  # Falls back to `issuer` in auth.ts when left empty.
+  internalIssuer: ""
+  # Secret holding the client secret, created by the deployment pipeline.
+  clientSecret:
+    secretName: keycloak-client-marketplace
+    key: client-secret
+
+# Where the app reaches the platform API — the APISIX gateway, never the
+# portal-backend directly.
+api:
+  baseUrl: "http://apisix-gateway.apisix.svc.cluster.local"
+  port: "80"
+
+# NextAuth session-cookie encryption secret.
+nextauthSecret:
+  secretName: marketplace-nextauth-secret
+  key: secret
+
+# Self-signed cluster CA: Node rejects the certificate chain otherwise.
+# (The portal frontend sets the same flag, with a TODO to mount the CA properly.)
+nodeTlsRejectUnauthorized: "0"

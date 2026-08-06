@@ -1,10 +1,35 @@
 image:
   repository: ghcr.io/open-urban-apps-civitascore/civitas-marketplace
-  tag: v1.0.0
+  tag: v0.2.0
   pullPolicy: Always
 
 ingress:
   enabled: true
   className: nginx
   host: marketplace.179.237.75.185.nip.io
+  tls:
+    enabled: true
+    secretName: marketplace-tls
+    clusterIssuer: selfsigned-ca
 
+publicUrl: "https://marketplace.179.237.75.185.nip.io"
+
+keycloak:
+  clientId: marketplace
+  realm: core
+  issuer: "https://idm.179.237.75.185.nip.io/realms/core"
+  # Browser goes to idm.<domain>; the container reaches Keycloak internally.
+  internalIssuer: "http://keycloak-app-keycloakx-http.core.svc.cluster.local/realms/core"
+  clientSecret:
+    secretName: keycloak-client-marketplace
+    key: client-secret
+
+api:
+  baseUrl: "http://apisix-gateway.core.svc.cluster.local"
+  port: "80"
+
+nextauthSecret:
+  secretName: marketplace-nextauth-secret
+  key: secret
+
+nodeTlsRejectUnauthorized: "0"
