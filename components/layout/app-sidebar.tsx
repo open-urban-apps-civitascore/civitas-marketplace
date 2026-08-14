@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import {
     Database,
     FileQuestion,
-    FlaskConical,
     Hexagon,
     LayoutGrid,
     type LucideIcon,
@@ -41,7 +40,6 @@ const NAV_SECTIONS: NavSection[] = [
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
             { title: 'In der Instanz', href: '/instance', icon: Database },
-            { title: 'Install-Lab', href: '/install-lab', icon: FlaskConical },
         ],
     },
     {

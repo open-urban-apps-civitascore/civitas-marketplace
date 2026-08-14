@@ -51,8 +51,6 @@ spec:
               value: {{ .Values.api.baseUrl | quote }}
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
-            - name: PORTAL_URL
-              value: {{ .Values.portalUrl | quote }}
             {{- if .Values.nodeTlsRejectUnauthorized }}
             # Self-signed cluster CA — see values.yaml note.
             - name: NODE_TLS_REJECT_UNAUTHORIZED

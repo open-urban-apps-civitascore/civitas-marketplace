@@ -20,9 +20,6 @@ service:
 # The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
 publicUrl: "https://marketplace.civitas.test"
 
-# Where "view in portal" links point (the portal frontend, browser-facing).
-portalUrl: "https://portal.civitas.test"
-
 keycloak:
   clientId: marketplace
   realm: core
