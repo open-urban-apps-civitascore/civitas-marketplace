@@ -11,6 +11,7 @@ export interface InstallResult {
 }
 
 interface DataSetImportSummary {
+    installationId?: string
     dataSetId?: string
     dataSetName?: string
     dataStructures?: { name: string; urn: string; action: string }[]
@@ -49,26 +50,33 @@ export async function installEntry(
         return res.failure
     }
 
-    const res = await postImport('/v1/imports/datasets', useCaseBundleBody(entry))
+    const res = await postImport('/v1/imports/datasets', buildUseCaseBundleBody(entry))
     if (res.ok) {
         const body = (await res.response.json()) as DataSetImportSummary
         const structures = (body.dataStructures ?? [])
             .map((s) => `${s.urn} (${s.action})`)
             .join(', ')
         const sources = body.dataSources?.length ?? 0
+        const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
         return {
             status: 'created',
-            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)`,
+            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${installation}`,
             httpStatus: 201,
         }
     }
     return res.failure
 }
 
-function useCaseBundleBody(entry: UseCaseEntry) {
+// "build" prefix: dodges the react-hooks lint rule that treats any use*
+// function as a hook.
+function buildUseCaseBundleBody(entry: UseCaseEntry) {
     return {
         name: entry.manifest.displayName,
         description: entry.manifest.description,
+        // Bundle identity for the backend's install provenance — recorded
+        // verbatim in the installation header, never interpreted.
+        bundleUrn: entry.manifest.id,
+        bundleVersion: entry.manifest.version,
         dataStructures: entry.bundle.dataStructures.map((structure) => ({
             name: structure.name,
             description: structure.description,

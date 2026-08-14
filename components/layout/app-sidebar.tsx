@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+    Database,
     FileQuestion,
     FlaskConical,
     Hexagon,
@@ -39,6 +40,7 @@ const NAV_SECTIONS: NavSection[] = [
                 ],
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
+            { title: 'In der Instanz', href: '/instance', icon: Database },
             { title: 'Install-Lab', href: '/install-lab', icon: FlaskConical },
         ],
     },
