@@ -15,9 +15,12 @@ const TYPE_LABEL: Record<CatalogManifest['type'], string> = {
 export function CatalogCard({
     manifest,
     action,
+    badge,
 }: {
     manifest: CatalogManifest
     action?: React.ReactNode
+    /** Optional state marker, rendered bottom right next to the action. */
+    badge?: React.ReactNode
 }) {
     const Icon = manifest.type === 'usecase' ? Boxes : Layers
 
@@ -60,7 +63,12 @@ export function CatalogCard({
                     </span>
                 </div>
 
-                {action && <div className="mt-4">{action}</div>}
+                {(action || badge) && (
+                    <div className="mt-4 flex items-start gap-3">
+                        {action}
+                        {badge && <div className="ml-auto shrink-0">{badge}</div>}
+                    </div>
+                )}
             </div>
         </article>
     )

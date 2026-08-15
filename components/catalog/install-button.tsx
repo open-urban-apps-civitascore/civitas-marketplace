@@ -25,8 +25,18 @@ function feedbackText(result: InstallResult): string {
     }
 }
 
-export function InstallButton({ entryId }: { entryId: string }) {
+export function InstallButton({
+    entryId,
+    installed = false,
+}: {
+    entryId: string
+    /** Already present in this instance — the action is then closed. */
+    installed?: boolean
+}) {
     const [result, formAction, pending] = useActionState(installEntry, null)
+    // Also latch on a fresh success, so the button closes immediately instead of
+    // waiting for the revalidated page to arrive.
+    const done = installed || result?.status === 'created'
 
     return (
         <div className="flex flex-col gap-2">
@@ -34,7 +44,7 @@ export function InstallButton({ entryId }: { entryId: string }) {
                 <input type="hidden" name="entryId" value={entryId} />
                 <button
                     type="submit"
-                    disabled={pending}
+                    disabled={pending || done}
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                     {pending ? (

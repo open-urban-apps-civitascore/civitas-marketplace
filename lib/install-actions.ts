@@ -1,5 +1,7 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
+
 import { findCatalogEntry, isDataStructureEntry, type UseCaseEntry } from '@/lib/mock-catalog'
 import { getAccessToken } from '@/lib/session'
 
@@ -61,6 +63,10 @@ export async function installEntry(
         const mappings = (body.mappings ?? []).map((m) => `${m.name} (${m.action})`).join(', ')
         const mappingSegment = mappings ? ` · Mappings: ${mappings}` : ''
         const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
+        // The catalogue badge and the provenance list both read from the install
+        // record that just came into existence.
+        revalidatePath('/use-cases')
+        revalidatePath('/installed')
         return {
             status: 'created',
             detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${installation}`,
