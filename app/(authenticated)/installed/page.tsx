@@ -1,7 +1,7 @@
 import { getAccessToken, requireSession } from '@/lib/session'
 
 interface InstalledArtifactRow {
-    artifactType: 'DATA_STRUCTURE' | 'DATA_SOURCE' | string
+    artifactType: 'DATA_STRUCTURE' | 'DATA_SOURCE' | 'MAPPING' | string
     name?: string
     shellId?: string
     urn?: string
@@ -22,6 +22,7 @@ interface InstallationRow {
 const ARTIFACT_TYPE_LABELS: Record<string, string> = {
     DATA_STRUCTURE: 'Datenstruktur',
     DATA_SOURCE: 'Datenquelle',
+    MAPPING: 'Mapping',
 }
 
 const ACTION_LABELS: Record<string, string> = {

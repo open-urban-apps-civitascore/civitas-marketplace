@@ -2,7 +2,9 @@ import airQualityManifest from './air-quality-station/manifest.json'
 import airQualityArtifact from './air-quality-station/artifact.schema.json'
 import trafficManifest from './traffic-counting/manifest.json'
 import trafficStructure from './traffic-counting/structure.artifact.schema.json'
+import trafficTargetStructure from './traffic-counting/structure.target.artifact.schema.json'
 import trafficSources from './traffic-counting/datasources.json'
+import trafficMapping from './traffic-counting/mapping.json'
 
 /**
  * Catalogue metadata for one installable entry — the "packaging". Mirrors the
@@ -38,6 +40,20 @@ export interface BundledDataSource {
     dataStructureUrn: string
 }
 
+/**
+ * A bundled mapping. Unlike a structure, whose identity travels inside the
+ * artifact as `$id`, a mapping carries its URN in the envelope: Model Forge
+ * stamps `id` on every write, so an authored one would be overwritten. Without
+ * `mappingUrn` the platform mints a random identity and every re-install would
+ * duplicate the mapping instead of resolving to the same one.
+ */
+export interface BundledMapping {
+    mappingUrn: string
+    name: string
+    description?: string
+    document: Record<string, unknown>
+}
+
 export interface DataStructureEntry {
     manifest: CatalogManifest & { type: 'datastructure' }
     artifact: Record<string, unknown>
@@ -48,6 +64,7 @@ export interface UseCaseEntry {
     bundle: {
         dataStructures: BundledDataStructure[]
         dataSources: BundledDataSource[]
+        mappings: BundledMapping[]
     }
 }
 
@@ -67,8 +84,14 @@ export const mockCatalog: CatalogEntry[] = [
                     description: 'Zählstellen und Zählungen im Geräteformat des Simulators',
                     model: trafficStructure,
                 },
+                {
+                    name: 'Verkehrsmessung',
+                    description: 'Normalisiertes Zielformat, gegen das Auswertungen laufen',
+                    model: trafficTargetStructure,
+                },
             ],
             dataSources: trafficSources as BundledDataSource[],
+            mappings: [trafficMapping as BundledMapping],
         },
     },
 ]

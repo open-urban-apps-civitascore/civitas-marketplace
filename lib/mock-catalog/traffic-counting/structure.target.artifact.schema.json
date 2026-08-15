@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:city:openurbanapps:datastructure:mobility:verkehrsmessung:default",
+  "title": "Verkehrsmessung (Zielformat)",
+  "description": "Normalisierte Einzelmessung: sprechende Feldnamen und echte Typen statt Geräteformat. Das ist die Struktur, gegen die Auswertungen und Dashboards geschrieben werden — das Mapping übersetzt das Geräteformat der Zählstellen hierher. Stammdaten der Zählstelle (Name, Koordinaten) bleiben in der Quellstruktur und werden erst mit dem Pipeline-Inkrement zugeführt.",
+  "$defs": {
+    "Verkehrsmessung": {
+      "type": "object",
+      "properties": {
+        "stationId": { "type": "string", "description": "Kennung der Zählstelle (aus counterId)" },
+        "observedAt": { "type": "string", "format": "date-time", "description": "Messzeitpunkt" },
+        "vehicleCount": { "type": "integer", "description": "Fahrzeuge im Messintervall" },
+        "avgSpeedKmh": { "type": "number", "description": "Durchschnittsgeschwindigkeit in km/h" },
+        "direction": { "type": "string", "description": "Fahrtrichtung, z. B. inbound/outbound" }
+      },
+      "required": ["stationId", "observedAt", "vehicleCount"]
+    }
+  }
+}

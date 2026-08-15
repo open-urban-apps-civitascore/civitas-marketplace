@@ -16,6 +16,7 @@ interface DataSetImportSummary {
     dataSetName?: string
     dataStructures?: { name: string; urn: string; action: string }[]
     dataSources?: { name: string }[]
+    mappings?: { name: string; urn: string; action: string }[]
 }
 
 /**
@@ -57,10 +58,12 @@ export async function installEntry(
             .map((s) => `${s.urn} (${s.action})`)
             .join(', ')
         const sources = body.dataSources?.length ?? 0
+        const mappings = (body.mappings ?? []).map((m) => `${m.name} (${m.action})`).join(', ')
+        const mappingSegment = mappings ? ` · Mappings: ${mappings}` : ''
         const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
         return {
             status: 'created',
-            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${installation}`,
+            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${installation}`,
             httpStatus: 201,
         }
     }
@@ -86,6 +89,12 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
             name: source.name,
             description: source.description,
             dataStructureUrn: source.dataStructureUrn,
+        })),
+        mappings: entry.bundle.mappings.map((mapping) => ({
+            name: mapping.name,
+            description: mapping.description,
+            mappingUrn: mapping.mappingUrn,
+            document: mapping.document,
         })),
     }
 }

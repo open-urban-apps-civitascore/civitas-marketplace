@@ -2,8 +2,8 @@
   "id": "urn:openurbanapps:usecase:verkehrszaehlung",
   "type": "usecase",
   "displayName": "Verkehrszählung",
-  "description": "Kompletter Use Case: Datenmodell für Zählstellen und Zählungen plus Datenquelle für den Sensor-Feed. Inkrement 1 — noch ohne Mapping und Pipeline.",
-  "version": "1.0.0",
+  "description": "Kompletter Use Case: Geräteformat der Zählstellen, normalisiertes Zielformat, Datenquelle für den Sensor-Feed und das Mapping zwischen den beiden Strukturen. Noch ohne Pipeline und Senke.",
+  "version": "1.1.0",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
   "keywords": ["verkehr", "mobilitaet", "zaehlstellen"]
