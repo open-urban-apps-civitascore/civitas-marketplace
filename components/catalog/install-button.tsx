@@ -1,8 +1,9 @@
 'use client'
 
 import { useActionState } from 'react'
-import { Download, Loader2 } from 'lucide-react'
+import { Download } from 'lucide-react'
 
+import { SubmitButton } from '@/components/catalog/submit-button'
 import { installEntry, type InstallResult } from '@/lib/install-actions'
 
 const FEEDBACK_STYLES: Record<InstallResult['status'], string> = {
@@ -32,18 +33,12 @@ export function InstallButton({ entryId }: { entryId: string }) {
         <div className="flex flex-col gap-2">
             <form action={formAction}>
                 <input type="hidden" name="entryId" value={entryId} />
-                <button
-                    type="submit"
-                    disabled={pending}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                    {pending ? (
-                        <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                        <Download className="size-4" />
-                    )}
-                    {pending ? 'Installiere …' : 'Installieren'}
-                </button>
+                <SubmitButton
+                    pending={pending}
+                    icon={Download}
+                    label="Installieren"
+                    pendingLabel="Installiere …"
+                />
             </form>
             {result && (
                 <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
