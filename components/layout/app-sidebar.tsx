@@ -35,6 +35,7 @@ const NAV_SECTIONS: NavSection[] = [
                 icon: LayoutGrid,
                 children: [
                     { title: 'Use Cases', href: '/use-cases' },
+                    { title: 'Add-ons', href: '/addons' },
                     { title: 'Datenstrukturen', href: '/datastructures' },
                 ],
             },
