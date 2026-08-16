@@ -1,14 +1,13 @@
 import { getAccessToken } from '@/lib/session'
 
 interface InstallationRow {
-    bundleUrn?: string
+    bundleId?: string
 }
 
 /**
- * Catalogue ids of the bundles this instance has installed, read from the
- * platform's install provenance (`GET /v1/installations`). The wire field is
- * still called `bundleUrn`, though the value is a marketplace-owned identifier
- * rather than a CORE URN.
+ * Catalogue ids of the entries this instance has installed, read from the
+ * platform's install provenance (`GET /v1/installations`) — both use-case
+ * bundles and single data structures record one.
  *
  * Returns an empty set when the endpoint is unreachable or the signed-in role
  * lacks INSTALLATION_READ: a missing badge is a far better failure mode than a
@@ -32,7 +31,7 @@ export async function fetchInstalledBundleIds(): Promise<Set<string>> {
         const page = (await res.json()) as { content?: InstallationRow[] }
         return new Set(
             (page.content ?? [])
-                .map((row) => row.bundleUrn)
+                .map((row) => row.bundleId)
                 .filter((id): id is string => Boolean(id)),
         )
     } catch {

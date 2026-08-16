@@ -45,9 +45,16 @@ export async function installEntry(
             name: entry.manifest.displayName,
             description: entry.manifest.description,
             model: entry.artifact,
+            // Same catalogue identity the bundle path sends, so this install shows up in the
+            // provenance too instead of being invisible under "Installiert".
+            bundleId: entry.manifest.id,
+            bundleVersion: entry.manifest.version,
         })
         if (res.ok) {
             const body = (await res.response.json()) as { modelUrn?: string }
+            revalidatePath('/datastructures')
+            revalidatePath('/installed')
+            revalidatePath('/instance')
             return { status: 'created', detail: body.modelUrn ?? entry.manifest.id, httpStatus: 201 }
         }
         return res.failure
@@ -84,7 +91,7 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
         description: entry.manifest.description,
         // Bundle identity for the backend's install provenance — recorded
         // verbatim in the installation header, never interpreted.
-        bundleUrn: entry.manifest.id,
+        bundleId: entry.manifest.id,
         bundleVersion: entry.manifest.version,
         dataStructures: entry.bundle.dataStructures.map((structure) => ({
             name: structure.name,

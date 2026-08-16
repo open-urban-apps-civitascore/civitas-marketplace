@@ -1,7 +1,7 @@
 import { getAccessToken, requireSession } from '@/lib/session'
 
 interface InstalledArtifactRow {
-    artifactType: 'DATA_STRUCTURE' | 'DATA_SOURCE' | 'MAPPING' | string
+    artifactType: 'DATA_STRUCTURE' | 'DATA_SOURCE' | 'MAPPING' | 'DATA_SET' | string
     name?: string
     shellId?: string
     urn?: string
@@ -11,7 +11,7 @@ interface InstalledArtifactRow {
 interface InstallationRow {
     id: string
     createdAt: string
-    bundleUrn?: string
+    bundleId?: string
     bundleVersion?: string
     dataSetId?: string
     dataSetName?: string
@@ -23,6 +23,7 @@ const ARTIFACT_TYPE_LABELS: Record<string, string> = {
     DATA_STRUCTURE: 'Datenstruktur',
     DATA_SOURCE: 'Datenquelle',
     MAPPING: 'Mapping',
+    DATA_SET: 'Dataset',
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -38,9 +39,10 @@ const dateFormat = new Intl.DateTimeFormat('de-DE', {
 
 /**
  * True marketplace installs — the backend's install provenance
- * (GET /v1/installations): which bundle, when, by whom, and what each install
- * created or reused. Manually created structures never show up here; the full
- * instance inventory lives on /instance.
+ * (GET /v1/installations): which catalogue entry, when, by whom, and what each
+ * install created or reused. Both use-case bundles and single data structures
+ * record one. Manually created artifacts never show up here; the full instance
+ * inventory lives on /instance.
  */
 export default async function InstalledPage() {
     await requireSession()
@@ -94,16 +96,16 @@ export default async function InstalledPage() {
                         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b bg-muted/50 px-4 py-3">
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                                 <span className="font-medium text-foreground">
-                                    {installation.dataSetName ?? installation.bundleUrn ?? '—'}
+                                    {installation.dataSetName ?? installation.bundleId ?? '—'}
                                 </span>
                                 {installation.bundleVersion && (
                                     <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">
                                         v{installation.bundleVersion}
                                     </span>
                                 )}
-                                {installation.bundleUrn && (
+                                {installation.bundleId && (
                                     <span className="break-all text-xs text-muted-foreground">
-                                        {installation.bundleUrn}
+                                        {installation.bundleId}
                                     </span>
                                 )}
                             </div>
