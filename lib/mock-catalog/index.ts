@@ -12,10 +12,14 @@ import trafficSources from './traffic-counting/datasources.json'
  * `id`: for datastructure entries this IS the artifact's logical CORE URN.
  * Use cases have no platform identity yet (the install-registry gap), so they
  * carry a marketplace-owned urn in a distinct scheme — never a fake CORE URN.
+ *
+ * `addon` shares this packaging but not the install path: add-ons are deployed
+ * components of the instance, proposed to its deployment repository rather than
+ * imported into the running platform (see lib/addon-catalog).
  */
 export interface CatalogManifest {
     id: string
-    type: 'datastructure' | 'usecase'
+    type: 'datastructure' | 'usecase' | 'addon'
     displayName: string
     description: string
     version: string

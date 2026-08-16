@@ -1,10 +1,17 @@
-import { Boxes, Layers } from 'lucide-react'
+import { Blocks, Boxes, Layers, type LucideIcon } from 'lucide-react'
 
 import type { CatalogManifest } from '@/lib/mock-catalog'
 
 const TYPE_LABEL: Record<CatalogManifest['type'], string> = {
     datastructure: 'Datenstruktur',
     usecase: 'Use Case',
+    addon: 'Add-on',
+}
+
+const TYPE_ICON: Record<CatalogManifest['type'], LucideIcon> = {
+    datastructure: Layers,
+    usecase: Boxes,
+    addon: Blocks,
 }
 
 /**
@@ -19,7 +26,7 @@ export function CatalogCard({
     manifest: CatalogManifest
     action?: React.ReactNode
 }) {
-    const Icon = manifest.type === 'usecase' ? Boxes : Layers
+    const Icon = TYPE_ICON[manifest.type]
 
     return (
         <article className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md">
