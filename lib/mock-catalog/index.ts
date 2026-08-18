@@ -5,6 +5,7 @@ import trafficStructure from './traffic-counting/structure.artifact.schema.json'
 import trafficTargetStructure from './traffic-counting/structure.target.artifact.schema.json'
 import trafficSources from './traffic-counting/datasources.json'
 import trafficMapping from './traffic-counting/mapping.json'
+import trafficPipeline from './traffic-counting/pipeline.json'
 
 /**
  * Catalogue metadata for one installable entry — the "packaging". Mirrors the
@@ -33,11 +34,18 @@ export interface BundledDataStructure {
     model: Record<string, unknown>
 }
 
-/** A bundled data source, referencing its structure by CORE URN. */
+/**
+ * A bundled data source, referencing its structure by CORE URN. The connector
+ * configuration matters beyond ingestion: only a configured source gets a
+ * minted configuration URN, and only that URN lets a bundle pipeline
+ * reference the source in its graph.
+ */
 export interface BundledDataSource {
     name: string
     description?: string
     dataStructureUrn: string
+    connectorType?: 'MQTT' | 'SQL'
+    configuration?: Record<string, unknown>
 }
 
 /**
@@ -54,6 +62,32 @@ export interface BundledMapping {
     document: Record<string, unknown>
 }
 
+/**
+ * A bundled data sink. Carries no URN at all: a sink has no portable identity —
+ * the receiving instance mints one — so the `name` is a bundle-local handle
+ * that pipelines in the same bundle reference via `sinkRef`. The
+ * configuration's `element` names the target structure by its logical CORE
+ * URN; the platform resolves and rewrites it to the installed version.
+ */
+export interface BundledDataSink {
+    name: string
+    dataSinkType: 'POSTGIS' | 'FROST'
+    configuration: Record<string, unknown>
+}
+
+/**
+ * A bundled pipeline. The graph references its bundle siblings by NAME
+ * (sourceRef/sinkRef/mappingRef): minted URNs differ per instance, so names
+ * are the only identities a bundle can author. Values starting with `urn:`
+ * pass through verbatim for the advanced case of referencing something
+ * already installed.
+ */
+export interface BundledPipeline {
+    name: string
+    description?: string
+    model: Record<string, unknown>
+}
+
 export interface DataStructureEntry {
     manifest: CatalogManifest & { type: 'datastructure' }
     artifact: Record<string, unknown>
@@ -65,6 +99,8 @@ export interface UseCaseEntry {
         dataStructures: BundledDataStructure[]
         dataSources: BundledDataSource[]
         mappings: BundledMapping[]
+        dataSinks: BundledDataSink[]
+        pipelines: BundledPipeline[]
     }
 }
 
@@ -92,6 +128,19 @@ export const mockCatalog: CatalogEntry[] = [
             ],
             dataSources: trafficSources as BundledDataSource[],
             mappings: [trafficMapping as BundledMapping],
+            dataSinks: [
+                {
+                    name: 'Verkehrsmessung-Tabelle',
+                    dataSinkType: 'POSTGIS',
+                    configuration: {
+                        tableName: 'verkehrsmessung',
+                        // Logical URN of the TARGET structure — the platform resolves
+                        // it to the installed version's model URN.
+                        element: 'urn:core:city:openurbanapps:datastructure:mobility:verkehrsmessung:default',
+                    },
+                },
+            ],
+            pipelines: [trafficPipeline as BundledPipeline],
         },
     },
 ]

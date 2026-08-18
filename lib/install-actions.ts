@@ -102,12 +102,24 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
             name: source.name,
             description: source.description,
             dataStructureUrn: source.dataStructureUrn,
+            connectorType: source.connectorType,
+            configuration: source.configuration,
         })),
         mappings: entry.bundle.mappings.map((mapping) => ({
             name: mapping.name,
             description: mapping.description,
             mappingUrn: mapping.mappingUrn,
             document: mapping.document,
+        })),
+        dataSinks: entry.bundle.dataSinks.map((sink) => ({
+            name: sink.name,
+            dataSinkType: sink.dataSinkType,
+            configuration: sink.configuration,
+        })),
+        pipelines: entry.bundle.pipelines.map((pipeline) => ({
+            name: pipeline.name,
+            description: pipeline.description,
+            model: pipeline.model,
         })),
     }
 }

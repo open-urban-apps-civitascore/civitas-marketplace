@@ -1,7 +1,14 @@
 import { getAccessToken, requireSession } from '@/lib/session'
 
 interface InstalledArtifactRow {
-    artifactType: 'DATA_STRUCTURE' | 'DATA_SOURCE' | 'MAPPING' | 'DATA_SET' | string
+    artifactType:
+        | 'DATA_STRUCTURE'
+        | 'DATA_SOURCE'
+        | 'MAPPING'
+        | 'DATA_SET'
+        | 'DATA_SINK'
+        | 'PIPELINE'
+        | string
     name?: string
     shellId?: string
     urn?: string
@@ -24,6 +31,8 @@ const ARTIFACT_TYPE_LABELS: Record<string, string> = {
     DATA_SOURCE: 'Datenquelle',
     MAPPING: 'Mapping',
     DATA_SET: 'Dataset',
+    DATA_SINK: 'Datensenke',
+    PIPELINE: 'Pipeline',
 }
 
 const ACTION_LABELS: Record<string, string> = {

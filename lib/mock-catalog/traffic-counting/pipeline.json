@@ -1,0 +1,33 @@
+{
+  "name": "Zählung zu Messung",
+  "description": "Liest den Zählstellen-Feed, übersetzt ihn mit dem Mapping ins normalisierte Zielformat und schreibt in die PostGIS-Tabelle.",
+  "model": {
+    "nodes": [
+      {
+        "id": "n-source",
+        "kind": "source",
+        "label": "Zählstellen-Feed",
+        "sourceRef": "Zählstellen-Feed",
+        "x-ui-position": { "x": 0, "y": 120 }
+      },
+      {
+        "id": "n-mapping",
+        "kind": "mapping",
+        "label": "Zählung → Messung",
+        "mappingRef": "urn:core:city:openurbanapps:mapping:mobility:zaehlungzumessung:default",
+        "x-ui-position": { "x": 260, "y": 120 }
+      },
+      {
+        "id": "n-sink",
+        "kind": "sink",
+        "label": "Verkehrsmessung-Tabelle",
+        "sinkRef": "Verkehrsmessung-Tabelle",
+        "x-ui-position": { "x": 520, "y": 120 }
+      }
+    ],
+    "edges": [
+      { "id": "e-source-mapping", "source": "n-source", "target": "n-mapping" },
+      { "id": "e-mapping-sink", "source": "n-mapping", "target": "n-sink" }
+    ]
+  }
+}
