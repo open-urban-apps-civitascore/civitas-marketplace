@@ -2,12 +2,15 @@ import { getAccessToken } from '@/lib/session'
 
 interface InstallationRow {
     bundleId?: string
+    uninstalledAt?: string | null
 }
 
 /**
- * Catalogue ids of the entries this instance has installed, read from the
- * platform's install provenance (`GET /v1/installations`) — both use-case
- * bundles and single data structures record one.
+ * Catalogue ids of the entries this instance has ACTIVELY installed, read from
+ * the platform's install provenance (`GET /v1/installations`) — both use-case
+ * bundles and single data structures record one. Uninstalled installations
+ * stay in the provenance as history but no longer claim the badge: the entry
+ * is installable again.
  *
  * Returns an empty set when the endpoint is unreachable or the signed-in role
  * lacks INSTALLATION_READ: a missing badge is a far better failure mode than a
@@ -31,6 +34,7 @@ export async function fetchInstalledBundleIds(): Promise<Set<string>> {
         const page = (await res.json()) as { content?: InstallationRow[] }
         return new Set(
             (page.content ?? [])
+                .filter((row) => !row.uninstalledAt)
                 .map((row) => row.bundleId)
                 .filter((id): id is string => Boolean(id)),
         )

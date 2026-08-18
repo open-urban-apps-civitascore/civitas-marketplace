@@ -149,3 +149,49 @@ async function postImport(path: string, body: unknown): Promise<PostResult> {
         response.status === 409 ? 'conflict' : response.status === 400 ? 'invalid' : 'error'
     return { ok: false, failure: { status, detail, httpStatus: response.status } }
 }
+
+export interface UninstallResult {
+    status: 'uninstalled' | 'conflict' | 'invalid' | 'error'
+    detail: string
+    httpStatus: number
+}
+
+/**
+ * Uninstalls a structure-only installation through the platform's provenance
+ * API. The record survives as history (uninstalledAt set); the structure —
+ * shell, version and registry model — is deleted by the backend, so the
+ * catalogue badge frees up and the entry becomes installable again.
+ */
+export async function uninstallInstallation(
+    _prev: UninstallResult | null,
+    formData: FormData,
+): Promise<UninstallResult> {
+    const installationId = formData.get('installationId')
+    if (typeof installationId !== 'string' || installationId.length === 0) {
+        return { status: 'error', detail: 'installationId fehlt', httpStatus: 0 }
+    }
+
+    const accessToken = await getAccessToken()
+    const response = await fetch(
+        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${installationId}`,
+        {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: 'no-store',
+        },
+    )
+
+    if (response.status === 204) {
+        revalidatePath('/installed')
+        revalidatePath('/datastructures')
+        revalidatePath('/use-cases')
+        revalidatePath('/instance')
+        return { status: 'uninstalled', detail: 'Deinstalliert', httpStatus: 204 }
+    }
+
+    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
+    const detail = problem?.detail ?? `${response.status} ${response.statusText}`
+    const status =
+        response.status === 409 ? 'conflict' : response.status === 400 ? 'invalid' : 'error'
+    return { status, detail, httpStatus: response.status }
+}

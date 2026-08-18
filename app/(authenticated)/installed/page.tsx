@@ -1,3 +1,4 @@
+import { UninstallButton } from '@/components/installed/uninstall-button'
 import { getAccessToken, requireSession } from '@/lib/session'
 
 interface InstalledArtifactRow {
@@ -18,6 +19,8 @@ interface InstalledArtifactRow {
 interface InstallationRow {
     id: string
     createdAt: string
+    /** Set when the installation was uninstalled; the record stays as history. */
+    uninstalledAt?: string | null
     bundleId?: string
     bundleVersion?: string
     dataSetId?: string
@@ -118,13 +121,27 @@ export default async function InstalledPage() {
                                     </span>
                                 )}
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                                {dateFormat.format(new Date(installation.createdAt))}
-                                {installation.installedBy && (
-                                    <span title={installation.installedBy}>
-                                        {' · von '}
-                                        {installation.installedBy.slice(0, 8)}
+                            <div className="flex items-center gap-3">
+                                <div className="text-xs text-muted-foreground">
+                                    {dateFormat.format(new Date(installation.createdAt))}
+                                    {installation.installedBy && (
+                                        <span title={installation.installedBy}>
+                                            {' · von '}
+                                            {installation.installedBy.slice(0, 8)}
+                                        </span>
+                                    )}
+                                </div>
+                                {installation.uninstalledAt ? (
+                                    <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                        Deinstalliert{' '}
+                                        {dateFormat.format(new Date(installation.uninstalledAt))}
                                     </span>
+                                ) : (
+                                    // Slice 1: only structure-only installations are
+                                    // uninstallable — bundles wait for the teardown increment.
+                                    installation.artifacts.every(
+                                        (artifact) => artifact.artifactType === 'DATA_STRUCTURE',
+                                    ) && <UninstallButton installationId={installation.id} />
                                 )}
                             </div>
                         </div>
