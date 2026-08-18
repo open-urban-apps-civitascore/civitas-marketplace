@@ -15,7 +15,7 @@ const FEEDBACK_STYLES: Record<UninstallResult['status'], string> = {
 function feedbackText(result: UninstallResult): string {
     switch (result.status) {
         case 'uninstalled':
-            return 'Deinstalliert — die Struktur wurde entfernt.'
+            return 'Deinstalliert — alle angelegten Artefakte wurden entfernt.'
         case 'conflict':
             return `Noch in Verwendung (409): ${result.detail}`
         case 'invalid':
@@ -26,10 +26,10 @@ function feedbackText(result: UninstallResult): string {
 }
 
 /**
- * Uninstalls a structure-only installation. Only rendered for active
- * installations whose every line is a DATA_STRUCTURE — use-case bundles get no
- * button, because the platform refuses them until the teardown increment
- * lands (slice B).
+ * Uninstalls an installation: the platform tears down everything it CREATED,
+ * in reverse touch order, keeping artifacts other active installations still
+ * reference. Released/provisioned datasets are refused by the backend with an
+ * actionable message — the button shows it verbatim.
  */
 export function UninstallButton({ installationId }: { installationId: string }) {
     const [result, formAction, pending] = useActionState(uninstallInstallation, null)
@@ -44,7 +44,7 @@ export function UninstallButton({ installationId }: { installationId: string }) 
                 action={formAction}
                 onSubmit={(event) => {
                     // Native confirm keeps the destructive step deliberate without a dialog stack.
-                    if (!window.confirm('Datenstruktur wirklich deinstallieren?')) {
+                    if (!window.confirm('Installation wirklich deinstallieren? Alle dabei angelegten Artefakte werden entfernt.')) {
                         event.preventDefault()
                     }
                 }}

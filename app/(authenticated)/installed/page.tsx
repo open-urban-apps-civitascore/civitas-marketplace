@@ -137,11 +137,7 @@ export default async function InstalledPage() {
                                         {dateFormat.format(new Date(installation.uninstalledAt))}
                                     </span>
                                 ) : (
-                                    // Slice 1: only structure-only installations are
-                                    // uninstallable — bundles wait for the teardown increment.
-                                    installation.artifacts.every(
-                                        (artifact) => artifact.artifactType === 'DATA_STRUCTURE',
-                                    ) && <UninstallButton installationId={installation.id} />
+                                    <UninstallButton installationId={installation.id} />
                                 )}
                             </div>
                         </div>
