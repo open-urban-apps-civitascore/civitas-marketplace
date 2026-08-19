@@ -14,7 +14,7 @@
         "id": "n-mapping",
         "kind": "mapping",
         "label": "Zählung → Messung",
-        "mappingRef": "urn:core:city:openurbanapps:mapping:mobility:zaehlungzumessung:default",
+        "mappingRef": "urn:core:standard:openurbanapps:mapping:mobility:zaehlungzumessung:t6iap1st7k",
         "x-ui-position": { "x": 260, "y": 120 }
       },
       {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:core:city:openurbanapps:datastructure:mobility:verkehrsmessung:default",
+  "$id": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo",
   "title": "Verkehrsmessung (Zielformat)",
   "description": "Normalisierte Einzelmessung: sprechende Feldnamen und echte Typen statt Geräteformat. Das ist die Struktur, gegen die Auswertungen und Dashboards geschrieben werden — das Mapping übersetzt das Geräteformat der Zählstellen hierher. Stammdaten der Zählstelle (Name, Koordinaten) bleiben in der Quellstruktur und werden erst mit dem Pipeline-Inkrement zugeführt.",
   "$defs": {

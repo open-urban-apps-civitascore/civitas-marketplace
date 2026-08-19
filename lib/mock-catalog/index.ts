@@ -15,6 +15,17 @@ import trafficPipeline from './traffic-counting/pipeline.json'
  * `id`: for datastructure entries this IS the artifact's logical CORE URN.
  * Use cases have no platform identity yet (the install-registry gap), so they
  * carry a marketplace-owned urn in a distinct scheme — never a fake CORE URN.
+ *
+ * URN convention for catalogue artifacts (pending upstream alignment, our
+ * proposal): scope `standard` — the documented value for externally authored,
+ * unmodified-imported models, which is exactly what a catalogue entry is.
+ * The disambiguator is DERIVED, not hand-written: SHA-256 over the stable key
+ * `openurbanapps#<artifact-name>`, first 10 bytes folded into base36 — the
+ * same `deriveDisambiguator` mechanism Model Forge uses for XÖV imports, so
+ * every instance computes the identical identity and equal names from other
+ * publishers can never collide. The key must NEVER change once published:
+ * a changed key is a new identity, and installed instances would stop
+ * recognising the artifact.
  */
 export interface CatalogManifest {
     id: string
@@ -136,7 +147,7 @@ export const mockCatalog: CatalogEntry[] = [
                         tableName: 'verkehrsmessung',
                         // Logical URN of the TARGET structure — the platform resolves
                         // it to the installed version's model URN.
-                        element: 'urn:core:city:openurbanapps:datastructure:mobility:verkehrsmessung:default',
+                        element: 'urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo',
                     },
                 },
             ],

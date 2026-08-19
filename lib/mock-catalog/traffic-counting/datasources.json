@@ -2,7 +2,7 @@
   {
     "name": "Zählstellen-Feed",
     "description": "Empfängt die Zählungen der Sensoren über den Plattform-Broker (MQTT).",
-    "dataStructureUrn": "urn:core:city:openurbanapps:datastructure:mobility:verkehrszaehlung:default",
+    "dataStructureUrn": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrszaehlung:faqnlc1804",
     "connectorType": "MQTT",
     "configuration": {
       "urls": ["tcp://civitas-mosquitto:1883"],

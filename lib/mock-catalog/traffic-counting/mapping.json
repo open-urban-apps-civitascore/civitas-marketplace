@@ -1,11 +1,11 @@
 {
-  "mappingUrn": "urn:core:city:openurbanapps:mapping:mobility:zaehlungzumessung:default",
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:mobility:zaehlungzumessung:t6iap1st7k",
   "name": "Zählung → Verkehrsmessung",
   "description": "Übersetzt das Geräteformat der Zählstellen in das normalisierte Zielformat: Feldnamen werden sprechend, Zeitstempel und Zahlen bekommen echte Typen.",
   "document": {
     "title": "Zählung → Verkehrsmessung",
-    "source": "urn:core:city:openurbanapps:datastructure:mobility:verkehrszaehlung:default",
-    "target": "urn:core:city:openurbanapps:datastructure:mobility:verkehrsmessung:default",
+    "source": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrszaehlung:faqnlc1804",
+    "target": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo",
     "fields": {
       "$.stationId": "$.counterId",
       "$.observedAt": {
