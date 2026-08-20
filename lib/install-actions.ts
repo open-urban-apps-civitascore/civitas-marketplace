@@ -83,6 +83,23 @@ export async function installEntry(
     return res.failure
 }
 
+/**
+ * Meta fields of a CORE-IR connector document that never travel inside the
+ * wire configuration: identity and self-description belong to the catalogue
+ * (and, on the instance side, to the registry's own stamps), not to the
+ * connector payload.
+ */
+const CONNECTOR_META_FIELDS = ['$schema', 'id', 'title', 'description', 'connectionType'] as const
+
+function connectorConfiguration(
+    document: Record<string, unknown>,
+    alsoStrip: readonly string[] = [],
+): Record<string, unknown> {
+    const configuration: Record<string, unknown> = { ...document }
+    for (const field of [...CONNECTOR_META_FIELDS, ...alsoStrip]) delete configuration[field]
+    return configuration
+}
+
 // "build" prefix: dodges the react-hooks lint rule that treats any use*
 // function as a hook.
 function buildUseCaseBundleBody(entry: UseCaseEntry) {
@@ -98,12 +115,19 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
             description: structure.description,
             model: structure.model,
         })),
+        // Sources and sinks are authored as CORE-IR connector documents; the
+        // wire API predates that form and wants name/type/configuration with
+        // no adoptable identity. This mapping is the whole seam — when the
+        // platform grows an identity-keeping door for connector shells, only
+        // this function changes, not the catalogue.
         dataSources: entry.bundle.dataSources.map((source) => ({
-            name: source.name,
-            description: source.description,
-            dataStructureUrn: source.dataStructureUrn,
-            connectorType: source.connectorType,
-            configuration: source.configuration,
+            name: source.document.title,
+            description: source.document.description,
+            // The source contract wants the structure reference OUTSIDE the
+            // configuration ('mqtt' → 'MQTT', 'sql' → 'SQL')…
+            dataStructureUrn: source.document.element,
+            connectorType: String(source.document.connectionType ?? '').toUpperCase(),
+            configuration: connectorConfiguration(source.document, ['element']),
         })),
         mappings: entry.bundle.mappings.map((mapping) => ({
             name: mapping.name,
@@ -112,9 +136,10 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
             document: mapping.document,
         })),
         dataSinks: entry.bundle.dataSinks.map((sink) => ({
-            name: sink.name,
-            dataSinkType: sink.dataSinkType,
-            configuration: sink.configuration,
+            name: sink.document.title,
+            dataSinkType: String(sink.document.connectionType ?? '').toUpperCase(),
+            // …while the sink contract keeps `element` (and tableName) INSIDE it.
+            configuration: connectorConfiguration(sink.document),
         })),
         pipelines: entry.bundle.pipelines.map((pipeline) => ({
             name: pipeline.name,

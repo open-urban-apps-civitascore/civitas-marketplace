@@ -3,7 +3,8 @@ import airQualityArtifact from './air-quality-station/artifact.schema.json'
 import trafficManifest from './traffic-counting/manifest.json'
 import trafficStructure from './traffic-counting/structure.artifact.schema.json'
 import trafficTargetStructure from './traffic-counting/structure.target.artifact.schema.json'
-import trafficSources from './traffic-counting/datasources.json'
+import trafficSourceFeed from './traffic-counting/zaehlstellen-feed.datasource.json'
+import trafficSinkTable from './traffic-counting/verkehrsmessung-tabelle.datasink.json'
 import trafficMapping from './traffic-counting/mapping.json'
 import trafficPipeline from './traffic-counting/pipeline.json'
 
@@ -46,17 +47,40 @@ export interface BundledDataStructure {
 }
 
 /**
- * A bundled data source, referencing its structure by CORE URN. The connector
- * configuration matters beyond ingestion: only a configured source gets a
- * minted configuration URN, and only that URN lets a bundle pipeline
- * reference the source in its graph.
+ * One instance-local install parameter of a connector document: a top-level
+ * field whose value belongs to the receiving instance (broker URL, table
+ * name), not to the portable content. The document carries the catalogue
+ * default; a future install dialog offers these fields for override before
+ * the value lands in the wire configuration. Declaring the split here keeps
+ * the catalogue honest about what travels and what is per-instance.
+ */
+export interface InstallParameter {
+    /** Top-level field of the connector document this parameter sets. */
+    field: string
+    label: string
+    description?: string
+}
+
+/**
+ * A bundled data source, authored as a CORE-IR datasource document
+ * (datasource.schema.json): `$schema`, `id`, `title`, `connectionType`,
+ * `element` plus the connector fields. `title` doubles as the bundle-local
+ * handle a pipeline's `sourceRef` resolves against; `element` names the
+ * payload structure by CORE URN. The declared `id` is the catalogue-owned
+ * logical identity (scope `standard`, derived disambiguator) — today's wire
+ * API cannot adopt it for connector shells (the receiving instance mints
+ * one), so the install maps the document onto the existing
+ * name/connectorType/configuration fields and the id stays catalogue-side
+ * until the platform grows an identity-keeping door for sources and sinks.
+ *
+ * The connector configuration matters beyond ingestion: only a configured
+ * source gets a minted configuration URN, and only that URN lets a bundle
+ * pipeline reference the source in its graph.
  */
 export interface BundledDataSource {
-    name: string
-    description?: string
-    dataStructureUrn: string
-    connectorType?: 'MQTT' | 'SQL'
-    configuration?: Record<string, unknown>
+    document: Record<string, unknown>
+    /** Fields of `document` that are instance-local install parameters. */
+    parameters?: InstallParameter[]
 }
 
 /**
@@ -74,16 +98,19 @@ export interface BundledMapping {
 }
 
 /**
- * A bundled data sink. Carries no URN at all: a sink has no portable identity —
- * the receiving instance mints one — so the `name` is a bundle-local handle
- * that pipelines in the same bundle reference via `sinkRef`. The
- * configuration's `element` names the target structure by its logical CORE
- * URN; the platform resolves and rewrites it to the installed version.
+ * A bundled data sink, authored as a CORE-IR datasink document
+ * (datasink.schema.json): `$schema`, `id`, `title`, `connectionType`
+ * (`postgis` | `frost`) plus the variant's fields. `title` is the
+ * bundle-local handle pipelines reference via `sinkRef`; `element` names the
+ * target structure by its logical CORE URN and the platform resolves and
+ * rewrites it to the installed version. As with sources, the declared `id`
+ * is the catalogue-owned identity the wire API cannot adopt yet — the
+ * install maps the document onto name/dataSinkType/configuration.
  */
 export interface BundledDataSink {
-    name: string
-    dataSinkType: 'POSTGIS' | 'FROST'
-    configuration: Record<string, unknown>
+    document: Record<string, unknown>
+    /** Fields of `document` that are instance-local install parameters. */
+    parameters?: InstallParameter[]
 }
 
 /**
@@ -137,18 +164,31 @@ export const mockCatalog: CatalogEntry[] = [
                     model: trafficTargetStructure,
                 },
             ],
-            dataSources: trafficSources as BundledDataSource[],
+            dataSources: [
+                {
+                    document: trafficSourceFeed,
+                    parameters: [
+                        {
+                            field: 'urls',
+                            label: 'MQTT-Broker-URLs',
+                            description:
+                                'Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker.',
+                        },
+                    ],
+                },
+            ],
             mappings: [trafficMapping as BundledMapping],
             dataSinks: [
                 {
-                    name: 'Verkehrsmessung-Tabelle',
-                    dataSinkType: 'POSTGIS',
-                    configuration: {
-                        tableName: 'verkehrsmessung',
-                        // Logical URN of the TARGET structure — the platform resolves
-                        // it to the installed version's model URN.
-                        element: 'urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo',
-                    },
+                    document: trafficSinkTable,
+                    parameters: [
+                        {
+                            field: 'tableName',
+                            label: 'PostGIS-Tabellenname',
+                            description:
+                                'Name der Zieltabelle in der PostGIS-Datenbank der Instanz.',
+                        },
+                    ],
                 },
             ],
             pipelines: [trafficPipeline as BundledPipeline],
