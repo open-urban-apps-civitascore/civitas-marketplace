@@ -1,6 +1,6 @@
 import { Boxes, Layers } from 'lucide-react'
 
-import type { CatalogManifest } from '@/lib/mock-catalog'
+import type { CatalogManifest } from '@/lib/catalog/types'
 
 const TYPE_LABEL: Record<CatalogManifest['type'], string> = {
     datastructure: 'Datenstruktur',

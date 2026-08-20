@@ -1,14 +1,16 @@
 import { Check } from 'lucide-react'
 
 import { CatalogCard } from '@/components/catalog/catalog-card'
+import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
 import { InstallButton } from '@/components/catalog/install-button'
+import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
 import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
-import { mockCatalog } from '@/lib/mock-catalog'
 import { requireSession } from '@/lib/session'
 
 export default async function UseCasesPage() {
     await requireSession()
-    const useCases = mockCatalog.filter((entry) => entry.manifest.type === 'usecase')
+    const useCases = await getCatalogSummaries('usecase')
+    const meta = await getCatalogMeta()
     // Which bundles are installed comes from the platform's provenance, not from
     // marketplace bookkeeping — the catalogue id is recorded on every install.
     const installedIds = await fetchInstalledCatalogEntryIds()
@@ -21,22 +23,20 @@ export default async function UseCasesPage() {
                     Vollständige Anwendungsfälle: Datenmodell, Datenquellen und – künftig –
                     Pipeline und Dashboard, installierbar in einem Schritt.
                 </p>
+                <div className="mt-2">
+                    <CatalogFreshness meta={meta} />
+                </div>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {useCases.map((entry) => {
-                    const installed = installedIds.has(entry.manifest.id)
+                    const installed = installedIds.has(entry.id)
 
                     return (
                         <CatalogCard
-                            key={entry.manifest.id}
-                            manifest={entry.manifest}
-                            action={
-                                <InstallButton
-                                    entryId={entry.manifest.id}
-                                    installed={installed}
-                                />
-                            }
+                            key={entry.id}
+                            manifest={entry}
+                            action={<InstallButton entryId={entry.id} installed={installed} />}
                             badge={
                                 installed ? (
                                     <span className="inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-1 text-xs font-medium text-success">

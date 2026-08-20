@@ -10,5 +10,42 @@
     "verkehr",
     "mobilitaet",
     "zaehlstellen"
-  ]
+  ],
+  "members": {
+    "dataStructures": [
+      { "file": "verkehrszaehlung.datastructure.json" },
+      { "file": "verkehrsmessung.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "zaehlstellen-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "zaehlung-zu-messung.mapping.json" }
+    ],
+    "dataSinks": [
+      {
+        "file": "verkehrsmessung-tabelle.datasink.json",
+        "parameters": [
+          {
+            "field": "tableName",
+            "label": "PostGIS-Tabellenname",
+            "description": "Name der Zieltabelle in der PostGIS-Datenbank der Instanz."
+          }
+        ]
+      }
+    ],
+    "pipelines": [
+      { "file": "zaehlung-zu-messung.pipeline.json" }
+    ]
+  },
+  "dependencies": []
 }

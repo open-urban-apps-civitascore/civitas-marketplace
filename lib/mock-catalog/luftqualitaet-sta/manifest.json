@@ -12,5 +12,33 @@
     "feinstaub",
     "sensorthings",
     "frost"
-  ]
+  ],
+  "members": {
+    "dataStructures": [
+      { "file": "luftmessung.datastructure.json" },
+      { "file": "sta-observation.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "luftmessungs-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "luftmessung-zu-observation.mapping.json" }
+    ],
+    "dataSinks": [
+      { "file": "frost-observations.datasink.json" }
+    ],
+    "pipelines": [
+      { "file": "luftqualitaets-import.pipeline.json" }
+    ]
+  },
+  "dependencies": []
 }

@@ -2,7 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { findCatalogEntry, isDataStructureEntry, type UseCaseEntry } from '@/lib/mock-catalog'
+import { BundleError } from '@/lib/catalog/bundle'
+import { resolveCatalogEntry } from '@/lib/catalog/source'
+import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
 import { getAccessToken } from '@/lib/session'
 
 export interface InstallResult {
@@ -22,16 +24,32 @@ interface DataSetImportSummary {
 }
 
 /**
- * Installs a catalogue entry through the REAL install path: user token → APISIX
- * gateway → the type's import endpoint. Only the payload source is mocked;
- * this action is the production install call.
+ * Installs a catalogue entry through the REAL install path: catalogue source
+ * (git artifact repo at its pinned ref, or the local fixtures) → user token →
+ * APISIX gateway → the type's import endpoint. The package content is fetched
+ * at install time; nothing installable is shipped with the app.
  */
 export async function installEntry(
     _prev: InstallResult | null,
     formData: FormData,
 ): Promise<InstallResult> {
     const entryId = formData.get('entryId')
-    const entry = typeof entryId === 'string' ? findCatalogEntry(entryId) : undefined
+
+    let entry: CatalogEntry | undefined
+    try {
+        entry = typeof entryId === 'string' ? await resolveCatalogEntry(entryId) : undefined
+    } catch (error) {
+        // A package that cannot be fetched or does not hang together must
+        // fail loudly here — never install a half-assembled bundle.
+        return {
+            status: 'error',
+            detail:
+                error instanceof BundleError
+                    ? `Paket-Quelle nicht verfügbar: ${error.message}`
+                    : `Paket-Quelle nicht verfügbar: ${String(error)}`,
+            httpStatus: error instanceof BundleError ? error.status : 0,
+        }
+    }
     if (!entry) {
         return {
             status: 'error',

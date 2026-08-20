@@ -6,5 +6,11 @@
   "version": "1.0.0",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
-  "keywords": ["umwelt", "luftqualitaet", "sensorik"]
+  "keywords": ["umwelt", "luftqualitaet", "sensorik"],
+  "members": {
+    "dataStructures": [
+      { "file": "air-quality-station.datastructure.json" }
+    ]
+  },
+  "dependencies": []
 }
