@@ -36,6 +36,7 @@ const NAV_SECTIONS: NavSection[] = [
                 children: [
                     { title: 'Use Cases', href: '/use-cases' },
                     { title: 'Datenstrukturen', href: '/datastructures' },
+                    { title: 'Add-ons', href: '/add-ons' },
                 ],
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
