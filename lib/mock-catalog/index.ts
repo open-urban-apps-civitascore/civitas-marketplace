@@ -7,6 +7,13 @@ import trafficSourceFeed from './traffic-counting/zaehlstellen-feed.datasource.j
 import trafficSinkTable from './traffic-counting/verkehrsmessung-tabelle.datasink.json'
 import trafficMapping from './traffic-counting/mapping.json'
 import trafficPipeline from './traffic-counting/pipeline.json'
+import airStaManifest from './luftqualitaet-sta/manifest.json'
+import airStaStructure from './luftqualitaet-sta/structure.artifact.schema.json'
+import airStaTargetStructure from './luftqualitaet-sta/structure.target.artifact.schema.json'
+import airStaSourceFeed from './luftqualitaet-sta/luftmessungs-feed.datasource.json'
+import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.json'
+import airStaMapping from './luftqualitaet-sta/mapping.json'
+import airStaPipeline from './luftqualitaet-sta/pipeline.json'
 
 /**
  * Catalogue metadata for one installable entry — the "packaging". Mirrors the
@@ -192,6 +199,43 @@ export const mockCatalog: CatalogEntry[] = [
                 },
             ],
             pipelines: [trafficPipeline as BundledPipeline],
+        },
+    },
+    {
+        manifest: airStaManifest as UseCaseEntry['manifest'],
+        bundle: {
+            dataStructures: [
+                {
+                    name: 'Luftmessung',
+                    description:
+                        'Rohformat der Luftqualitäts-Stationen (PM2,5 als Pflichtwert, PM10/Gase optional)',
+                    model: airStaStructure,
+                },
+                {
+                    name: 'STA-Observation',
+                    description:
+                        'SensorThings-Zielformat, das der FROST-Server als Observation akzeptiert',
+                    model: airStaTargetStructure,
+                },
+            ],
+            dataSources: [
+                {
+                    document: airStaSourceFeed,
+                    parameters: [
+                        {
+                            field: 'urls',
+                            label: 'MQTT-Broker-URLs',
+                            description:
+                                'Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker.',
+                        },
+                    ],
+                },
+            ],
+            mappings: [airStaMapping as BundledMapping],
+            // FROST needs no instance-local parameters: the sink references only the
+            // mapping's target structure; server and project come from the platform.
+            dataSinks: [{ document: airStaSinkFrost }],
+            pipelines: [airStaPipeline as BundledPipeline],
         },
     },
 ]
