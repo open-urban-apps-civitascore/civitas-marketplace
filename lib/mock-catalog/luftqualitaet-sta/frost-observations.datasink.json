@@ -1,0 +1,8 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:environment:frostobservations:s53sq3rtwj",
+  "title": "Sensordaten-Speicher",
+  "description": "Schreibt die normalisierten Beobachtungen in den SensorThings-Speicher (FROST-Server) der Instanz.",
+  "connectionType": "frost",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:staobservation:rkanst1s7f"
+}
