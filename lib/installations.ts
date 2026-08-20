@@ -1,7 +1,7 @@
 import { getAccessToken } from '@/lib/session'
 
 interface InstallationRow {
-    bundleId?: string
+    catalogEntryId?: string
     uninstalledAt?: string | null
 }
 
@@ -16,7 +16,7 @@ interface InstallationRow {
  * lacks INSTALLATION_READ: a missing badge is a far better failure mode than a
  * catalogue that refuses to install anything.
  */
-export async function fetchInstalledBundleIds(): Promise<Set<string>> {
+export async function fetchInstalledCatalogEntryIds(): Promise<Set<string>> {
     try {
         const accessToken = await getAccessToken()
 
@@ -35,7 +35,7 @@ export async function fetchInstalledBundleIds(): Promise<Set<string>> {
         return new Set(
             (page.content ?? [])
                 .filter((row) => !row.uninstalledAt)
-                .map((row) => row.bundleId)
+                .map((row) => row.catalogEntryId)
                 .filter((id): id is string => Boolean(id)),
         )
     } catch {

@@ -21,8 +21,8 @@ interface InstallationRow {
     createdAt: string
     /** Set when the installation was uninstalled; the record stays as history. */
     uninstalledAt?: string | null
-    bundleId?: string
-    bundleVersion?: string
+    catalogEntryId?: string
+    catalogEntryVersion?: string
     dataSetId?: string
     dataSetName?: string
     installedBy?: string
@@ -108,16 +108,16 @@ export default async function InstalledPage() {
                         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b bg-muted/50 px-4 py-3">
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                                 <span className="font-medium text-foreground">
-                                    {installation.dataSetName ?? installation.bundleId ?? '—'}
+                                    {installation.dataSetName ?? installation.catalogEntryId ?? '—'}
                                 </span>
-                                {installation.bundleVersion && (
+                                {installation.catalogEntryVersion && (
                                     <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">
-                                        v{installation.bundleVersion}
+                                        v{installation.catalogEntryVersion}
                                     </span>
                                 )}
-                                {installation.bundleId && (
+                                {installation.catalogEntryId && (
                                     <span className="break-all text-xs text-muted-foreground">
-                                        {installation.bundleId}
+                                        {installation.catalogEntryId}
                                     </span>
                                 )}
                             </div>

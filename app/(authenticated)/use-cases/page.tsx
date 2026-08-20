@@ -2,7 +2,7 @@ import { Check } from 'lucide-react'
 
 import { CatalogCard } from '@/components/catalog/catalog-card'
 import { InstallButton } from '@/components/catalog/install-button'
-import { fetchInstalledBundleIds } from '@/lib/installations'
+import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
 import { mockCatalog } from '@/lib/mock-catalog'
 import { requireSession } from '@/lib/session'
 
@@ -11,7 +11,7 @@ export default async function UseCasesPage() {
     const useCases = mockCatalog.filter((entry) => entry.manifest.type === 'usecase')
     // Which bundles are installed comes from the platform's provenance, not from
     // marketplace bookkeeping — the catalogue id is recorded on every install.
-    const installedIds = await fetchInstalledBundleIds()
+    const installedIds = await fetchInstalledCatalogEntryIds()
 
     return (
         <div className="flex flex-col gap-6">
