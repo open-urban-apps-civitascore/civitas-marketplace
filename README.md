@@ -52,8 +52,35 @@ browser ──▶ marketplace ──▶ APISIX :9080 ──▶ portal-backend :8
 | `auth.ts` / `auth.config.ts` | NextAuth setup: Keycloak provider, session-cookie callbacks, federated sign-out |
 | `lib/session.ts` | `requireSession()` guard and `getAccessToken()` for server-side backend calls |
 | `lib/tokenUtils.ts` | Access-token refresh against Keycloak |
+| `lib/addon-catalog/` | The add-on catalogue: remote source + cache (`source.ts`), entry normalisation and installability (`listing.ts`), package fetching (`package-source.ts`) |
+| `lib/deployment-repo/` | Composing an add-on install as a deployment-repo change and opening it as a pull request |
 | `app/(authenticated)/` | Route group for signed-in pages: shared shell plus sign-out |
 | `app/login/` | Sign-in page, deliberately outside that group |
+
+## The add-on catalogue
+
+Add-ons are read from the curated catalogue repository
+([`civitas-addon-catalog`](https://github.com/open-urban-apps-civitascore/civitas-addon-catalog),
+via `ADDON_CATALOG_URL`). A pull request there is the submission and review is
+the curation; the raw `index.json` is the API. The result is cached briefly and
+kept as last-known-good, so an unreachable catalogue degrades to visibly stale
+data rather than an empty page.
+
+The catalogue holds metadata only. Each entry points at the add-on's own
+repository at an immutable ref - a tag or a commit, never a branch, because a
+branch would make two installs of the same listed version differ.
+
+Listing and installability are separate questions: an entry that does not say
+how it installs is still listed, and its detail page names what is missing.
+Only a complete entry offers "Installation vorschlagen", which then
+
+1. fetches the package from the add-on's repository at the pinned ref (binary
+   files stay binary - see `lib/package-file.ts`),
+2. composes the change: the package under
+   `deployment/addons/<componentName>/` plus one line in the environment's
+   `components:` list,
+3. opens a pull request against the deployment repository. Nothing merges -
+   that stays with the operator.
 
 ### Where auth checks belong
 

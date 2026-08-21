@@ -1,118 +1,94 @@
-import { ExternalLink, Info, Puzzle } from 'lucide-react'
-
-import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
-import { getAddons, getCatalogMeta } from '@/lib/catalog/source'
+import { AddonListingCard } from '@/components/catalog/addon-listing-card'
+import { Code } from '@/components/catalog/code'
+import { listAddons, type CatalogState } from '@/lib/addon-catalog'
+import { deploymentRepoConfig, forgeReadiness, type ForgeReadiness } from '@/lib/deployment-repo/config'
 import { requireSession } from '@/lib/session'
 
-/**
- * Infrastructure add-ons (NodeRed, Airflow, …) — a separate top-level
- * catalogue section next to use cases, NOT bundle members. They are listed
- * here for discovery, but deliberately WITHOUT an install button: add-ons are
- * deployed operator-side via GitOps (their deploymentRef points at the addon
- * repo), and the platform offers no API this marketplace could honestly call.
- */
+const READINESS_HINT: Record<ForgeReadiness, string | null> = {
+    ready: null,
+    'missing-repo':
+        'Für diese Instanz ist kein Deployment-Repository hinterlegt (DEPLOYMENT_REPO). Vorschläge lassen sich trotzdem erzeugen und einsehen – sie können dann manuell übernommen werden.',
+    'missing-token':
+        'Es fehlt nur noch der Zugang (DEPLOYMENT_REPO_TOKEN) – bis dahin wird die Änderung erzeugt und angezeigt, aber kein Pull Request geöffnet.',
+}
+
+const CATALOG_HINT: Record<CatalogState, string | null> = {
+    ok: null,
+    unconfigured:
+        'Es ist kein Katalog hinterlegt (ADDON_CATALOG_URL) — deshalb ist die Liste leer.',
+    unreachable:
+        'Der Katalog ist derzeit nicht erreichbar und wurde auch noch nie erfolgreich gelesen.',
+    stale: 'Der Katalog ist gerade nicht erreichbar. Gezeigt wird der zuletzt gelesene Stand.',
+    incompatible:
+        'Der Katalog verwendet ein neueres Format, als diese Anwendung lesen kann — nicht der Katalog ist veraltet, sondern der Marktplatz.',
+}
+
+function formatTimestamp(value: string): string {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
+
 export default async function AddonsPage() {
     await requireSession()
-    const addons = await getAddons()
-    const meta = await getCatalogMeta()
+
+    const { addons, state, url, fetchedAt, error, skipped } = await listAddons()
+    const config = deploymentRepoConfig()
+    const readiness = forgeReadiness(config)
+
+    const catalogHint = CATALOG_HINT[state]
+    const readinessHint = READINESS_HINT[readiness]
 
     return (
         <div className="flex flex-col gap-6">
             <div>
                 <h1>Add-ons</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    Infrastruktur-Bausteine für die Plattform — kuratiert im Katalog, installiert
-                    vom Betreiber der Instanz.
-                </p>
-                <div className="mt-2">
-                    <CatalogFreshness meta={meta} />
-                </div>
-            </div>
-
-            <div className="flex items-start gap-2.5 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-                <Info className="mt-0.5 size-4 shrink-0" />
-                <p>
-                    Add-ons werden nicht über den Marketplace installiert, sondern
-                    betreiberseitig per GitOps in das Deployment der Instanz aufgenommen. Die
-                    Einträge hier verweisen auf das jeweilige Add-on-Repository.
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                    Eigenständige Anwendungen, die zu Ihrer Instanz gehören. Der Marktplatz kann sie
+                    nicht selbst installieren – er bereitet die nötige Änderung vor, freigegeben und
+                    ausgerollt wird sie vom Betrieb.
                 </p>
             </div>
 
-            {addons.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                    {meta.origin === 'mock'
-                        ? 'Der lokale Demo-Katalog enthält keine Add-ons — sie kommen aus dem Katalog-Repo (REPO_LIST_URL).'
-                        : 'Der Katalog enthält derzeit keine Add-ons.'}
-                </p>
-            ) : (
+            <section
+                className={`flex flex-col gap-1.5 rounded-lg border p-4 text-sm text-muted-foreground ${
+                    catalogHint || readinessHint ? 'border-warn/40 bg-warn/5' : 'bg-card'
+                }`}
+            >
+                {url && (
+                    <p>
+                        Katalog: <Code>{url}</Code>
+                        {fetchedAt && ` · gelesen ${formatTimestamp(fetchedAt)}`}
+                    </p>
+                )}
+                {catalogHint && <p>{catalogHint}</p>}
+                {error && (state === 'stale' || state === 'incompatible') && (
+                    <p>Letzter Fehler: {error}</p>
+                )}
+                {skipped > 0 && (
+                    <p>
+                        {skipped} {skipped === 1 ? 'Eintrag' : 'Einträge'} aus dem Katalog konnten
+                        nicht gelesen werden und fehlen in der Liste.
+                    </p>
+                )}
+                {config.repo && (
+                    <p>
+                        Ziel für Vorschläge: <Code>{config.repo}</Code> auf Branch{' '}
+                        <Code>{config.baseBranch}</Code>, Umgebung <Code>{config.environment}</Code>.
+                    </p>
+                )}
+                {readinessHint && <p>{readinessHint}</p>}
+            </section>
+
+            {addons.length > 0 ? (
                 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                    {addons.map((addon) => (
-                        <article
-                            key={addon.id}
-                            className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md"
-                        >
-                            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5">
-                                <Puzzle className="size-9 text-primary/70" />
-                                <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-background px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
-                                    Add-on
-                                </span>
-                            </div>
-
-                            <div className="flex flex-1 flex-col p-5">
-                                <h3 className="text-lg font-semibold leading-tight text-foreground">
-                                    {addon.name}
-                                </h3>
-                                <p className="mt-1.5 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-                                    {addon.description}
-                                </p>
-
-                                {addon.categories.length > 0 && (
-                                    <div className="mt-3 flex flex-wrap gap-1.5">
-                                        {addon.categories.map((category) => (
-                                            <span
-                                                key={category}
-                                                className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                                            >
-                                                {category}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4">
-                                    <span className="truncate text-sm text-muted-foreground">
-                                        {addon.author}
-                                        {addon.compatibility.length > 0 &&
-                                            ` · CORE ${addon.compatibility
-                                                .map((entry) => entry.coreVersion)
-                                                .join(', ')}`}
-                                    </span>
-                                    {addon.licenses?.tool && (
-                                        <span
-                                            className="max-w-28 shrink-0 truncate text-xs text-muted-foreground"
-                                            title={addon.licenses.tool}
-                                        >
-                                            {addon.licenses.tool}
-                                        </span>
-                                    )}
-                                </div>
-
-                                {addon.repository && (
-                                    <div className="mt-4">
-                                        <a
-                                            href={addon.repository}
-                                            target="_blank"
-                                            rel="noreferrer noopener"
-                                            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-                                        >
-                                            <ExternalLink className="size-3.5" />
-                                            Add-on-Repository
-                                        </a>
-                                    </div>
-                                )}
-                            </div>
-                        </article>
+                    {addons.map((entry) => (
+                        <AddonListingCard key={entry.listing.id} entry={entry} />
                     ))}
+                </div>
+            ) : (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                    Keine Add-ons verfügbar.
                 </div>
             )}
         </div>
