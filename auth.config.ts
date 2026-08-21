@@ -56,7 +56,15 @@ export const authConfig = {
                 }
             }
             if (!isTokenExpired(token.expires_at)) return token
-            return refreshAccessToken(token)
+            const refreshed = await refreshAccessToken(token)
+            // Returning null is what makes Auth.js call sessionStore.clean() and
+            // drop the session cookie — including every chunk (.0/.1) and with
+            // the right __Secure- attributes. Middleware cannot do this: the
+            // auth() wrapper appends its own Set-Cookie after the handler's, so
+            // a delete there is simply overwritten. Only a terminal rejection
+            // clears; an unreachable Keycloak keeps the token for a retry.
+            if (refreshed.error === 'RefreshTokenExpired') return null
+            return refreshed
         },
         session({ session, token }) {
             return { ...session, error: token.error }
