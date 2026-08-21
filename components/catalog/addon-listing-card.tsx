@@ -5,10 +5,8 @@ import { CurationTierBadge } from '@/components/catalog/curation-tier'
 import type { ParsedAddon } from '@/lib/addon-catalog'
 
 /**
- * One add-on in the grid. Says what a card can honestly say: what it is, who
- * vouches for it, which Core versions it supports — and, when the listing is
- * incomplete, that it cannot be installed from here. A catalogue that hides
- * incomplete entries teaches nobody what is missing.
+ * One add-on in the grid. An incomplete listing is shown, not hidden — with a
+ * marker that it cannot be installed from here.
  */
 export function AddonListingCard({ entry }: { entry: ParsedAddon }) {
     const { listing, missingForInstall } = entry

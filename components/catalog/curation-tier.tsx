@@ -3,10 +3,8 @@ import { FlaskConical, type LucideIcon, ShieldCheck, Users } from 'lucide-react'
 import type { AddonCuration } from '@/lib/addon-catalog'
 
 /**
- * The store's one graded trust signal, rendered identically wherever it
- * appears. Colour is never the only carrier — every tier has an icon and a
- * word — and the tiers are cumulative, so the wording says what was checked
- * rather than how good something is.
+ * The store's one graded trust signal, rendered identically everywhere. Colour
+ * is never the only carrier: every tier has an icon and a word.
  */
 const TIER: Record<AddonCuration['tier'], { label: string; icon: LucideIcon; className: string; hint: string }> = {
     verified: {
