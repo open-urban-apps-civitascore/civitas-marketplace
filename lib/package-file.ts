@@ -19,9 +19,3 @@ export interface PackageFile {
 /** A deployment package, keyed by path relative to the package root. */
 export type AddonPackage = Record<string, PackageFile>
 
-/** Wraps files that are known to be text — the bundled add-on's TypeScript sources. */
-export function asTextPackage(files: Record<string, string>): AddonPackage {
-    return Object.fromEntries(
-        Object.entries(files).map(([path, content]) => [path, { content, encoding: 'utf8' as const }]),
-    )
-}

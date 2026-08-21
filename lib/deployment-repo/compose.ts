@@ -2,10 +2,8 @@ import type { AddonPackage } from '@/lib/package-file'
 import { environmentFilePath, type DeploymentRepoConfig } from './config'
 
 /**
- * Everything needed to propose one add-on install, independent of where the
- * listing and the package came from. The catalogue fetches a package from the
- * maintainer's repository; the bundled add-on carries its own — by the time a
- * proposal is composed, both look the same.
+ * Everything needed to propose one add-on install: the listing's identity plus
+ * the package fetched from the maintainer's repository.
  */
 export interface InstallCandidate {
     componentName: string
@@ -14,7 +12,7 @@ export interface InstallCandidate {
     description: string
     publisher: string
     license?: string
-    /** What is being installed — a tag, a short commit, or the bundled version. */
+    /** What is being installed — a tag or a short commit. */
     version?: string
     /** The deployment package, keyed by path relative to the package root. */
     files: AddonPackage
@@ -39,9 +37,8 @@ export interface ComposedInstall {
 }
 
 /**
- * Everything the layout functions need. Narrower than `AddonManifest` on
- * purpose: the detail page composes these strings from a catalogue listing,
- * which carries the component name without being a manifest.
+ * Everything the layout functions need — the detail page composes these strings
+ * from a catalogue listing, which carries the component name and nothing else.
  */
 export interface ComponentIdentity {
     componentName: string

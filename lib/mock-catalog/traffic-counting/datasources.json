@@ -1,7 +1,0 @@
-[
-  {
-    "name": "Zählstellen-Feed",
-    "description": "Empfängt die Zählungen der Sensoren. Die Anbindung (MQTT-Topic, Pipeline) folgt mit den nächsten Import-Inkrementen.",
-    "dataStructureUrn": "urn:core:city:openurbanapps:datastructure:mobility:verkehrszaehlung:default"
-  }
-]

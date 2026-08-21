@@ -1,17 +1,10 @@
-import { Blocks, Boxes, Layers, type LucideIcon } from 'lucide-react'
+import { Boxes, Layers } from 'lucide-react'
 
-import type { CatalogManifest } from '@/lib/mock-catalog'
+import type { CatalogManifest } from '@/lib/catalog/types'
 
 const TYPE_LABEL: Record<CatalogManifest['type'], string> = {
     datastructure: 'Datenstruktur',
     usecase: 'Use Case',
-    addon: 'Add-on',
-}
-
-const TYPE_ICON: Record<CatalogManifest['type'], LucideIcon> = {
-    datastructure: Layers,
-    usecase: Boxes,
-    addon: Blocks,
 }
 
 /**
@@ -22,11 +15,14 @@ const TYPE_ICON: Record<CatalogManifest['type'], LucideIcon> = {
 export function CatalogCard({
     manifest,
     action,
+    badge,
 }: {
     manifest: CatalogManifest
     action?: React.ReactNode
+    /** Optional state marker, rendered bottom right next to the action. */
+    badge?: React.ReactNode
 }) {
-    const Icon = TYPE_ICON[manifest.type]
+    const Icon = manifest.type === 'usecase' ? Boxes : Layers
 
     return (
         <article className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md">
@@ -67,7 +63,12 @@ export function CatalogCard({
                     </span>
                 </div>
 
-                {action && <div className="mt-4">{action}</div>}
+                {(action || badge) && (
+                    <div className="mt-4 flex items-start gap-3">
+                        {action}
+                        {badge && <div className="ml-auto shrink-0">{badge}</div>}
+                    </div>
+                )}
             </div>
         </article>
     )

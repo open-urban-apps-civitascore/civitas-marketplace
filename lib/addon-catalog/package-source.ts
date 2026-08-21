@@ -142,9 +142,7 @@ async function readPackageFile(
 }
 
 /**
- * The package as `path -> content`, with paths relative to the package root —
- * the same shape the bundled add-on provides, so the install composer does not
- * care where a package came from.
+ * The package as `path -> file`, with paths relative to the package root.
  */
 export async function fetchAddonPackage(ref: AddonPackageRef): Promise<AddonPackage> {
     const prefix = ref.path === '.' ? '' : `${ref.path.replace(/\/+$/, '')}/`

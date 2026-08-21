@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:core:city:openurbanapps:datastructure:mobility:verkehrszaehlung:default",
+  "$id": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrszaehlung:faqnlc1804",
   "title": "Verkehrszählung",
   "description": "Zählstellen und ihre Zählungen. Die Feldnamen entsprechen dem Geräteformat des Datenquellen-Simulators, damit der Passthrough-Pfad (PostGIS-Senke) ohne Mapping funktioniert.",
   "$defs": {

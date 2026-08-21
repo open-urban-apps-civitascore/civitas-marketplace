@@ -26,8 +26,18 @@ function feedbackText(result: InstallResult): string {
     }
 }
 
-export function InstallButton({ entryId }: { entryId: string }) {
+export function InstallButton({
+    entryId,
+    installed = false,
+}: {
+    entryId: string
+    /** Already present in this instance — the action is then closed. */
+    installed?: boolean
+}) {
     const [result, formAction, pending] = useActionState(installEntry, null)
+    // Also latch on a fresh success, so the button closes immediately instead of
+    // waiting for the revalidated page to arrive.
+    const done = installed || result?.status === 'created'
 
     return (
         <div className="flex flex-col gap-2">
@@ -38,6 +48,7 @@ export function InstallButton({ entryId }: { entryId: string }) {
                     icon={Download}
                     label="Installieren"
                     pendingLabel="Installiere …"
+                    disabled={done}
                 />
             </form>
             {result && (

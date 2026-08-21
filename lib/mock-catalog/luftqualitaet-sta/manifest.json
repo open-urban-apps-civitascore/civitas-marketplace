@@ -1,0 +1,44 @@
+{
+  "id": "urn:openurbanapps:usecase:luftqualitaet-sta",
+  "type": "usecase",
+  "displayName": "Luftqualität (SensorThings)",
+  "description": "Kompletter Use Case: Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat (STA-Observation), MQTT-Datenquelle, das Mapping zwischen beiden Strukturen sowie Pipeline und FROST-Senke — abgestimmt auf günstige Stationshardware mit Feinstaub- und Klimasensor.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": [
+    "umwelt",
+    "luftqualitaet",
+    "feinstaub",
+    "sensorthings",
+    "frost"
+  ],
+  "members": {
+    "dataStructures": [
+      { "file": "luftmessung.datastructure.json" },
+      { "file": "sta-observation.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "luftmessungs-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "luftmessung-zu-observation.mapping.json" }
+    ],
+    "dataSinks": [
+      { "file": "frost-observations.datasink.json" }
+    ],
+    "pipelines": [
+      { "file": "luftqualitaets-import.pipeline.json" }
+    ]
+  },
+  "dependencies": []
+}

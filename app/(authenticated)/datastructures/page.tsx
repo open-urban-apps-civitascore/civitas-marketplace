@@ -1,11 +1,17 @@
+import { Check } from 'lucide-react'
+
 import { CatalogCard } from '@/components/catalog/catalog-card'
+import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
 import { InstallButton } from '@/components/catalog/install-button'
-import { mockCatalog } from '@/lib/mock-catalog'
+import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
+import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
 import { requireSession } from '@/lib/session'
 
 export default async function DataStructuresCatalogPage() {
     await requireSession()
-    const structures = mockCatalog.filter((entry) => entry.manifest.type === 'datastructure')
+    const structures = await getCatalogSummaries('datastructure')
+    const meta = await getCatalogMeta()
+    const installedIds = await fetchInstalledCatalogEntryIds()
 
     return (
         <div className="flex flex-col gap-6">
@@ -15,16 +21,31 @@ export default async function DataStructuresCatalogPage() {
                     Wiederverwendbare Fachmodelle — einzeln installierbar und von mehreren Use
                     Cases gemeinsam nutzbar.
                 </p>
+                <div className="mt-2">
+                    <CatalogFreshness meta={meta} />
+                </div>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {structures.map((entry) => (
-                    <CatalogCard
-                        key={entry.manifest.id}
-                        manifest={entry.manifest}
-                        action={<InstallButton entryId={entry.manifest.id} />}
-                    />
-                ))}
+                {structures.map((entry) => {
+                    const installed = installedIds.has(entry.id)
+
+                    return (
+                        <CatalogCard
+                            key={entry.id}
+                            manifest={entry}
+                            action={<InstallButton entryId={entry.id} installed={installed} />}
+                            badge={
+                                installed ? (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-1 text-xs font-medium text-success">
+                                        <Check className="size-3.5" />
+                                        Bereits installiert
+                                    </span>
+                                ) : undefined
+                            }
+                        />
+                    )
+                })}
             </div>
         </div>
     )

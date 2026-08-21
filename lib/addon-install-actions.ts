@@ -1,8 +1,7 @@
 'use server'
 
-import { findAddonListing, findBundledEntry, type AddonListing } from '@/lib/addon-catalog'
+import { findAddonListing, type AddonListing } from '@/lib/addon-catalog'
 import { fetchAddonPackage, PackageFetchError } from '@/lib/addon-catalog/package-source'
-import { asTextPackage, type AddonPackage } from '@/lib/package-file'
 import {
     composeAddonInstall,
     pullRequestBody,
@@ -28,49 +27,22 @@ export interface AddonInstallResult {
 /** Human-readable provenance of the package, for the pull-request body. */
 function provenanceOf(listing: AddonListing): string | undefined {
     const source = listing.install?.source
-    if (source?.kind !== 'repository') return undefined
-    const { project, ref, path } = source.ref
+    if (!source) return undefined
+    const { project, ref, path } = source
     const location = path === '.' ? '' : ` (${path})`
     return `\`${project}\`${location} at \`${ref}\``
 }
 
 /**
- * Resolves the deployment package. The bundled add-on carries its own files;
- * a catalogue entry's package is fetched from the maintainer's repository at
- * the pinned version — the marketplace never stores a copy, so what lands in
- * the pull request is what the maintainer published at that version.
+ * Resolves the deployment package: fetched from the maintainer's repository at
+ * the pinned version. The marketplace never stores a copy, so what lands in the
+ * pull request is what the maintainer published at that version.
  */
 async function resolveCandidate(listing: AddonListing): Promise<InstallCandidate> {
     const install = listing.install
     if (!install) {
-        throw new PackageFetchError(
-            'Diese Listung enthält keine Installationsangaben.',
-            400,
-        )
+        throw new PackageFetchError('Diese Listung enthält keine Installationsangaben.', 400)
     }
-
-    let files: AddonPackage
-    if (install.source.kind === 'bundled') {
-        const bundled = findBundledEntry(listing.id)
-        if (!bundled) {
-            // Never silently propose an empty package: registering a component
-            // whose folder does not exist breaks the next deployment apply.
-            throw new PackageFetchError(
-                `Das mitgelieferte Paket für „${listing.id}" wurde nicht gefunden.`,
-                500,
-            )
-        }
-        files = asTextPackage(bundled.files)
-    } else {
-        files = await fetchAddonPackage(install.source.ref)
-    }
-
-    const version =
-        install.source.kind === 'repository'
-            ? install.source.ref.refType === 'tag'
-                ? install.source.ref.ref
-                : install.source.ref.ref.slice(0, 7)
-            : undefined
 
     return {
         componentName: install.componentName,
@@ -79,8 +51,11 @@ async function resolveCandidate(listing: AddonListing): Promise<InstallCandidate
         description: listing.description ?? listing.summary,
         publisher: listing.publisher,
         license: listing.license,
-        version,
-        files,
+        version:
+            install.source.refType === 'tag'
+                ? install.source.ref
+                : install.source.ref.slice(0, 7),
+        files: await fetchAddonPackage(install.source),
     }
 }
 

@@ -1,0 +1,16 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:environment:luftmessungzuobservation:uktwf8tdur",
+  "name": "Luftmessung → Observation",
+  "description": "Übersetzt die PM2,5-Rohmessung der Station in eine SensorThings-Observation: Zeitstempel wird phenomenonTime/resultTime, Messwert und Qualitätskennzeichen werden result/resultQuality. Der Datastream-Verweis wird nicht gemappt — ihn löst die Laufzeit aus den Stammdaten auf.",
+  "document": {
+    "title": "Luftmessung → Observation",
+    "source": "urn:core:standard:openurbanapps:datastructure:environment:luftmessung:8vuby3re7d",
+    "target": "urn:core:standard:openurbanapps:datastructure:environment:staobservation:rkanst1s7f",
+    "fields": {
+      "$.phenomenonTime": "$.timestamp",
+      "$.resultTime": "$.timestamp",
+      "$.result": "$.pm25.value",
+      "$.resultQuality": "$.pm25.quality"
+    }
+  }
+}

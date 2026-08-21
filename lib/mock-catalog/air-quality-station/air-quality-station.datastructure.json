@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:core:city:openurbanapps:datastructure:environment:airqualitystation:default",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:airqualitystation:q7it0vhxlx",
   "title": "Luftqualitäts-Messstation",
   "description": "Stationäre Luftqualitätsmessung: Stationen mit Standort, Messwerte je Station und Zeitpunkt.",
   "$defs": {

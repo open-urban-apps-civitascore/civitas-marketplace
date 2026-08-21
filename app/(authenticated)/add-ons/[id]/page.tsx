@@ -16,10 +16,9 @@ import {
 import { AddonInstallButton } from '@/components/catalog/addon-install-button'
 import { Code } from '@/components/catalog/code'
 import { CurationTierBadge, curationHint } from '@/components/catalog/curation-tier'
-import { findAddonListing, findBundledEntry, originLabel } from '@/lib/addon-catalog'
-import { addonDir, componentLine, composeAddonInstall } from '@/lib/deployment-repo/compose'
+import { findAddonListing } from '@/lib/addon-catalog'
+import { addonDir, componentLine } from '@/lib/deployment-repo/compose'
 import { deploymentRepoConfig, environmentFilePath, forgeReadiness } from '@/lib/deployment-repo/config'
-import { asTextPackage } from '@/lib/package-file'
 import { requireSession } from '@/lib/session'
 
 export default async function AddonDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -35,26 +34,11 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
     const registrationPath = environmentFilePath(config)
     const forge = forgeReadiness(config)
 
-    const bundled = findBundledEntry(listing.id)
-    const composed =
-        bundled && listing.install
-            ? composeAddonInstall(
-                  {
-                      componentName: listing.install.componentName,
-                      subdomain: listing.install.subdomain,
-                      displayName: listing.displayName,
-                      description: listing.summary,
-                      publisher: listing.publisher,
-                      files: asTextPackage(bundled.files),
-                  },
-                  config,
-              )
-            : undefined
 
     return (
         <div className="flex max-w-4xl flex-col gap-6">
             <Link
-                href="/addons"
+                href="/add-ons"
                 className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
             >
                 <ArrowLeft className="size-4" />
@@ -72,7 +56,7 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                         {listing.deprecated.successorId && (
                             <p className="mt-1.5">
                                 <Link
-                                    href={`/addons/${listing.deprecated.successorId}`}
+                                    href={`/add-ons/${listing.deprecated.successorId}`}
                                     className="font-medium text-primary underline-offset-2 hover:underline"
                                 >
                                     Empfohlener Nachfolger ansehen
@@ -91,9 +75,6 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                         Add-on
-                    </span>
-                    <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        {originLabel(listing)}
                     </span>
                     {listing.categories.map((category) => (
                         <span
@@ -119,13 +100,13 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                         <dt>Herausgeber:</dt>
                         <dd className="font-medium text-foreground">{listing.publisher}</dd>
                     </div>
-                    {listing.install?.source.kind === 'repository' && (
+                    {listing.install && (
                         <div className="flex gap-1.5">
                             <dt>Gelistete Version:</dt>
                             <dd className="font-mono text-xs font-medium text-foreground">
-                                {listing.install.source.ref.refType === 'tag'
-                                    ? listing.install.source.ref.ref
-                                    : listing.install.source.ref.ref.slice(0, 12)}
+                                {listing.install.source.refType === 'tag'
+                                    ? listing.install.source.ref
+                                    : listing.install.source.ref.slice(0, 12)}
                             </dd>
                         </div>
                     )}
@@ -176,9 +157,9 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                 )}
 
                 <div className="flex flex-wrap gap-4 text-sm">
-                    {listing.install?.source.kind === 'repository' && (
+                    {listing.install && (
                         <a
-                            href={`https://gitlab.com/${listing.install.source.ref.project}`}
+                            href={`https://gitlab.com/${listing.install.source.project}`}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
@@ -265,30 +246,12 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                             <code>{componentLine(listing.install, '')}</code>
                         </pre>
 
-                        {composed ? (
-                            <details className="text-sm text-muted-foreground">
-                                <summary className="cursor-pointer underline-offset-2 hover:underline">
-                                    {Object.keys(composed.files).length} Dateien im Paket
-                                </summary>
-                                <ul className="mt-2 flex flex-col gap-0.5">
-                                    {Object.keys(composed.files).map((path) => (
-                                        <li key={path} className="break-all font-mono text-xs">
-                                            {path}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </details>
-                        ) : (
-                            listing.install.source.kind === 'repository' && (
-                                <p className="text-sm text-muted-foreground">
-                                    Das Paket wird beim Vorschlagen unverändert aus{' '}
-                                    <Code>{listing.install.source.ref.project}</Code> geholt,
-                                    festgelegt auf{' '}
-                                    <Code>{listing.install.source.ref.ref}</Code> — der Marktplatz
-                                    hält keine eigene Kopie.
-                                </p>
-                            )
-                        )}
+                        <p className="text-sm text-muted-foreground">
+                            Das Paket wird beim Vorschlagen unverändert aus{' '}
+                            <Code>{listing.install.source.project}</Code> geholt, festgelegt auf{' '}
+                            <Code>{listing.install.source.ref}</Code> — der Marktplatz hält keine
+                            eigene Kopie.
+                        </p>
 
                         <p className="text-sm text-muted-foreground">
                             Erreichbar wird das Add-on anschließend unter{' '}
@@ -351,13 +314,11 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                 </section>
             )}
 
-            {listing.origin === 'catalog' && (
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Globe className="size-3.5" />
-                    Eintrag aus dem kuratierten Katalog. Korrekturen laufen über einen Merge
-                    Request im Katalog-Repository.
-                </p>
-            )}
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Globe className="size-3.5" />
+                Eintrag aus dem kuratierten Katalog. Korrekturen laufen über einen Merge Request im
+                Katalog-Repository.
+            </p>
         </div>
     )
 }

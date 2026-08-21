@@ -15,12 +15,12 @@ const READINESS_HINT: Record<ForgeReadiness, string | null> = {
 const CATALOG_HINT: Record<CatalogState, string | null> = {
     ok: null,
     unconfigured:
-        'Es ist kein Katalog hinterlegt (ADDON_CATALOG_URL). Gezeigt wird nur das mitgelieferte Beispiel-Add-on.',
+        'Es ist kein Katalog hinterlegt (ADDON_CATALOG_URL) — deshalb ist die Liste leer.',
     unreachable:
-        'Der Katalog ist derzeit nicht erreichbar und wurde auch noch nie erfolgreich gelesen – deshalb steht hier nur das mitgelieferte Beispiel.',
+        'Der Katalog ist derzeit nicht erreichbar und wurde auch noch nie erfolgreich gelesen.',
     stale: 'Der Katalog ist gerade nicht erreichbar. Gezeigt wird der zuletzt gelesene Stand.',
     incompatible:
-        'Der Katalog verwendet ein neueres Format, als diese Anwendung lesen kann — nicht der Katalog ist veraltet, sondern der Marktplatz. Bis zum Update wird nur das mitgelieferte Beispiel gezeigt.',
+        'Der Katalog verwendet ein neueres Format, als diese Anwendung lesen kann — nicht der Katalog ist veraltet, sondern der Marktplatz.',
 }
 
 function formatTimestamp(value: string): string {

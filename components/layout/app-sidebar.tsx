@@ -3,8 +3,8 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+    Database,
     FileQuestion,
-    FlaskConical,
     Hexagon,
     LayoutGrid,
     type LucideIcon,
@@ -35,12 +35,12 @@ const NAV_SECTIONS: NavSection[] = [
                 icon: LayoutGrid,
                 children: [
                     { title: 'Use Cases', href: '/use-cases' },
-                    { title: 'Add-ons', href: '/addons' },
                     { title: 'Datenstrukturen', href: '/datastructures' },
+                    { title: 'Add-ons', href: '/add-ons' },
                 ],
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
-            { title: 'Install-Lab', href: '/install-lab', icon: FlaskConical },
+            { title: 'In der Instanz', href: '/instance', icon: Database },
         ],
     },
     {

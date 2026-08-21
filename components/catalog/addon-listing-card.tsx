@@ -16,16 +16,11 @@ export function AddonListingCard({ entry }: { entry: ParsedAddon }) {
 
     return (
         <Link
-            href={`/addons/${listing.id}`}
+            href={`/add-ons/${listing.id}`}
             className="group flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
             <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5">
                 <Blocks className="size-9 text-primary/70" />
-                {listing.origin === 'bundled' && (
-                    <span className="absolute left-3 top-3 rounded-md bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-sm">
-                        Beispiel
-                    </span>
-                )}
             </div>
 
             <div className="flex flex-1 flex-col p-5">
@@ -72,9 +67,10 @@ export function AddonListingCard({ entry }: { entry: ParsedAddon }) {
                 <div className="mt-3 flex items-center justify-between gap-2">
                     {installable ? (
                         <span className="text-xs text-muted-foreground">
-                            {listing.install?.source.kind === 'repository'
-                                ? `Version ${listing.install.source.ref.refType === 'tag' ? listing.install.source.ref.ref : listing.install.source.ref.ref.slice(0, 7)}`
-                                : 'Mitgeliefertes Paket'}
+                            Version{' '}
+                            {listing.install?.source.refType === 'tag'
+                                ? listing.install.source.ref
+                                : listing.install?.source.ref.slice(0, 7)}
                         </span>
                     ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-warn">

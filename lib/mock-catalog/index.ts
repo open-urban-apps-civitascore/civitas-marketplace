@@ -1,87 +1,65 @@
+import type { PackageManifest } from '@/lib/catalog/types'
+
 import airQualityManifest from './air-quality-station/manifest.json'
-import airQualityArtifact from './air-quality-station/artifact.schema.json'
+import airQualityArtifact from './air-quality-station/air-quality-station.datastructure.json'
 import trafficManifest from './traffic-counting/manifest.json'
-import trafficStructure from './traffic-counting/structure.artifact.schema.json'
-import trafficSources from './traffic-counting/datasources.json'
+import trafficStructure from './traffic-counting/verkehrszaehlung.datastructure.json'
+import trafficTargetStructure from './traffic-counting/verkehrsmessung.datastructure.json'
+import trafficSourceFeed from './traffic-counting/zaehlstellen-feed.datasource.json'
+import trafficSinkTable from './traffic-counting/verkehrsmessung-tabelle.datasink.json'
+import trafficMapping from './traffic-counting/zaehlung-zu-messung.mapping.json'
+import trafficPipeline from './traffic-counting/zaehlung-zu-messung.pipeline.json'
+import airStaManifest from './luftqualitaet-sta/manifest.json'
+import airStaStructure from './luftqualitaet-sta/luftmessung.datastructure.json'
+import airStaTargetStructure from './luftqualitaet-sta/sta-observation.datastructure.json'
+import airStaSourceFeed from './luftqualitaet-sta/luftmessungs-feed.datasource.json'
+import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.json'
+import airStaMapping from './luftqualitaet-sta/luftmessung-zu-observation.mapping.json'
+import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
 
 /**
- * Catalogue metadata for one installable entry — the "packaging". Mirrors the
- * manifest format decided for the GitLab catalogue, so swapping this mock for
- * fetched entries later changes only the data source, not the shape.
- *
- * `id`: for datastructure entries this IS the artifact's logical CORE URN.
- * Use cases have no platform identity yet (the install-registry gap), so they
- * carry a marketplace-owned urn in a distinct scheme — never a fake CORE URN.
- *
- * `addon` shares this packaging but not the install path: add-ons are deployed
- * components of the instance, proposed to its deployment repository rather than
- * imported into the running platform (see lib/addon-catalog).
+ * Local catalogue fixtures: verbatim copies of the artifact-repo content
+ * (gitlab.com/civitascore-openurbanapps/commune-*) — manifest.json plus the
+ * member files it lists, under the same file names. They serve two purposes:
+ * offline/demo catalogue when no REPO_LIST_URL is configured, and test
+ * fixtures for the assembly path. Because both sources run through
+ * assembleCatalogEntry, keeping these byte-equal to the repo content means
+ * mock installs and remote installs are provably the same request.
  */
-export interface CatalogManifest {
-    id: string
-    type: 'datastructure' | 'usecase' | 'addon'
-    displayName: string
-    description: string
-    version: string
-    maintainer: string
-    license: string
-    keywords: string[]
+
+export interface MockPackage {
+    manifest: PackageManifest
+    /** Member file contents, keyed by the file name the manifest lists. */
+    files: Record<string, Record<string, unknown>>
 }
 
-/** A bundled data structure: name + the opaque artifact (its `$id` is the identity). */
-export interface BundledDataStructure {
-    name: string
-    description?: string
-    model: Record<string, unknown>
-}
-
-/** A bundled data source, referencing its structure by CORE URN. */
-export interface BundledDataSource {
-    name: string
-    description?: string
-    dataStructureUrn: string
-}
-
-export interface DataStructureEntry {
-    manifest: CatalogManifest & { type: 'datastructure' }
-    artifact: Record<string, unknown>
-}
-
-export interface UseCaseEntry {
-    manifest: CatalogManifest & { type: 'usecase' }
-    bundle: {
-        dataStructures: BundledDataStructure[]
-        dataSources: BundledDataSource[]
-    }
-}
-
-export type CatalogEntry = DataStructureEntry | UseCaseEntry
-
-export const mockCatalog: CatalogEntry[] = [
+export const mockPackages: MockPackage[] = [
     {
-        manifest: airQualityManifest as DataStructureEntry['manifest'],
-        artifact: airQualityArtifact,
+        manifest: airQualityManifest as unknown as PackageManifest,
+        files: {
+            'air-quality-station.datastructure.json': airQualityArtifact,
+        },
     },
     {
-        manifest: trafficManifest as UseCaseEntry['manifest'],
-        bundle: {
-            dataStructures: [
-                {
-                    name: 'Verkehrszählung',
-                    description: 'Zählstellen und Zählungen im Geräteformat des Simulators',
-                    model: trafficStructure,
-                },
-            ],
-            dataSources: trafficSources as BundledDataSource[],
+        manifest: trafficManifest as unknown as PackageManifest,
+        files: {
+            'verkehrszaehlung.datastructure.json': trafficStructure,
+            'verkehrsmessung.datastructure.json': trafficTargetStructure,
+            'zaehlstellen-feed.datasource.json': trafficSourceFeed,
+            'zaehlung-zu-messung.mapping.json': trafficMapping,
+            'verkehrsmessung-tabelle.datasink.json': trafficSinkTable,
+            'zaehlung-zu-messung.pipeline.json': trafficPipeline,
+        },
+    },
+    {
+        manifest: airStaManifest as unknown as PackageManifest,
+        files: {
+            'luftmessung.datastructure.json': airStaStructure,
+            'sta-observation.datastructure.json': airStaTargetStructure,
+            'luftmessungs-feed.datasource.json': airStaSourceFeed,
+            'luftmessung-zu-observation.mapping.json': airStaMapping,
+            'frost-observations.datasink.json': airStaSinkFrost,
+            'luftqualitaets-import.pipeline.json': airStaPipeline,
         },
     },
 ]
-
-export function findCatalogEntry(id: string): CatalogEntry | undefined {
-    return mockCatalog.find((entry) => entry.manifest.id === id)
-}
-
-/** Type guard: TypeScript cannot narrow on the nested manifest.type discriminant. */
-export function isDataStructureEntry(entry: CatalogEntry): entry is DataStructureEntry {
-    return entry.manifest.type === 'datastructure'
-}

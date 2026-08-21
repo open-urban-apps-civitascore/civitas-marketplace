@@ -20,9 +20,6 @@ service:
 # The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
 publicUrl: "https://marketplace.civitas.test"
 
-# Where "view in portal" links point (the portal frontend, browser-facing).
-portalUrl: "https://portal.civitas.test"
-
 keycloak:
   clientId: marketplace
   realm: core
@@ -44,6 +41,13 @@ keycloak:
 api:
   baseUrl: "http://apisix-gateway.apisix.svc.cluster.local"
   port: "80"
+
+# Catalogue source: raw URL of the git-hosted repo-list index. Empty = the
+# app serves its bundled demo fixtures (offline mode).
+catalog:
+  repoListUrl: "https://gitlab.com/civitascore-openurbanapps/civitas-marketplace-catalog/-/raw/main/index.json"
+  # Seconds a fetched index is served before re-fetching; empty = default (900).
+  ttlSeconds: ""
 
 # NextAuth session-cookie encryption secret.
 nextauthSecret:

@@ -28,13 +28,12 @@ export interface AddonListing {
     compatibleCoreVersions: string[]
     /** What the add-on needs from the platform, e.g. KEYCLOAK, APISIX_INGRESS. */
     platformNeeds: string[]
-    /** Absent for the bundled example: it ships with the app, nobody curated it. */
+    /** Absent when the entry carries no review information. */
     curation?: AddonCuration
     /** Set when the catalogue has withdrawn the entry but kept it visible. */
     deprecated?: { reason: string; successorId?: string }
     /** Present only when the entry carries everything an install proposal needs. */
     install?: AddonInstallSpec
-    origin: AddonOrigin
 }
 
 /**
@@ -49,13 +48,6 @@ export interface AddonCuration {
     notes?: string
 }
 
-/**
- * Where the entry came from. Visible in the UI because it changes what the
- * reader should expect: catalogue entries are curated and updated remotely,
- * the bundled one ships with this app as the proof of the install path.
- */
-export type AddonOrigin = 'catalog' | 'bundled'
-
 export interface AddonInstallSpec {
     /**
      * Folder name under `deployment/addons/` AND the exact string in the
@@ -64,20 +56,9 @@ export interface AddonInstallSpec {
     componentName: string
     /** Where it becomes reachable, as `<subdomain>.<instance domain>`. */
     subdomain: string
-    /** Where the deployment package comes from when a proposal is composed. */
-    source: AddonPackageSource
+    /** Where the deployment package is fetched from when a proposal is composed. */
+    source: AddonPackageRef
 }
-
-/**
- * Two ways a deployment package reaches the pull request. `bundled` exists for
- * the one add-on that ships with this app to keep the install path provable
- * end to end; every catalogue entry uses `repository`, because mirroring
- * someone else's deployment code into the catalogue would make the catalogue a
- * fork of it.
- */
-export type AddonPackageSource =
-    | { kind: 'bundled' }
-    | { kind: 'repository'; ref: AddonPackageRef }
 
 export interface AddonPackageRef {
     /** Forge the project lives on. */
@@ -177,7 +158,6 @@ export function parseCatalogAddon(raw: unknown): ParsedAddon | null {
         deprecated: deprecatedReason
             ? { reason: deprecatedReason, successorId: str(deprecatedRaw?.successorId) }
             : undefined,
-        origin: 'catalog',
     }
 
     const source = (entry.source ?? {}) as Record<string, unknown>
@@ -209,14 +189,11 @@ export function parseCatalogAddon(raw: unknown): ParsedAddon | null {
             componentName: componentName!,
             subdomain: subdomain!,
             source: {
-                kind: 'repository',
-                ref: {
-                    type: 'gitlab',
-                    project: project!,
-                    ref: ref!,
-                    refType: refType === 'commit' ? 'commit' : 'tag',
-                    path: path!,
-                },
+                type: 'gitlab',
+                project: project!,
+                ref: ref!,
+                refType: refType === 'commit' ? 'commit' : 'tag',
+                path: path!,
             },
         }
     }
