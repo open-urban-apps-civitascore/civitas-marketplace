@@ -1,5 +1,24 @@
-import type { AddonEntry, AddonManifest } from '@/lib/addon-catalog'
+import type { AddonPackage } from '@/lib/package-file'
 import { environmentFilePath, type DeploymentRepoConfig } from './config'
+
+/**
+ * Everything needed to propose one add-on install, independent of where the
+ * listing and the package came from. The catalogue fetches a package from the
+ * maintainer's repository; the bundled add-on carries its own — by the time a
+ * proposal is composed, both look the same.
+ */
+export interface InstallCandidate {
+    componentName: string
+    subdomain: string
+    displayName: string
+    description: string
+    publisher: string
+    license?: string
+    /** What is being installed — a tag, a short commit, or the bundled version. */
+    version?: string
+    /** The deployment package, keyed by path relative to the package root. */
+    files: AddonPackage
+}
 
 /**
  * Composing the change is deliberately separate from delivering it. The same
@@ -12,16 +31,25 @@ import { environmentFilePath, type DeploymentRepoConfig } from './config'
  */
 export interface ComposedInstall {
     /** New files, keyed by their path in the deployment repository. */
-    files: Record<string, string>
+    files: AddonPackage
     /** The environment file that gains exactly one line. */
     registrationPath: string
     /** Deterministic, so clicking twice targets the same branch instead of piling up. */
     branch: string
 }
 
+/**
+ * Everything the layout functions need. Narrower than `AddonManifest` on
+ * purpose: the detail page composes these strings from a catalogue listing,
+ * which carries the component name without being a manifest.
+ */
+export interface ComponentIdentity {
+    componentName: string
+}
+
 /** The add-on's folder in the deployment repository — this module owns that layout. */
-export function addonDir(manifest: AddonManifest): string {
-    return `deployment/addons/${manifest.componentName}`
+export function addonDir(component: ComponentIdentity): string {
+    return `deployment/addons/${component.componentName}`
 }
 
 /**
@@ -29,24 +57,24 @@ export function addonDir(manifest: AddonManifest): string {
  * preview renders it at the canonical indentation, the editor re-renders it at
  * whatever indentation the target file actually uses.
  */
-export function componentLine(manifest: AddonManifest, indent = '  '): string {
-    return `${indent}- ${manifest.componentName}  # AppStore add-on (${addonDir(manifest)})`
+export function componentLine(component: ComponentIdentity, indent = '  '): string {
+    return `${indent}- ${component.componentName}  # AppStore add-on (${addonDir(component)})`
 }
 
 export function composeAddonInstall(
-    entry: AddonEntry,
+    candidate: InstallCandidate,
     config: DeploymentRepoConfig,
 ): ComposedInstall {
-    const dir = addonDir(entry.manifest)
-    const files: Record<string, string> = {}
-    for (const [relativePath, content] of Object.entries(entry.files)) {
-        files[`${dir}/${relativePath}`] = content
+    const dir = addonDir(candidate)
+    const files: AddonPackage = {}
+    for (const [relativePath, file] of Object.entries(candidate.files)) {
+        files[`${dir}/${relativePath}`] = file
     }
 
     return {
         files,
         registrationPath: environmentFilePath(config),
-        branch: `appstore/install-${entry.manifest.componentName}`,
+        branch: `appstore/install-${candidate.componentName}`,
     }
 }
 
@@ -70,7 +98,7 @@ export type RegistrationOutcome =
  */
 export function registerComponent(
     fileContent: string,
-    manifest: AddonManifest,
+    component: ComponentIdentity,
 ): RegistrationOutcome {
     const lines = fileContent.split('\n')
     const listStart = lines.findIndex((line) => /^components:[ \t]*$/.test(line))
@@ -86,20 +114,20 @@ export function registerComponent(
 
         const item = /^(\s+)-\s+(\S+)/.exec(line)
         if (!item) break // a line at column 0 — the next top-level key, list is over
-        if (item[2] === manifest.componentName) return { status: 'already-registered' }
+        if (item[2] === component.componentName) return { status: 'already-registered' }
 
         indent = item[1]
         lastItem = i
     }
 
-    const line = componentLine(manifest, indent)
+    const line = componentLine(component, indent)
     lines.splice(lastItem === -1 ? listStart + 1 : lastItem + 1, 0, line)
 
     return { status: 'inserted', content: lines.join('\n'), line }
 }
 
-export function pullRequestTitle(entry: AddonEntry): string {
-    return `Install add-on: ${entry.manifest.displayName}`
+export function pullRequestTitle(candidate: InstallCandidate): string {
+    return `Install add-on: ${candidate.displayName}`
 }
 
 /**
@@ -108,12 +136,14 @@ export function pullRequestTitle(entry: AddonEntry): string {
  * It shows the line as actually inserted, not the canonical form.
  */
 export function pullRequestBody(
-    entry: AddonEntry,
+    candidate: InstallCandidate,
     change: ComposedInstall,
     insertedLine: string,
     requestedBy: string,
+    /** Where the package was fetched from, so a reviewer can verify the bytes. */
+    provenance?: string,
 ): string {
-    const { manifest } = entry
+    const manifest = candidate
 
     return [
         `Proposed by the CIVITAS AppStore on behalf of **${requestedBy}**.`,
@@ -125,6 +155,7 @@ export function pullRequestBody(
         '## What this changes',
         '',
         `- adds \`${addonDir(manifest)}/\` (${Object.keys(change.files).length} files) — the add-on's deployment package`,
+        ...(provenance ? [`  fetched verbatim from ${provenance}`] : []),
         `- registers it in \`${change.registrationPath}\`:`,
         '',
         '```yaml',
@@ -145,6 +176,12 @@ export function pullRequestBody(
         '',
         '---',
         '',
-        `Version ${manifest.version} · ${manifest.license} · maintained by ${manifest.maintainer}`,
+        [
+            manifest.version ? `Version ${manifest.version}` : null,
+            manifest.license,
+            `maintained by ${manifest.publisher}`,
+        ]
+            .filter(Boolean)
+            .join(' · '),
     ].join('\n')
 }

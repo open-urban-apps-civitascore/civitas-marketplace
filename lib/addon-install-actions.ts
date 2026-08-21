@@ -1,13 +1,20 @@
 'use server'
 
-import { findAddonEntry } from '@/lib/addon-catalog'
+import { findAddonListing, findBundledEntry, type AddonListing } from '@/lib/addon-catalog'
+import { fetchAddonPackage, PackageFetchError } from '@/lib/addon-catalog/package-source'
+import { asTextPackage, type AddonPackage } from '@/lib/package-file'
 import {
     composeAddonInstall,
     pullRequestBody,
     pullRequestTitle,
     registerComponent,
+    type InstallCandidate,
 } from '@/lib/deployment-repo/compose'
-import { deploymentRepoConfig, forgeReadiness } from '@/lib/deployment-repo/config'
+import {
+    deploymentRepoConfig,
+    environmentFilePath,
+    forgeReadiness,
+} from '@/lib/deployment-repo/config'
 import { ForgeError, openPullRequest, readFile } from '@/lib/deployment-repo/github'
 import { requireSession } from '@/lib/session'
 
@@ -16,6 +23,65 @@ export interface AddonInstallResult {
     detail: string
     /** Set for 'proposed' and 'already-open': where a human reviews the change. */
     prUrl?: string
+}
+
+/** Human-readable provenance of the package, for the pull-request body. */
+function provenanceOf(listing: AddonListing): string | undefined {
+    const source = listing.install?.source
+    if (source?.kind !== 'repository') return undefined
+    const { project, ref, path } = source.ref
+    const location = path === '.' ? '' : ` (${path})`
+    return `\`${project}\`${location} at \`${ref}\``
+}
+
+/**
+ * Resolves the deployment package. The bundled add-on carries its own files;
+ * a catalogue entry's package is fetched from the maintainer's repository at
+ * the pinned version — the marketplace never stores a copy, so what lands in
+ * the pull request is what the maintainer published at that version.
+ */
+async function resolveCandidate(listing: AddonListing): Promise<InstallCandidate> {
+    const install = listing.install
+    if (!install) {
+        throw new PackageFetchError(
+            'Diese Listung enthält keine Installationsangaben.',
+            400,
+        )
+    }
+
+    let files: AddonPackage
+    if (install.source.kind === 'bundled') {
+        const bundled = findBundledEntry(listing.id)
+        if (!bundled) {
+            // Never silently propose an empty package: registering a component
+            // whose folder does not exist breaks the next deployment apply.
+            throw new PackageFetchError(
+                `Das mitgelieferte Paket für „${listing.id}" wurde nicht gefunden.`,
+                500,
+            )
+        }
+        files = asTextPackage(bundled.files)
+    } else {
+        files = await fetchAddonPackage(install.source.ref)
+    }
+
+    const version =
+        install.source.kind === 'repository'
+            ? install.source.ref.refType === 'tag'
+                ? install.source.ref.ref
+                : install.source.ref.ref.slice(0, 7)
+            : undefined
+
+    return {
+        componentName: install.componentName,
+        subdomain: install.subdomain,
+        displayName: listing.displayName,
+        description: listing.description ?? listing.summary,
+        publisher: listing.publisher,
+        license: listing.license,
+        version,
+        files,
+    }
 }
 
 /**
@@ -37,13 +103,41 @@ export async function proposeAddonInstall(
     const session = await requireSession()
 
     const entryId = formData.get('entryId')
-    const entry = typeof entryId === 'string' ? findAddonEntry(entryId) : undefined
+    if (typeof entryId !== 'string') {
+        return { status: 'error', detail: 'Kein Katalog-Eintrag angegeben.' }
+    }
+
+    const entry = await findAddonListing(entryId)
     if (!entry) {
-        return { status: 'error', detail: `Unbekannter Katalog-Eintrag: ${String(entryId)}` }
+        return { status: 'error', detail: `Unbekannter Katalog-Eintrag: ${entryId}` }
+    }
+
+    const { listing, missingForInstall } = entry
+    const install = listing.install
+    if (!install) {
+        return {
+            status: 'error',
+            detail:
+                'Diese Listung sagt noch nicht, wie das Add-on installiert wird. Es fehlt: ' +
+                (missingForInstall.join('; ') || 'die Installationsangaben') + '.',
+        }
+    }
+
+    // A deprecated entry stays visible so instances that already run it learn
+    // why — but proposing a fresh install of something the catalogue has
+    // withdrawn would work against exactly that.
+    if (listing.deprecated) {
+        return {
+            status: 'error',
+            detail:
+                `„${listing.displayName}" ist im Katalog als veraltet markiert: ${listing.deprecated.reason}` +
+                (listing.deprecated.successorId
+                    ? ` Empfohlener Nachfolger: ${listing.deprecated.successorId}.`
+                    : ''),
+        }
     }
 
     const config = deploymentRepoConfig()
-    const { manifest } = entry
 
     // The readiness states are explained on the page itself; repeating them here
     // would only restate what the user is already looking at.
@@ -58,37 +152,46 @@ export async function proposeAddonInstall(
         }
     }
 
-    const change = composeAddonInstall(entry, config)
-
     try {
-        const current = await readFile(config, change.registrationPath)
-        const registration = registerComponent(current, manifest)
+        // Decide whether there is anything to do BEFORE downloading a package:
+        // the registration check is one request, the package is dozens, and an
+        // add-on that is already registered needs none of them.
+        const registrationPath = environmentFilePath(config)
+        const current = await readFile(config, registrationPath)
+        const registration = registerComponent(current, install)
 
         if (registration.status === 'already-registered') {
             return {
                 status: 'already-registered',
-                detail: `„${manifest.componentName}" steht bereits in der Komponentenliste von ${config.environment}.`,
+                detail: `„${install.componentName}" steht bereits in der Komponentenliste von ${config.environment}.`,
             }
         }
         if (registration.status === 'no-component-list') {
             return {
                 status: 'error',
                 detail:
-                    `${change.registrationPath} enthält keine components-Liste. ` +
+                    `${registrationPath} enthält keine components-Liste. ` +
                     `Diese Umgebung erbt die Standardliste — sie muss einmalig ausgeschrieben werden.`,
             }
         }
 
+        const candidate = await resolveCandidate(listing)
+        const change = composeAddonInstall(candidate, config)
+
         const result = await openPullRequest(config, {
             branch: change.branch,
-            title: pullRequestTitle(entry),
+            title: pullRequestTitle(candidate),
             body: pullRequestBody(
-                entry,
+                candidate,
                 change,
                 registration.line,
                 session.user?.name ?? session.user?.email ?? 'unbekannt',
+                provenanceOf(listing),
             ),
-            files: { ...change.files, [change.registrationPath]: registration.content },
+            files: {
+                ...change.files,
+                [change.registrationPath]: { content: registration.content, encoding: 'utf8' },
+            },
         })
 
         if (result.status === 'already-open') {
@@ -105,6 +208,12 @@ export async function proposeAddonInstall(
             prUrl: result.url,
         }
     } catch (error) {
+        if (error instanceof PackageFetchError) {
+            return {
+                status: 'error',
+                detail: `Das Deployment-Paket konnte nicht geladen werden: ${error.message}`,
+            }
+        }
         if (error instanceof ForgeError) {
             return { status: 'error', detail: forgeMessage(error, config.repo) }
         }

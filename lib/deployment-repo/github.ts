@@ -1,3 +1,4 @@
+import type { AddonPackage } from '@/lib/package-file'
 import type { DeploymentRepoConfig } from './config'
 
 /**
@@ -77,7 +78,7 @@ export type PullRequestOutcome =
 
 export async function openPullRequest(
     config: DeploymentRepoConfig,
-    input: { branch: string; title: string; body: string; files: Record<string, string> },
+    input: { branch: string; title: string; body: string; files: AddonPackage },
 ): Promise<PullRequestOutcome> {
     const owner = config.repo.split('/')[0]
 
@@ -101,17 +102,26 @@ export async function openPullRequest(
     const baseSha = baseRef.object.sha
     const baseCommit = await gh<{ tree: { sha: string } }>(config, `/git/commits/${baseSha}`)
 
+    // Text goes inline; anything binary becomes a blob first, because the tree
+    // API only accepts `content` as UTF-8 and would mangle the bytes. Uploading
+    // every file as a blob would cost one request per file, so only the files
+    // that need it pay that price.
+    const treeEntries = await Promise.all(
+        Object.entries(input.files).map(async ([path, file]) => {
+            if (file.encoding === 'utf8') {
+                return { path, mode: '100644', type: 'blob', content: file.content }
+            }
+            const blob = await gh<{ sha: string }>(config, '/git/blobs', {
+                method: 'POST',
+                body: { content: file.content, encoding: 'base64' },
+            })
+            return { path, mode: '100644', type: 'blob', sha: blob.sha }
+        }),
+    )
+
     const tree = await gh<{ sha: string }>(config, '/git/trees', {
         method: 'POST',
-        body: {
-            base_tree: baseCommit.tree.sha,
-            tree: Object.entries(input.files).map(([path, content]) => ({
-                path,
-                mode: '100644',
-                type: 'blob',
-                content,
-            })),
-        },
+        body: { base_tree: baseCommit.tree.sha, tree: treeEntries },
     })
 
     const commit = await gh<{ sha: string }>(config, '/git/commits', {
