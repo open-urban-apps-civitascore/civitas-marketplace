@@ -25,10 +25,10 @@ export function CatalogCard({
     const Icon = manifest.type === 'usecase' ? Boxes : Layers
 
     return (
-        <article className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md">
-            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5">
+        <article className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-[box-shadow,border-color] hover:border-ring hover:shadow-md">
+            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5 dark:from-primary/20 dark:to-primary/10">
                 <Icon className="size-9 text-primary/70" />
-                <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-background px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
+                <span className="absolute left-3 top-3 inline-flex items-center rounded-md border bg-card px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
                     {TYPE_LABEL[manifest.type]}
                 </span>
             </div>

@@ -29,7 +29,7 @@ export default async function AddonsPage() {
                 </div>
             </div>
 
-            <div className="flex items-start gap-2.5 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            <div className="flex items-start gap-2.5 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
                 <Info className="mt-0.5 size-4 shrink-0" />
                 <p>
                     Add-ons werden nicht über den Marketplace installiert, sondern
@@ -49,11 +49,11 @@ export default async function AddonsPage() {
                     {addons.map((addon) => (
                         <article
                             key={addon.id}
-                            className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow hover:shadow-md"
+                            className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-[box-shadow,border-color] hover:border-ring hover:shadow-md"
                         >
-                            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5">
+                            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5 dark:from-primary/20 dark:to-primary/10">
                                 <Puzzle className="size-9 text-primary/70" />
-                                <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-background px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
+                                <span className="absolute left-3 top-3 inline-flex items-center rounded-md border bg-card px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
                                     Add-on
                                 </span>
                             </div>
@@ -103,7 +103,7 @@ export default async function AddonsPage() {
                                             href={addon.repository}
                                             target="_blank"
                                             rel="noreferrer noopener"
-                                            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                                            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
                                         >
                                             <ExternalLink className="size-3.5" />
                                             Add-on-Repository

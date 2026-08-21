@@ -30,7 +30,7 @@ export default async function InstancePage() {
         return (
             <div className="flex flex-col gap-6">
                 <h1>In der Instanz vorhanden</h1>
-                <p className="rounded-lg border border-error/40 bg-error/5 px-4 py-3 text-sm text-error">
+                <p className="rounded-lg border border-error/40 bg-error/5 dark:bg-error/15 px-4 py-3 text-sm text-error">
                     Backend antwortet mit {res.status} {res.statusText}
                 </p>
             </div>

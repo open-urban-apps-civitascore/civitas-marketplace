@@ -72,7 +72,7 @@ export default async function InstalledPage() {
         return (
             <div className="flex flex-col gap-6">
                 <h1>Installiert</h1>
-                <p className="rounded-lg border border-error/40 bg-error/5 px-4 py-3 text-sm text-error">
+                <p className="rounded-lg border border-error/40 bg-error/5 dark:bg-error/15 px-4 py-3 text-sm text-error">
                     Backend antwortet mit {res.status} {res.statusText}
                     {res.status === 403 &&
                         ' — fehlt der Rolle die Berechtigung INSTALLATION_READ?'}
@@ -171,7 +171,7 @@ export default async function InstalledPage() {
                                             <span
                                                 className={
                                                     artifact.action === 'CREATED'
-                                                        ? 'rounded bg-success/10 px-1.5 py-0.5 text-xs text-success'
+                                                        ? 'rounded bg-success/10 dark:bg-success/20 px-1.5 py-0.5 text-xs text-success'
                                                         : 'rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
                                                 }
                                             >

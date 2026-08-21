@@ -67,8 +67,8 @@ export function AppSidebar({
             className="flex h-svh w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground"
         >
             <div className="flex items-center gap-2.5 p-3">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-[#036aa1]">
-                    <Hexagon className="size-5 text-white" />
+                <div className="flex size-9 items-center justify-center rounded-lg bg-primary">
+                    <Hexagon className="size-5 text-primary-foreground" />
                 </div>
                 <div className="grid leading-tight">
                     <span className="truncate text-sm font-semibold">{tenantName}</span>

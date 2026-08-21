@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:is(.dark *));
+/* `.dark *` alone matches only DESCENDANTS, so a `dark:` utility written on the
+   <html> element that carries the class would silently not apply. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Design tokens ported from the previous marketplace-addon prototype. 
    Aligned with CIVITAS palette (primary = the portal's blue), sidebar
@@ -48,6 +50,9 @@
 }
 
 :root {
+  /* Tells the browser to render native UI (scrollbars, form controls, date
+     pickers) in the matching scheme — CSS variables do not reach those. */
+  color-scheme: light;
   --font-ibm-plex-sans:
     'IBM Plex Sans', 'Aptos', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --font-ibm-plex-mono:
@@ -88,39 +93,63 @@
   --status-label: oklch(90.196% 0.02539 233.145);
 }
 
+/* Dark theme. Every value carries a faint CIVITAS tint (hue 242.772) instead of
+   a neutral grey, and the surfaces form a deliberate elevation ladder:
+   background 0.145 → page well 0.211 (that is `bg-muted/40`, composited) →
+   card 0.26 → popover 0.28 → chip 0.30. The well is what `--muted` is tuned
+   FOR, so changing --muted moves the ground every card sits on.
+   Contrast was verified per pair; the floors are 4.5:1 for text and 3:1 for
+   UI boundaries and focus rings. All values are inside the sRGB gamut. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --outline: oklch(71.547% 0.00008 271.152);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --success: oklch(75.099% 0.17584 156.33);
-  --warn: oklch(85.148% 0.17171 99.388);
-  --error: oklch(67.512% 0.20416 358.512);
-  --experimental: oklch(0.72 0.12 300);
-  --status-label: oklch(40% 0.04 233.145);
+  color-scheme: dark;
+  --background: oklch(0.145 0.010 242.772);
+  --foreground: oklch(0.97 0.005 242.772);
+  --card: oklch(0.26 0.016 242.772);
+  --card-foreground: oklch(0.97 0.005 242.772);
+  --popover: oklch(0.28 0.018 242.772);
+  --popover-foreground: oklch(0.97 0.005 242.772);
+  /* The brand blue lifted for a dark ground — one token has to work both as a
+     fill (6.72:1 against its foreground) and as text (5.45:1 on card), and it
+     must stay clear of --foreground so `text-primary` still reads as a link. */
+  --primary: oklch(0.68 0.13 242.772);
+  --primary-foreground: oklch(0.17 0.035 242.772);
+  --primary-light: oklch(0.80 0.055 242.772);
+  --secondary: oklch(0.30 0.016 242.772);
+  --secondary-foreground: oklch(0.97 0.005 242.772);
+  --muted: oklch(0.30 0.016 242.772);
+  --muted-foreground: oklch(0.74 0.014 242.772);
+  --accent: oklch(0.33 0.030 242.772);
+  --accent-foreground: oklch(0.97 0.005 242.772);
+  --destructive: oklch(0.68 0.19 22);
+  /* Opaque, not white-with-alpha: an alpha border composites differently on
+     every surface, so the same `border` class drew a different strength on the
+     well, on a card and in the sidebar. */
+  --border: oklch(0.42 0.018 242.772);
+  --outline: oklch(0.56 0.016 242.772);
+  --input: oklch(0.56 0.020 242.772);
+  /* The base layer halves this with `outline-ring/50`, so it is set bright
+     enough that the *halved* ring still clears the 3:1 focus floor. */
+  --ring: oklch(0.78 0.12 242.772);
+  /* Below --card: the shell recedes so content cards sit above it. */
+  --sidebar: oklch(0.185 0.012 242.772);
+  --sidebar-foreground: oklch(0.97 0.005 242.772);
+  --sidebar-primary: oklch(0.68 0.13 242.772);
+  --sidebar-primary-foreground: oklch(0.17 0.035 242.772);
+  /* The active-nav marker. Double-coded: a tinted fill AND a distinct text
+     colour, so "you are here" survives even if the fill is missed. */
+  --sidebar-accent: oklch(0.36 0.065 242.772);
+  --sidebar-accent-foreground: oklch(0.93 0.035 242.772);
+  --sidebar-border: oklch(0.33 0.016 242.772);
+  --sidebar-ring: oklch(0.78 0.12 242.772);
+  --success: oklch(0.76 0.150 158);
+  /* Darkened rather than lifted: at the light theme's lightness a 6px status
+     dot outshines the body text and halates against the near-black ground. */
+  --warn: oklch(0.80 0.140 92);
+  /* Hue 22, matching --destructive: the light theme's 358 renders pink, which
+     does not read as an error next to a real red. */
+  --error: oklch(0.68 0.190 22);
+  --experimental: oklch(0.74 0.115 300);
+  --status-label: oklch(0.38 0.055 242.772);
 }
 
 @layer base {
@@ -143,4 +172,18 @@
   body {
     @apply bg-background text-foreground font-sans font-normal;
   }
+}
+
+/* Theme toggle: all three icons are always in the markup, so server and client
+   render identically and there is no hydration gap to suppress. Which one is
+   visible follows `data-theme` on <html>, written by the inline theme script
+   before first paint and updated by the toggle. */
+.theme-icon {
+  display: none;
+}
+
+[data-theme='light'] .theme-icon-light,
+[data-theme='dark'] .theme-icon-dark,
+[data-theme='system'] .theme-icon-system {
+  display: block;
 }

@@ -39,7 +39,7 @@ export default async function UseCasesPage() {
                             action={<InstallButton entryId={entry.id} installed={installed} />}
                             badge={
                                 installed ? (
-                                    <span className="inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-1 text-xs font-medium text-success">
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-success/10 dark:bg-success/20 px-2 py-1 text-xs font-medium text-success">
                                         <Check className="size-3.5" />
                                         Bereits installiert
                                     </span>

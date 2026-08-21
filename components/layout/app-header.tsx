@@ -1,6 +1,7 @@
 import { LayoutGrid, LogOut } from 'lucide-react'
 
 import { signOut } from '@/auth'
+import { ThemeToggle } from '@/components/layout/theme-toggle'
 
 /**
  * Top bar of the authenticated shell: breadcrumb on the left, connection badge
@@ -29,6 +30,7 @@ export function AppHeader({
                     <span className="size-1.5 rounded-full bg-success" />
                     Verbunden · {connection}
                 </span>
+                <ThemeToggle />
                 <div className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                     {initials}
                 </div>

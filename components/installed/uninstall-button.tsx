@@ -53,7 +53,7 @@ export function UninstallButton({ installationId }: { installationId: string }) 
                 <button
                     type="submit"
                     disabled={pending}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-error/40 px-2.5 py-1 text-xs font-medium text-error transition-colors hover:bg-error/5 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-error/40 px-2.5 py-1 text-xs font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:opacity-50"
                 >
                     {pending ? (
                         <Loader2 className="size-3.5 animate-spin" />
