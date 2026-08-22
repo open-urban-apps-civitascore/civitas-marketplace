@@ -3,7 +3,7 @@
   "type": "usecase",
   "displayName": "Verkehrszählung",
   "description": "Zählstellen-Rohformat, normalisiertes Zielformat, MQTT-Quelle, Mapping, Pipeline und PostGIS-Senke.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
   "keywords": [
@@ -45,6 +45,9 @@
     ],
     "pipelines": [
       { "file": "zaehlung-zu-messung.pipeline.json" }
+    ],
+    "simulations": [
+      { "file": "zaehlstellen.simulation.json" }
     ]
   },
   "dependencies": []

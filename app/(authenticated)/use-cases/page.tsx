@@ -3,9 +3,11 @@ import { Check } from 'lucide-react'
 import { CatalogCard } from '@/components/catalog/catalog-card'
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
 import { InstallButton } from '@/components/catalog/install-button'
+import { SamplePreview } from '@/components/catalog/sample-preview'
 import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
 import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
 import { requireSession } from '@/lib/session'
+import { isSimulatorConfigured } from '@/lib/simulator/client'
 
 export default async function UseCasesPage() {
     await requireSession()
@@ -14,6 +16,9 @@ export default async function UseCasesPage() {
     // Which bundles are installed comes from the platform's provenance, not from
     // marketplace bookkeeping — the catalogue id is recorded on every install.
     const installedIds = await fetchInstalledCatalogEntryIds()
+    // Sample preview needs the in-cluster simulator; without it the button
+    // simply does not render.
+    const previewAvailable = isSimulatorConfigured()
 
     return (
         <div className="flex flex-col gap-6">
@@ -36,7 +41,12 @@ export default async function UseCasesPage() {
                         <CatalogCard
                             key={entry.id}
                             manifest={entry}
-                            action={<InstallButton entryId={entry.id} installed={installed} />}
+                            action={
+                                <div className="flex flex-wrap items-start gap-2">
+                                    <InstallButton entryId={entry.id} installed={installed} />
+                                    {previewAvailable && <SamplePreview entryId={entry.id} />}
+                                </div>
+                            }
                             badge={
                                 installed ? (
                                     <span className="inline-flex items-center gap-1 rounded-md bg-success/10 dark:bg-success/20 px-2 py-1 text-xs font-medium text-success">

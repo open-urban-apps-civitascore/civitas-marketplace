@@ -67,6 +67,7 @@ export interface PackageMembers {
     mappings?: PackageMember[]
     dataSinks?: PackageMember[]
     pipelines?: PackageMember[]
+    simulations?: PackageMember[]
 }
 
 /**
@@ -158,6 +159,61 @@ export interface BundledPipeline {
     model: Record<string, unknown>
 }
 
+/**
+ * One field generator of a demo-data simulation. The vocabulary is the
+ * simulator's own (src/types.ts there) — the catalogue transports it verbatim
+ * rather than inventing a parallel one, so a bundled scenario can be sent to
+ * `PUT /simulations/:id` and `POST /sample` without translation.
+ */
+export type GeneratorSpec =
+    | { kind: 'constant'; value: unknown }
+    | { kind: 'now' }
+    | { kind: 'enum'; values: unknown[] }
+    | { kind: 'randomWalk'; min: number; max: number; step: number; start?: number; integer?: boolean }
+    | {
+          kind: 'dailyProfile'
+          min: number
+          max: number
+          peakHours: number[]
+          noise?: number
+          integer?: boolean
+      }
+
+/**
+ * One publisher the simulator would run for this use case — one MQTT stream on
+ * one topic, typically one measuring station. Field keys are dotted paths
+ * (`pm25.value`), exactly as the simulator expands them into nested objects.
+ */
+export interface SimulationStream {
+    /** Stream slug, unique within the simulation; part of the simulator id. */
+    name: string
+    fields: Record<string, GeneratorSpec>
+}
+
+/**
+ * A bundled demo-data scenario: which datasource it feeds, which class of the
+ * SOURCE structure its messages instantiate, and the streams themselves.
+ *
+ * `messageClass` is a JSON pointer into the source structure — `#` for a
+ * structure whose root is the message shape, `#/$defs/Messung` for a structure
+ * that keeps its classes in $defs. The assembly validates every field path
+ * against that class (required coverage + subset), so scenario and structure
+ * cannot drift apart silently.
+ *
+ * `topicBase` is a template, not a final topic: the install appends a
+ * per-installation nonce so two installs never share a topic. Broker URLs are
+ * deliberately NOT part of this document — they are instance-local values.
+ */
+export interface BundledSimulation {
+    /** Bundle-local handle of the datasource this scenario feeds (its title). */
+    sourceRef: string
+    /** JSON pointer to the message class inside the source structure. */
+    messageClass: string
+    topicBase: string
+    intervalSeconds?: number
+    streams: SimulationStream[]
+}
+
 export interface DataStructureEntry {
     manifest: CatalogManifest & { type: 'datastructure' }
     artifact: Record<string, unknown>
@@ -171,6 +227,7 @@ export interface UseCaseEntry {
         mappings: BundledMapping[]
         dataSinks: BundledDataSink[]
         pipelines: BundledPipeline[]
+        simulations: BundledSimulation[]
     }
 }
 

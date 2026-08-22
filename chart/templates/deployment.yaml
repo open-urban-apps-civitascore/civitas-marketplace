@@ -59,6 +59,10 @@ spec:
             - name: REPO_LIST_TTL_SECONDS
               value: {{ .Values.catalog.ttlSeconds | quote }}
             {{- end }}
+            {{- if .Values.simulator.apiUrl }}
+            - name: SIMULATOR_API_URL
+              value: {{ .Values.simulator.apiUrl | quote }}
+            {{- end }}
             {{- if .Values.nodeTlsRejectUnauthorized }}
             # Self-signed cluster CA — see values.yaml note.
             - name: NODE_TLS_REJECT_UNAUTHORIZED

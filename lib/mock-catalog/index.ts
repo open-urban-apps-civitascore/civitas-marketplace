@@ -9,6 +9,7 @@ import trafficSourceFeed from './traffic-counting/zaehlstellen-feed.datasource.j
 import trafficSinkTable from './traffic-counting/verkehrsmessung-tabelle.datasink.json'
 import trafficMapping from './traffic-counting/zaehlung-zu-messung.mapping.json'
 import trafficPipeline from './traffic-counting/zaehlung-zu-messung.pipeline.json'
+import trafficSimulation from './traffic-counting/zaehlstellen.simulation.json'
 import airStaManifest from './luftqualitaet-sta/manifest.json'
 import airStaStructure from './luftqualitaet-sta/luftmessung.datastructure.json'
 import airStaTargetStructure from './luftqualitaet-sta/sta-observation.datastructure.json'
@@ -16,6 +17,7 @@ import airStaSourceFeed from './luftqualitaet-sta/luftmessungs-feed.datasource.j
 import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.json'
 import airStaMapping from './luftqualitaet-sta/luftmessung-zu-observation.mapping.json'
 import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
+import airStaSimulation from './luftqualitaet-sta/luftmessung.simulation.json'
 
 /**
  * Local catalogue fixtures: verbatim copies of the artifact-repo content
@@ -49,6 +51,7 @@ export const mockPackages: MockPackage[] = [
             'zaehlung-zu-messung.mapping.json': trafficMapping,
             'verkehrsmessung-tabelle.datasink.json': trafficSinkTable,
             'zaehlung-zu-messung.pipeline.json': trafficPipeline,
+            'zaehlstellen.simulation.json': trafficSimulation,
         },
     },
     {
@@ -60,6 +63,7 @@ export const mockPackages: MockPackage[] = [
             'luftmessung-zu-observation.mapping.json': airStaMapping,
             'frost-observations.datasink.json': airStaSinkFrost,
             'luftqualitaets-import.pipeline.json': airStaPipeline,
+            'luftmessung.simulation.json': airStaSimulation,
         },
     },
 ]

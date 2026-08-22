@@ -3,7 +3,7 @@
   "type": "usecase",
   "displayName": "Luftqualität (SensorThings)",
   "description": "Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat, MQTT-Quelle, Mapping, Pipeline und FROST-Senke.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
   "keywords": [
@@ -38,6 +38,9 @@
     ],
     "pipelines": [
       { "file": "luftqualitaets-import.pipeline.json" }
+    ],
+    "simulations": [
+      { "file": "luftmessung.simulation.json" }
     ]
   },
   "dependencies": []

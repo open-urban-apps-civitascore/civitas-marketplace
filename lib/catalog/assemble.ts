@@ -1,8 +1,10 @@
 import type {
     BundledMapping,
     BundledPipeline,
+    BundledSimulation,
     CatalogEntry,
     DataStructureEntry,
+    GeneratorSpec,
     PackageManifest,
     PackageMember,
     UseCaseEntry,
@@ -83,7 +85,136 @@ export function parsePackageManifest(value: unknown, where: string): PackageMani
     parseMembers(members.mappings, `${where}: members.mappings`)
     parseMembers(members.dataSinks, `${where}: members.dataSinks`)
     parseMembers(members.pipelines, `${where}: members.pipelines`)
+    parseMembers(members.simulations, `${where}: members.simulations`)
     return value as unknown as PackageManifest
+}
+
+/** Generator kinds and their required numeric/array operands, mirroring the simulator's zod schema. */
+const GENERATOR_KINDS: Record<string, string[]> = {
+    constant: [],
+    now: [],
+    enum: ['values'],
+    randomWalk: ['min', 'max', 'step'],
+    dailyProfile: ['min', 'max', 'peakHours'],
+}
+
+/**
+ * Resolves one step into a JSON-Schema object: follows a local `$ref`
+ * (`#/$defs/...`) inside the structure document, then returns the schema node.
+ * Only bundle-internal refs are followed — a catalogue structure referencing a
+ * foreign URN is opaque here, and the walk stops with an error.
+ */
+function deref(node: Record<string, unknown>, root: Record<string, unknown>, where: string): Record<string, unknown> {
+    const ref = node.$ref
+    if (typeof ref !== 'string') return node
+    if (!ref.startsWith('#/')) {
+        throw new CatalogIntegrityError(`${where}: cannot follow external $ref '${ref}'`)
+    }
+    let target: unknown = root
+    for (const segment of ref.slice(2).split('/')) {
+        if (!isRecord(target) || !(segment in target)) {
+            throw new CatalogIntegrityError(`${where}: $ref '${ref}' does not resolve`)
+        }
+        target = target[segment]
+    }
+    if (!isRecord(target)) throw new CatalogIntegrityError(`${where}: $ref '${ref}' is not an object`)
+    return target
+}
+
+/**
+ * Validates a simulation against the SOURCE structure it claims to feed.
+ *
+ * The check is two-directional. Subset: every dotted field path must exist in
+ * the message class (with `$ref` resolution, so `pm25.value` walks through the
+ * Measurement def). Coverage: every `required` property of the message class —
+ * and of every nested object the paths step into — must be produced by at
+ * least one field. Subset alone would not catch a scenario that forgets the
+ * timestamp; coverage alone would not catch a typo'd field name.
+ */
+function validateSimulation(
+    simulation: BundledSimulation,
+    structureModel: Record<string, unknown>,
+    where: string,
+): void {
+    // Resolve the message class: '#' is the structure root, '#/$defs/X' a class.
+    const pointer = simulation.messageClass
+    if (typeof pointer !== 'string' || (pointer !== '#' && !pointer.startsWith('#/'))) {
+        throw new CatalogIntegrityError(`${where}: messageClass must be '#' or a '#/...' JSON pointer`)
+    }
+    const messageClass =
+        pointer === '#'
+            ? structureModel
+            : deref({ $ref: pointer }, structureModel, where)
+
+    // Walk one dotted path through the schema, resolving $refs at every step.
+    const resolvePath = (path: string): { covered: Set<string> } => {
+        const covered = new Set<string>()
+        let node = deref(messageClass, structureModel, where)
+        let walked = ''
+        for (const segment of path.split('.')) {
+            walked = walked ? `${walked}.${segment}` : segment
+            const properties = node.properties
+            if (!isRecord(properties) || !(segment in properties)) {
+                throw new CatalogIntegrityError(
+                    `${where}: field '${path}' — '${walked}' is not a property of ${simulation.messageClass}`,
+                )
+            }
+            covered.add(walked)
+            node = deref(properties[segment] as Record<string, unknown>, structureModel, `${where}: ${walked}`)
+        }
+        return { covered }
+    }
+
+    for (const stream of simulation.streams) {
+        const covered = new Set<string>()
+        for (const [path, spec] of Object.entries(stream.fields)) {
+            // Generator shape first — a wrong kind would only fail at the simulator.
+            const generator = spec as GeneratorSpec
+            const operands = GENERATOR_KINDS[generator.kind]
+            if (!operands) {
+                throw new CatalogIntegrityError(
+                    `${where}: stream '${stream.name}' field '${path}' has unknown generator kind '${String(generator.kind)}'`,
+                )
+            }
+            for (const operand of operands) {
+                if (!(operand in (generator as unknown as Record<string, unknown>))) {
+                    throw new CatalogIntegrityError(
+                        `${where}: stream '${stream.name}' field '${path}' (${generator.kind}) is missing '${operand}'`,
+                    )
+                }
+            }
+            for (const prefix of resolvePath(path).covered) covered.add(prefix)
+        }
+
+        // Required coverage, top-level and one level into every object a path
+        // steps into: producing pm25.value while omitting pm25.unit ships a
+        // message the structure itself declares invalid.
+        const requireCovered = (node: Record<string, unknown>, prefix: string) => {
+            const required = node.required
+            if (!Array.isArray(required)) return
+            for (const name of required) {
+                const full = prefix ? `${prefix}.${String(name)}` : String(name)
+                const isCovered = [...covered].some((c) => c === full || c.startsWith(`${full}.`))
+                if (!isCovered) {
+                    throw new CatalogIntegrityError(
+                        `${where}: stream '${stream.name}' does not produce required field '${full}' of ${simulation.messageClass}`,
+                    )
+                }
+            }
+        }
+        requireCovered(deref(messageClass, structureModel, where), '')
+        // For every covered object one level deep, check its own requireds.
+        const parents = new Set([...covered].filter((c) => !c.includes('.')))
+        for (const parent of parents) {
+            const classNode = deref(messageClass, structureModel, where)
+            const properties = classNode.properties
+            if (!isRecord(properties) || !isRecord(properties[parent])) continue
+            const child = deref(properties[parent] as Record<string, unknown>, structureModel, where)
+            if (isRecord(child.properties) && [...covered].some((c) => c.startsWith(`${parent}.`))) {
+                requireCovered(child, parent)
+            }
+        }
+    }
 }
 
 /** Reader for one member file; the two sources differ only in this function. */
@@ -170,7 +301,45 @@ export function assembleCatalogEntry(
             }
             return pipeline as unknown as BundledPipeline
         }),
+        simulations: [],
     }
+
+    // Simulations resolve against the datasources and structures above, so they
+    // are assembled after the rest of the bundle exists.
+    bundle.simulations = (manifest.members.simulations ?? []).map((member) => {
+            const where = `${manifest.id}: simulation '${member.file}'`
+            const document = read(member)
+            requireString(document, 'sourceRef', where)
+            requireString(document, 'messageClass', where)
+            requireString(document, 'topicBase', where)
+            if (!Array.isArray(document.streams) || document.streams.length === 0) {
+                throw new CatalogIntegrityError(`${where} needs a non-empty streams array`)
+            }
+            const simulation = document as unknown as BundledSimulation
+
+            // The scenario feeds a bundled datasource; resolve it by its title
+            // (the bundle-local handle), then the SOURCE structure by the URN
+            // the datasource's `element` names — the same resolution the
+            // platform performs at install time.
+            const source = bundle.dataSources.find(
+                (candidate) => candidate.document.title === simulation.sourceRef,
+            )
+            if (!source) {
+                throw new CatalogIntegrityError(
+                    `${where}: sourceRef '${simulation.sourceRef}' matches no bundled datasource title`,
+                )
+            }
+            const structure = bundle.dataStructures.find(
+                (candidate) => candidate.model.$id === source.document.element,
+            )
+            if (!structure) {
+                throw new CatalogIntegrityError(
+                    `${where}: datasource '${simulation.sourceRef}' names structure '${String(source.document.element)}', which is not bundled`,
+                )
+            }
+            validateSimulation(simulation, structure.model, where)
+            return simulation
+        })
 
     return { manifest: manifest as UseCaseEntry['manifest'], bundle }
 }

@@ -49,6 +49,10 @@ catalog:
   # Seconds a fetched index is served before re-fetching; empty = default (900).
   ttlSeconds: ""
 
+# Demo-data simulator API (in-cluster). Empty = simulator-backed UI is hidden.
+simulator:
+  apiUrl: ""
+
 # NextAuth session-cookie encryption secret.
 nextauthSecret:
   secretName: marketplace-nextauth-secret
