@@ -11,7 +11,7 @@
       "$.observedAt": {
         "op": "toDate",
         "input": "$.timestamp",
-        "pattern": "yyyy-MM-dd'T'HH:mm:ssXXX"
+        "pattern": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
       },
       "$.vehicleCount": { "op": "toInt", "input": "$.vehicleCount" },
       "$.avgSpeedKmh": { "op": "toFloat", "input": "$.avgSpeedKmh" },

@@ -2,8 +2,8 @@
   "id": "urn:openurbanapps:usecase:verkehrszaehlung",
   "type": "usecase",
   "displayName": "Verkehrszählung",
-  "description": "Kompletter Use Case: Geräteformat der Zählstellen, normalisiertes Zielformat, Datenquelle für den Sensor-Feed, das Mapping zwischen den beiden Strukturen sowie Pipeline und PostGIS-Senke — nach dem Release fließen Daten.",
-  "version": "1.2.0",
+  "description": "Zählstellen-Rohformat, normalisiertes Zielformat, MQTT-Quelle, Mapping, Pipeline und PostGIS-Senke.",
+  "version": "1.3.0",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
   "keywords": [

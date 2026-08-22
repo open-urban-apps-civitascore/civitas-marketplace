@@ -2,8 +2,8 @@
   "id": "urn:openurbanapps:usecase:luftqualitaet-sta",
   "type": "usecase",
   "displayName": "Luftqualität (SensorThings)",
-  "description": "Kompletter Use Case: Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat (STA-Observation), MQTT-Datenquelle, das Mapping zwischen beiden Strukturen sowie Pipeline und FROST-Senke — abgestimmt auf günstige Stationshardware mit Feinstaub- und Klimasensor.",
-  "version": "1.0.0",
+  "description": "Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat, MQTT-Quelle, Mapping, Pipeline und FROST-Senke.",
+  "version": "1.0.1",
   "maintainer": "Open Urban Apps",
   "license": "EUPL-1.2",
   "keywords": [
