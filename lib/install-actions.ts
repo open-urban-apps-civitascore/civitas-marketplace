@@ -21,6 +21,8 @@ interface DataSetImportSummary {
     dataStructures?: { name: string; urn: string; action: string }[]
     dataSources?: { name: string }[]
     mappings?: { name: string; urn: string; action: string }[]
+    dataSinks?: { name: string; urn: string; action: string }[]
+    pipelines?: { name: string; urn: string; action: string }[]
 }
 
 /**
@@ -87,6 +89,12 @@ export async function installEntry(
         const sources = body.dataSources?.length ?? 0
         const mappings = (body.mappings ?? []).map((m) => `${m.name} (${m.action})`).join(', ')
         const mappingSegment = mappings ? ` · Mappings: ${mappings}` : ''
+        // A use-case bundle installs five member kinds; a summary that reports three reads as
+        // full success while staying silent about the two that decide whether a release can
+        // deploy anything. Both are counted, and an absent kind says so rather than vanishing.
+        const sinks = body.dataSinks?.length ?? 0
+        const pipelines = body.pipelines?.length ?? 0
+        const flowSegment = ` · ${sinks} Senke(n) · ${pipelines} Pipeline(s)`
         const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
         // The catalogue badge and the provenance list both read from the install
         // record that just came into existence.
@@ -94,7 +102,7 @@ export async function installEntry(
         revalidatePath('/installed')
         return {
             status: 'created',
-            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${installation}`,
+            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${flowSegment}${installation}`,
             httpStatus: 201,
         }
     }
