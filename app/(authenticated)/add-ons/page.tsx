@@ -18,6 +18,8 @@ export default async function AddonsPage() {
     await requireSession()
 
     const [{ addons, skipped }, meta] = await Promise.all([listAddons(), getCatalogMeta()])
+    const curated = addons.filter((entry) => entry.missingForInstall.length === 0)
+    const ecosystem = addons.filter((entry) => entry.missingForInstall.length > 0)
     const config = deploymentRepoConfig()
     const readinessHint = READINESS_HINT[forgeReadiness(config)]
 
@@ -53,13 +55,47 @@ export default async function AddonsPage() {
                 </section>
             )}
 
-            {addons.length > 0 ? (
-                <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                    {addons.map((entry) => (
-                        <AddonListingCard key={entry.listing.id} entry={entry} />
-                    ))}
-                </div>
-            ) : (
+            {curated.length > 0 && (
+                <section className="flex flex-col gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-foreground">
+                            Für CIVITAS/CORE v2 kuratiert
+                        </h2>
+                        <p className="text-sm text-muted-foreground">
+                            Geprüft, auf eine feste Version festgelegt und über den Marktplatz
+                            vorschlagbar.
+                        </p>
+                    </div>
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                        {curated.map((entry) => (
+                            <AddonListingCard key={entry.listing.id} entry={entry} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {ecosystem.length > 0 && (
+                <section className="flex flex-col gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-foreground">
+                            Weitere Add-ons im Ökosystem
+                        </h2>
+                        <p className="max-w-3xl text-sm text-muted-foreground">
+                            Diese Add-ons gibt es bereits, sie sind aber noch nicht für v2
+                            paketiert: es fehlen die Angaben, die eine Installation über den
+                            Marktplatz möglich machen. Sie stehen hier, damit sichtbar ist, was
+                            der Katalog als Nächstes aufnehmen kann.
+                        </p>
+                    </div>
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                        {ecosystem.map((entry) => (
+                            <AddonListingCard key={entry.listing.id} entry={entry} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {addons.length === 0 && (
                 <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
                     Keine Add-ons verfügbar.
                 </div>
