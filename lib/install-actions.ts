@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
+import { clampDescription, versionProvenance } from '@/lib/install-payload'
 import { getAccessToken } from '@/lib/session'
 
 export interface InstallResult {
@@ -63,8 +64,13 @@ export async function installEntry(
     if (isDataStructureEntry(entry)) {
         const res = await postImport('/v1/imports/datastructures', {
             name: entry.manifest.displayName,
-            description: entry.manifest.description,
+            description: clampDescription(entry.manifest.description),
             model: entry.artifact,
+            modelName: entry.manifest.displayName,
+            versionDescription: versionProvenance(
+                entry.manifest.displayName,
+                entry.manifest.version,
+            ),
             // Same catalogue identity the bundle path sends, so this install shows up in the
             // provenance too instead of being invisible under "Installiert".
             catalogEntryId: entry.manifest.id,
@@ -131,15 +137,22 @@ function connectorConfiguration(
 function buildUseCaseBundleBody(entry: UseCaseEntry) {
     return {
         name: entry.manifest.displayName,
-        description: entry.manifest.description,
+        description: clampDescription(entry.manifest.description),
         // Bundle identity for the backend's install provenance — recorded
         // verbatim in the installation header, never interpreted.
         catalogEntryId: entry.manifest.id,
         catalogEntryVersion: entry.manifest.version,
         dataStructures: entry.bundle.dataStructures.map((structure) => ({
             name: structure.name,
-            description: structure.description,
+            description: clampDescription(structure.description),
             model: structure.model,
+            // The modeller titles its canvas from this; unset it reads as "Untitled Diagram",
+            // which looks like the structure lost its name rather than its layout.
+            modelName: structure.name,
+            versionDescription: versionProvenance(
+                entry.manifest.displayName,
+                entry.manifest.version,
+            ),
         })),
         // Sources and sinks are authored as CORE-IR connector documents; the
         // wire API predates that form and wants name/type/configuration with
@@ -148,7 +161,7 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
         // this function changes, not the catalogue.
         dataSources: entry.bundle.dataSources.map((source) => ({
             name: source.document.title,
-            description: source.document.description,
+            description: clampDescription(source.document.description),
             // The source contract wants the structure reference OUTSIDE the
             // configuration ('mqtt' → 'MQTT', 'sql' → 'SQL')…
             dataStructureUrn: source.document.element,
@@ -157,7 +170,7 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
         })),
         mappings: entry.bundle.mappings.map((mapping) => ({
             name: mapping.name,
-            description: mapping.description,
+            description: clampDescription(mapping.description),
             mappingUrn: mapping.mappingUrn,
             document: mapping.document,
         })),
@@ -169,7 +182,7 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
         })),
         pipelines: entry.bundle.pipelines.map((pipeline) => ({
             name: pipeline.name,
-            description: pipeline.description,
+            description: clampDescription(pipeline.description),
             model: pipeline.model,
         })),
     }
