@@ -1,6 +1,6 @@
 {
   "name": "Luftqualitäts-Import",
-  "description": "Liest den Luftmessungs-Feed, normalisiert die PM2,5-Messung mit dem Mapping zur SensorThings-Observation und schreibt sie in den FROST-Speicher.",
+  "description": "Liest den Luftmessungs-Feed, übersetzt die PM2,5-Messung mit dem Mapping in den SensorThings-Baum (Station → Messreihe → Beobachtung) und schreibt ihn in den FROST-Speicher.",
   "model": {
     "nodes": [
       {
@@ -19,8 +19,8 @@
       {
         "id": "n-mapping",
         "kind": "mapping",
-        "label": "Luftmessung → Observation",
-        "mappingRef": "Luftmessung → Observation",
+        "label": "Luftmessung → Luftstation",
+        "mappingRef": "Luftmessung → Luftstation",
         "x-ui-position": { "x": 260, "y": 120 }
       },
       {

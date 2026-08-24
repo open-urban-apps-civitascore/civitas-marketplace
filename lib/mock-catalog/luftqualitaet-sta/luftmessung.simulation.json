@@ -1,6 +1,6 @@
 {
   "sourceRef": "Luftmessungs-Feed",
-  "messageClass": "#",
+  "messageClass": "#/$defs/Luftmessung",
   "topicBase": "openurbanapps/luftqualitaet",
   "intervalSeconds": 10,
   "streams": [

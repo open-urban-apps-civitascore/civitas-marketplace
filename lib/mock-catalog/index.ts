@@ -12,10 +12,10 @@ import trafficPipeline from './traffic-counting/zaehlung-zu-messung.pipeline.jso
 import trafficSimulation from './traffic-counting/zaehlstellen.simulation.json'
 import airStaManifest from './luftqualitaet-sta/manifest.json'
 import airStaStructure from './luftqualitaet-sta/luftmessung.datastructure.json'
-import airStaTargetStructure from './luftqualitaet-sta/sta-observation.datastructure.json'
+import airStaTargetStructure from './luftqualitaet-sta/luftstation.datastructure.json'
 import airStaSourceFeed from './luftqualitaet-sta/luftmessungs-feed.datasource.json'
 import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.json'
-import airStaMapping from './luftqualitaet-sta/luftmessung-zu-observation.mapping.json'
+import airStaMapping from './luftqualitaet-sta/luftmessung-zu-station.mapping.json'
 import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
 import airStaSimulation from './luftqualitaet-sta/luftmessung.simulation.json'
 
@@ -58,9 +58,9 @@ export const mockPackages: MockPackage[] = [
         manifest: airStaManifest as unknown as PackageManifest,
         files: {
             'luftmessung.datastructure.json': airStaStructure,
-            'sta-observation.datastructure.json': airStaTargetStructure,
+            'luftstation.datastructure.json': airStaTargetStructure,
             'luftmessungs-feed.datasource.json': airStaSourceFeed,
-            'luftmessung-zu-observation.mapping.json': airStaMapping,
+            'luftmessung-zu-station.mapping.json': airStaMapping,
             'frost-observations.datasink.json': airStaSinkFrost,
             'luftqualitaets-import.pipeline.json': airStaPipeline,
             'luftmessung.simulation.json': airStaSimulation,
