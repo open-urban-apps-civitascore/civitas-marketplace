@@ -123,10 +123,51 @@ export async function deleteSimulation(id: string): Promise<void> {
  * a recomputation would miss.
  */
 export async function listSimulationIds(): Promise<string[]> {
+    return (await listSimulations()).map((simulation) => simulation.id)
+}
+
+/**
+ * The simulator's live record per publisher (its registry `SimulationStatus`).
+ * `lastPayload` is the last message actually handed to the broker — not a
+ * preview — which is what makes the installed-page panel honest: it shows
+ * published traffic, not what a scenario would hypothetically render.
+ */
+export interface SimulationStatus {
+    id: string
+    enabled: boolean
+    topic: string
+    url: string
+    intervalSeconds: number
+    createdAt: string
+    publishedCount: number
+    lastPublishedAt: string | null
+    lastPayload: Record<string, unknown> | null
+    lastError: string | null
+}
+
+/** Every registered simulation with its live publish state. */
+export async function listSimulations(): Promise<SimulationStatus[]> {
     const response = await simulatorRequest('/simulations', { method: 'GET' })
     if (!response.ok) throw await rejectionOf(response)
-    const body = (await response.json()) as { simulations?: { id?: unknown }[] }
-    return (body.simulations ?? [])
-        .map((simulation) => simulation.id)
-        .filter((id): id is string => typeof id === 'string')
+    const body = (await response.json()) as { simulations?: unknown[] }
+    return (body.simulations ?? []).filter(
+        (simulation): simulation is SimulationStatus =>
+            typeof simulation === 'object' &&
+            simulation !== null &&
+            typeof (simulation as { id?: unknown }).id === 'string',
+    )
+}
+
+/**
+ * Pauses or resumes one publisher and returns its refreshed state. The
+ * registration survives a switch-off — only publishing stops — so the panel's
+ * toggle is freely reversible, unlike DELETE.
+ */
+export async function switchSimulation(id: string, on: boolean): Promise<SimulationStatus> {
+    const response = await simulatorRequest(
+        `/simulations/${encodeURIComponent(id)}/${on ? 'switch_on' : 'switch_off'}`,
+        { method: 'POST' },
+    )
+    if (!response.ok) throw await rejectionOf(response)
+    return (await response.json()) as SimulationStatus
 }

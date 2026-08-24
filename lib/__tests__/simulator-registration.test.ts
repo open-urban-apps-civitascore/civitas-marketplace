@@ -4,7 +4,8 @@ import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import type { UseCaseEntry } from '@/lib/catalog/types'
 import { applyDeclaredUrlOverride } from '@/lib/install-payload'
 import { mockPackages } from '@/lib/mock-catalog'
-import { planSimulations, simulationIdPrefix } from '@/lib/simulator/registration'
+import { planSimulations, simulationIdPrefix, streamsOfInstallation } from '@/lib/simulator/registration'
+import type { SimulationStatus } from '@/lib/simulator/client'
 
 const INSTALLATION_ID = 'a1b2c3d4-0000-4000-8000-000000000000'
 
@@ -100,6 +101,37 @@ describe('planSimulations', () => {
                 }
             }
         }
+    })
+})
+
+describe('streamsOfInstallation', () => {
+    const status = (id: string): SimulationStatus => ({
+        id,
+        enabled: true,
+        topic: 'openurbanapps/x',
+        url: 'tcp://broker:1883',
+        intervalSeconds: 10,
+        createdAt: '2026-08-23T20:00:00Z',
+        publishedCount: 0,
+        lastPublishedAt: null,
+        lastPayload: null,
+        lastError: null,
+    })
+
+    it('claims exactly the prefix-matching streams, sorted, with the prefix stripped', () => {
+        const rows = streamsOfInstallation(
+            [status('inst-1--zaehler'), status('inst-2--fremd'), status('inst-1--ampel')],
+            'inst-1',
+        )
+        expect(rows.map((row) => row.streamName)).toEqual(['ampel', 'zaehler'])
+        expect(rows.map((row) => row.status.id)).toEqual(['inst-1--ampel', 'inst-1--zaehler'])
+    })
+
+    it('never claims another installation whose id merely starts with this one', () => {
+        // 'inst-1' vs 'inst-10': a substring match would leak streams across
+        // installations — the '--' in the prefix is what prevents it.
+        const rows = streamsOfInstallation([status('inst-10--stream')], 'inst-1')
+        expect(rows).toEqual([])
     })
 })
 

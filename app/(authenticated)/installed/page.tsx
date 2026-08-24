@@ -1,5 +1,8 @@
+import { SimulatorPanel } from '@/components/installed/simulator-panel'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import { getAccessToken, requireSession } from '@/lib/session'
+import { isSimulatorConfigured, listSimulations, type SimulationStatus } from '@/lib/simulator/client'
+import { streamsOfInstallation } from '@/lib/simulator/registration'
 
 interface InstalledArtifactRow {
     artifactType:
@@ -49,6 +52,19 @@ const dateFormat = new Intl.DateTimeFormat('de-DE', {
     timeZone: 'Europe/Berlin',
 })
 
+/** The installation's simulator panel — or nothing, when no streams are registered for it. */
+function InstallationSimulator({
+    simulations,
+    installationId,
+}: {
+    simulations: SimulationStatus[]
+    installationId: string
+}) {
+    const streams = streamsOfInstallation(simulations, installationId)
+    if (streams.length === 0) return null
+    return <SimulatorPanel installationId={installationId} initialStreams={streams} />
+}
+
 /**
  * True marketplace installs — the backend's install provenance
  * (GET /v1/installations): which catalogue entry, when, by whom, and what each
@@ -83,6 +99,14 @@ export default async function InstalledPage() {
 
     const page = (await res.json()) as { content?: InstallationRow[]; totalElements?: number }
     const installations = page.content ?? []
+
+    // One registry snapshot serves every panel; the panels poll on their own
+    // while open. An unreachable simulator degrades to no panels at all — the
+    // same demo-day-safe default as the unset SIMULATOR_API_URL.
+    let simulations: SimulationStatus[] = []
+    if (isSimulatorConfigured()) {
+        simulations = await listSimulations().catch(() => [])
+    }
 
     return (
         <div className="flex flex-col gap-6">
@@ -141,6 +165,13 @@ export default async function InstalledPage() {
                                 )}
                             </div>
                         </div>
+
+                        {!installation.uninstalledAt && (
+                            <InstallationSimulator
+                                simulations={simulations}
+                                installationId={installation.id}
+                            />
+                        )}
 
                         <table className="w-full text-sm">
                             <thead className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">

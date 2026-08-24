@@ -1,5 +1,5 @@
 import type { BundledDataSource, UseCaseEntry } from '@/lib/catalog/types'
-import type { SimulationInput } from '@/lib/simulator/client'
+import type { SimulationInput, SimulationStatus } from '@/lib/simulator/client'
 
 /**
  * Pure planning for stage B: which simulator registrations does an install of
@@ -102,4 +102,29 @@ function firstUrlOf(source: BundledDataSource | undefined): string | undefined {
     if (!Array.isArray(urls)) return undefined
     const first = urls[0]
     return typeof first === 'string' && first.trim() ? first : undefined
+}
+
+/** One installation's stream, with the display name the id prefix hides. */
+export interface InstallationStream {
+    /** The stream name as authored in the package — the id minus the prefix. */
+    streamName: string
+    status: SimulationStatus
+}
+
+/**
+ * The read-side counterpart of {@link planSimulations}: which of the
+ * simulator's registrations belong to this installation? Matching by the id
+ * prefix (never by substring — `abc` must not claim `abc2--…`) keeps this in
+ * step with the uninstall sweep: whatever the sweep would delete, the panel
+ * shows, including streams a since-changed package version no longer names.
+ */
+export function streamsOfInstallation(
+    all: SimulationStatus[],
+    installationId: string,
+): InstallationStream[] {
+    const prefix = simulationIdPrefix(installationId)
+    return all
+        .filter((status) => status.id.startsWith(prefix))
+        .map((status) => ({ streamName: status.id.slice(prefix.length), status }))
+        .sort((a, b) => a.streamName.localeCompare(b.streamName))
 }

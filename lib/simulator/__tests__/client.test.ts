@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchSample, isSimulatorConfigured, SimulatorError } from '@/lib/simulator/client'
+import {
+    fetchSample,
+    isSimulatorConfigured,
+    listSimulations,
+    SimulatorError,
+    switchSimulation,
+} from '@/lib/simulator/client'
 import { mockPackages } from '@/lib/mock-catalog'
 import type { BundledSimulation } from '@/lib/catalog/types'
 
@@ -62,5 +68,47 @@ describe('simulator client', () => {
     it('reports an unreachable simulator as a SimulatorError, not a crash', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
         await expect(fetchSample({ fields: {} })).rejects.toBeInstanceOf(SimulatorError)
+    })
+
+    it('lists full simulation statuses and drops malformed registry rows', async () => {
+        const status = {
+            id: 'inst--stream',
+            enabled: true,
+            topic: 'openurbanapps/x',
+            url: 'tcp://broker:1883',
+            intervalSeconds: 10,
+            createdAt: '2026-08-23T20:00:00Z',
+            publishedCount: 7,
+            lastPublishedAt: '2026-08-23T20:01:10Z',
+            lastPayload: { value: 1 },
+            lastError: null,
+        }
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(jsonResponse({ simulations: [status, { broken: true }] })),
+        )
+        expect(await listSimulations()).toEqual([status])
+    })
+
+    it('switches a stream via switch_on/switch_off and returns the refreshed state', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(jsonResponse({ id: 'inst--stream', enabled: false }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const refreshed = await switchSimulation('inst--stream', false)
+
+        expect(refreshed.enabled).toBe(false)
+        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(url).toBe('http://sim.example:4300/simulations/inst--stream/switch_off')
+        expect(init.method).toBe('POST')
+    })
+
+    it('surfaces a switch failure as a SimulatorError with the server detail', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(jsonResponse({ error: 'No such simulation.' }, 404)),
+        )
+        await expect(switchSimulation('missing', true)).rejects.toThrow('No such simulation.')
     })
 })
