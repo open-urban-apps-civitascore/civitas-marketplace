@@ -1,118 +1,103 @@
-import { ExternalLink, Info, Puzzle } from 'lucide-react'
-
+import { AddonListingCard } from '@/components/catalog/addon-listing-card'
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
-import { getAddons, getCatalogMeta } from '@/lib/catalog/source'
+import { Code } from '@/components/catalog/code'
+import { listAddons } from '@/lib/addon-catalog'
+import { getCatalogMeta } from '@/lib/catalog/source'
+import { deploymentRepoConfig, forgeReadiness, type ForgeReadiness } from '@/lib/deployment-repo/config'
 import { requireSession } from '@/lib/session'
 
-/**
- * Infrastructure add-ons (NodeRed, Airflow, …) — a separate top-level
- * catalogue section next to use cases, NOT bundle members. They are listed
- * here for discovery, but deliberately WITHOUT an install button: add-ons are
- * deployed operator-side via GitOps (their deploymentRef points at the addon
- * repo), and the platform offers no API this marketplace could honestly call.
- */
+const READINESS_HINT: Record<ForgeReadiness, string | null> = {
+    ready: null,
+    'missing-repo':
+        'Für diese Instanz ist kein Deployment-Repository hinterlegt (DEPLOYMENT_REPO). Vorschläge lassen sich trotzdem erzeugen und einsehen – sie können dann manuell übernommen werden.',
+    'missing-token':
+        'Es fehlt nur noch der Zugang (DEPLOYMENT_REPO_TOKEN) – bis dahin wird die Änderung erzeugt und angezeigt, aber kein Pull Request geöffnet.',
+}
+
 export default async function AddonsPage() {
     await requireSession()
-    const addons = await getAddons()
-    const meta = await getCatalogMeta()
+
+    const [{ addons, skipped }, meta] = await Promise.all([listAddons(), getCatalogMeta()])
+    const curated = addons.filter((entry) => entry.missingForInstall.length === 0)
+    const ecosystem = addons.filter((entry) => entry.missingForInstall.length > 0)
+    const config = deploymentRepoConfig()
+    const readinessHint = READINESS_HINT[forgeReadiness(config)]
 
     return (
         <div className="flex flex-col gap-6">
             <div>
                 <h1>Add-ons</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    Infrastruktur-Bausteine für die Plattform — kuratiert im Katalog, installiert
-                    vom Betreiber der Instanz.
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                    Eigenständige Anwendungen, die zu Ihrer Instanz gehören. Der Marktplatz kann sie
+                    nicht selbst installieren – er bereitet die nötige Änderung vor, freigegeben und
+                    ausgerollt wird sie vom Betrieb.
                 </p>
                 <div className="mt-2">
                     <CatalogFreshness meta={meta} />
                 </div>
             </div>
 
-            <div className="flex items-start gap-2.5 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-                <Info className="mt-0.5 size-4 shrink-0" />
-                <p>
-                    Add-ons werden nicht über den Marketplace installiert, sondern
-                    betreiberseitig per GitOps in das Deployment der Instanz aufgenommen. Die
-                    Einträge hier verweisen auf das jeweilige Add-on-Repository.
-                </p>
-            </div>
+            {(readinessHint || skipped > 0 || config.repo) && (
+                <section className="flex flex-col gap-1.5 rounded-lg border bg-card p-4 text-sm text-muted-foreground">
+                    {config.repo && (
+                        <p>
+                            Ziel für Vorschläge: <Code>{config.repo}</Code> auf Branch{' '}
+                            <Code>{config.baseBranch}</Code>, Umgebung <Code>{config.environment}</Code>.
+                        </p>
+                    )}
+                    {readinessHint && <p>{readinessHint}</p>}
+                    {skipped > 0 && (
+                        <p>
+                            {skipped} {skipped === 1 ? 'Eintrag' : 'Einträge'} aus dem Katalog konnten
+                            nicht gelesen werden und fehlen in der Liste.
+                        </p>
+                    )}
+                </section>
+            )}
 
-            {addons.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                    {meta.origin === 'mock'
-                        ? 'Der lokale Demo-Katalog enthält keine Add-ons — sie kommen aus dem Katalog-Repo (REPO_LIST_URL).'
-                        : 'Der Katalog enthält derzeit keine Add-ons.'}
-                </p>
-            ) : (
-                <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                    {addons.map((addon) => (
-                        <article
-                            key={addon.id}
-                            className="flex h-full flex-col overflow-hidden rounded-xl border bg-card transition-[box-shadow,border-color] hover:border-ring hover:shadow-md"
-                        >
-                            <div className="relative flex h-24 items-center justify-center bg-gradient-to-br from-primary/10 to-primary/5 dark:from-primary/20 dark:to-primary/10">
-                                <Puzzle className="size-9 text-primary/70" />
-                                <span className="absolute left-3 top-3 inline-flex items-center rounded-md border bg-card px-2.5 py-1 text-xs font-medium text-primary shadow-sm">
-                                    Add-on
-                                </span>
-                            </div>
+            {curated.length > 0 && (
+                <section className="flex flex-col gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-foreground">
+                            Für CIVITAS/CORE v2 kuratiert
+                        </h2>
+                        <p className="text-sm text-muted-foreground">
+                            Geprüft, auf eine feste Version festgelegt und über den Marktplatz
+                            vorschlagbar.
+                        </p>
+                    </div>
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                        {curated.map((entry) => (
+                            <AddonListingCard key={entry.listing.id} entry={entry} />
+                        ))}
+                    </div>
+                </section>
+            )}
 
-                            <div className="flex flex-1 flex-col p-5">
-                                <h3 className="text-lg font-semibold leading-tight text-foreground">
-                                    {addon.name}
-                                </h3>
-                                <p className="mt-1.5 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-                                    {addon.description}
-                                </p>
+            {ecosystem.length > 0 && (
+                <section className="flex flex-col gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-foreground">
+                            Weitere Add-ons im Ökosystem
+                        </h2>
+                        <p className="max-w-3xl text-sm text-muted-foreground">
+                            Diese Add-ons gibt es bereits, sie sind aber noch nicht für v2
+                            paketiert: es fehlen die Angaben, die eine Installation über den
+                            Marktplatz möglich machen. Sie stehen hier, damit sichtbar ist, was
+                            der Katalog als Nächstes aufnehmen kann.
+                        </p>
+                    </div>
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                        {ecosystem.map((entry) => (
+                            <AddonListingCard key={entry.listing.id} entry={entry} />
+                        ))}
+                    </div>
+                </section>
+            )}
 
-                                {addon.categories.length > 0 && (
-                                    <div className="mt-3 flex flex-wrap gap-1.5">
-                                        {addon.categories.map((category) => (
-                                            <span
-                                                key={category}
-                                                className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                                            >
-                                                {category}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4">
-                                    <span className="truncate text-sm text-muted-foreground">
-                                        {addon.author}
-                                        {addon.compatibility.length > 0 &&
-                                            ` · CORE ${addon.compatibility
-                                                .map((entry) => entry.coreVersion)
-                                                .join(', ')}`}
-                                    </span>
-                                    {addon.licenses?.tool && (
-                                        <span
-                                            className="max-w-28 shrink-0 truncate text-xs text-muted-foreground"
-                                            title={addon.licenses.tool}
-                                        >
-                                            {addon.licenses.tool}
-                                        </span>
-                                    )}
-                                </div>
-
-                                {addon.repository && (
-                                    <div className="mt-4">
-                                        <a
-                                            href={addon.repository}
-                                            target="_blank"
-                                            rel="noreferrer noopener"
-                                            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
-                                        >
-                                            <ExternalLink className="size-3.5" />
-                                            Add-on-Repository
-                                        </a>
-                                    </div>
-                                )}
-                            </div>
-                        </article>
-                    ))}
+            {addons.length === 0 && (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                    Keine Add-ons verfügbar.
                 </div>
             )}
         </div>

@@ -52,10 +52,37 @@ browser ──▶ marketplace ──▶ APISIX :9080 ──▶ portal-backend :8
 | `auth.ts` / `auth.config.ts` | NextAuth setup: Keycloak provider, session-cookie callbacks, federated sign-out |
 | `lib/session.ts` | `requireSession()` guard and `getAccessToken()` for server-side backend calls |
 | `lib/tokenUtils.ts` | Access-token refresh against Keycloak |
+| `lib/addon-catalog/` | Add-on rows from the repo-list: normalisation and installability (`listing.ts`), package fetching (`package-source.ts`), package facts for the detail page (`package-facts.ts`) |
+| `lib/deployment-repo/` | Composing an add-on install as a deployment-repo change and opening it as a pull request |
 | `app/(authenticated)/` | Route group for signed-in pages: shared shell plus sign-out |
 | `app/login/` | Sign-in page, deliberately outside that group |
 
-### Where auth checks belong
+## Add-ons
+
+Add-ons come from the **same repo-list** as use cases and data structures — one
+catalogue, one fetch, one freshness state. Their rows carry the catalogue's
+usual fields plus what an install needs: a pinned `ref` on the
+`deploymentRef`, an `install` block (component name + subdomain) and a
+`curation` verdict.
+
+Listing and installability are separate questions. A row without those extra
+fields is still listed, and its detail page names precisely what is missing —
+which is the case for every v1-era entry today. Only a complete row offers
+"Installation vorschlagen", which then
+
+1. fetches the package from the add-on's own repository at the pinned ref
+   (binary files stay binary - see `lib/package-file.ts`),
+2. composes the change: the package under
+   `deployment/addons/<componentName>/` plus one line in the environment's
+   `components:` list,
+3. opens a pull request against the deployment repository. Nothing merges -
+   that stays with the operator.
+
+The detail page additionally reads the add-on's own package at that ref to show
+what it really brings: Keycloak roles, container images, Helm charts, parts
+(`lib/addon-catalog/package-facts.ts`).
+
+## Where auth checks belong
 
 Every protected page calls `requireSession()` itself. The `(authenticated)` layout
 also checks, but only so the shell is not rendered for signed-out visitors - it

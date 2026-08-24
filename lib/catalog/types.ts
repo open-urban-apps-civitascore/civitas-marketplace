@@ -276,7 +276,36 @@ export interface AddonEntry {
     licenses?: { addon?: string; tool?: string }
     compatibility: { coreVersion: string; branch?: string; lastUpdated?: string }[]
     requiredCapabilities?: string[]
-    deploymentRef: { type: string; url: string; chartName?: string; path?: string }
+    /**
+     * `ref`/`refType` pin the package to an immutable version; `resolvedCommit`
+     * records what that tag pointed at when it was curated, so a moved tag can
+     * be detected. Absent on rows that are listable but not installable.
+     */
+    deploymentRef: {
+        type: string
+        url: string
+        chartName?: string
+        path?: string
+        ref?: string
+        refType?: 'tag' | 'commit'
+        resolvedCommit?: string
+    }
+    /** Longer text; `description` stays the one-sentence summary a card shows. */
+    details?: string
+    documentation?: string
+    wrappedTool?: { name: string; homepage?: string }
+    /**
+     * Present together with `deploymentRef.ref` and `curation` on an entry the
+     * marketplace may propose for installation — see lib/addon-catalog.
+     */
+    install?: { componentName: string; subdomain: string }
+    curation?: {
+        tier: 'experimental' | 'community' | 'verified'
+        reviewedBy: string
+        reviewedAt: string
+        notes?: string
+    }
+    deprecated?: { reason: string; successorId?: string }
     revoked?: boolean
     revokedReason?: string
 }
