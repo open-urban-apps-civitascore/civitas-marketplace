@@ -52,6 +52,10 @@ catalog:
 # Demo-data simulator API (in-cluster). Empty = simulator-backed UI is hidden.
 simulator:
   apiUrl: ""
+  # Broker the simulator publishes to, overriding the package's datasource URL.
+  # Empty = the package value is used as-is (correct when simulator and broker
+  # share the cluster network).
+  brokerUrl: ""
 
 # NextAuth session-cookie encryption secret.
 nextauthSecret:

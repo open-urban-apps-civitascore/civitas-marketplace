@@ -5,8 +5,15 @@ import { revalidatePath } from 'next/cache'
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
-import { clampDescription, versionProvenance } from '@/lib/install-payload'
+import { applyDeclaredUrlOverride, clampDescription, versionProvenance } from '@/lib/install-payload'
 import { getAccessToken } from '@/lib/session'
+import {
+    deleteSimulation,
+    isSimulatorConfigured,
+    listSimulationIds,
+    registerSimulation,
+} from '@/lib/simulator/client'
+import { planSimulations, simulationIdPrefix } from '@/lib/simulator/registration'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
@@ -37,6 +44,12 @@ export async function installEntry(
     formData: FormData,
 ): Promise<InstallResult> {
     const entryId = formData.get('entryId')
+    // Data-source choice from the install dialog. Anything unknown (including the
+    // dialog-less datastructure form) degrades to 'later' — today's plain install.
+    const modeRaw = formData.get('dataSourceMode')
+    const dataSourceMode = modeRaw === 'demo' || modeRaw === 'custom' ? modeRaw : 'later'
+    const brokerField = formData.get('brokerUrl')
+    const customBrokerUrl = typeof brokerField === 'string' ? brokerField.trim() : ''
 
     let entry: CatalogEntry | undefined
     try {
@@ -86,7 +99,20 @@ export async function installEntry(
         return res.failure
     }
 
-    const res = await postImport('/v1/imports/datasets', buildUseCaseBundleBody(entry))
+    // 'custom' applies the user's broker URL to the datasources that declare it
+    // as an install parameter — the manifest decides what is instance-local.
+    const effectiveEntry: UseCaseEntry =
+        dataSourceMode === 'custom' && customBrokerUrl
+            ? {
+                  ...entry,
+                  bundle: {
+                      ...entry.bundle,
+                      dataSources: applyDeclaredUrlOverride(entry.bundle.dataSources, customBrokerUrl),
+                  },
+              }
+            : entry
+
+    const res = await postImport('/v1/imports/datasets', buildUseCaseBundleBody(effectiveEntry))
     if (res.ok) {
         const body = (await res.response.json()) as DataSetImportSummary
         const structures = (body.dataStructures ?? [])
@@ -101,6 +127,11 @@ export async function installEntry(
         const sinks = body.dataSinks?.length ?? 0
         const pipelines = body.pipelines?.length ?? 0
         const flowSegment = ` · ${sinks} Senke(n) · ${pipelines} Pipeline(s)`
+        // Demo activation happens AFTER the install committed, and its failure is a
+        // warning in the summary, never an install failure: the simulator is an
+        // add-on, and a dead add-on must not make a use case uninstallable.
+        const demoSegment =
+            dataSourceMode === 'demo' ? await activateDemoStreams(entry, body.installationId) : ''
         const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
         // The catalogue badge and the provenance list both read from the install
         // record that just came into existence.
@@ -108,7 +139,7 @@ export async function installEntry(
         revalidatePath('/installed')
         return {
             status: 'created',
-            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${flowSegment}${installation}`,
+            detail: `Dataset „${body.dataSetName ?? entry.manifest.displayName}" angelegt · Strukturen: ${structures || '—'} · ${sources} Quelle(n)${mappingSegment}${flowSegment}${demoSegment}${installation}`,
             httpStatus: 201,
         }
     }
@@ -188,6 +219,58 @@ function buildUseCaseBundleBody(entry: UseCaseEntry) {
     }
 }
 
+/**
+ * Registers one simulator publisher per bundled stream (stage B). Every
+ * outcome — good or bad — comes back as a summary segment: a demo activation
+ * that fails must say so in the install feedback, and one that silently
+ * skipped streams would be finding-3 all over again.
+ */
+async function activateDemoStreams(
+    entry: UseCaseEntry,
+    installationId: string | undefined,
+): Promise<string> {
+    if (!isSimulatorConfigured()) {
+        return ' · Demo-Daten NICHT aktiviert: SIMULATOR_API_URL ist nicht konfiguriert'
+    }
+    if (!installationId) {
+        return ' · Demo-Daten NICHT aktiviert: Antwort trägt keine Installations-ID'
+    }
+    try {
+        // SIMULATOR_BROKER_URL overrides the package's broker for the simulator
+        // only — needed when the simulator runs outside the docker network and
+        // the container-name URL does not resolve for it.
+        const planned = planSimulations(entry, installationId, process.env.SIMULATOR_BROKER_URL)
+        if (planned.length === 0) {
+            return ' · Demo-Daten: Paket bündelt keine Szenarien'
+        }
+        for (const { id, input } of planned) {
+            await registerSimulation(id, input)
+        }
+        return ` · Demo-Daten: ${planned.length} Stream(s) aktiv`
+    } catch (error) {
+        return ` · Demo-Daten NICHT aktiviert: ${error instanceof Error ? error.message : String(error)}`
+    }
+}
+
+/**
+ * Sweeps the simulator for this installation's publishers by id prefix. Runs
+ * only after the uninstall committed — the reverse order could strand a live
+ * installation without its demo data when the uninstall is then refused.
+ */
+async function removeDemoStreams(installationId: string): Promise<string> {
+    if (!isSimulatorConfigured()) return ''
+    try {
+        const prefix = simulationIdPrefix(installationId)
+        const ids = (await listSimulationIds()).filter((id) => id.startsWith(prefix))
+        for (const id of ids) {
+            await deleteSimulation(id)
+        }
+        return ids.length > 0 ? ` · ${ids.length} Demo-Stream(s) entfernt` : ''
+    } catch (error) {
+        return ` · Demo-Stream-Aufräumen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`
+    }
+}
+
 type PostResult = { ok: true; response: Response } | { ok: false; failure: InstallResult }
 
 async function postImport(path: string, body: unknown): Promise<PostResult> {
@@ -246,11 +329,12 @@ export async function uninstallInstallation(
     )
 
     if (response.status === 204) {
+        const cleanup = await removeDemoStreams(installationId)
         revalidatePath('/installed')
         revalidatePath('/datastructures')
         revalidatePath('/use-cases')
         revalidatePath('/instance')
-        return { status: 'uninstalled', detail: 'Deinstalliert', httpStatus: 204 }
+        return { status: 'uninstalled', detail: `Deinstalliert${cleanup}`, httpStatus: 204 }
     }
 
     const problem = (await response.json().catch(() => null)) as { detail?: string } | null

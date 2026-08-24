@@ -200,9 +200,12 @@ export interface SimulationStream {
  * against that class (required coverage + subset), so scenario and structure
  * cannot drift apart silently.
  *
- * `topicBase` is a template, not a final topic: the install appends a
- * per-installation nonce so two installs never share a topic. Broker URLs are
- * deliberately NOT part of this document — they are instance-local values.
+ * `topicBase` is the topic prefix: a stream publishes on
+ * `topicBase/<streamName>`, which is exactly what the bundled datasource's
+ * `topicBase/+` subscription matches — the shape a real station fleet would
+ * use. Broker URLs are deliberately NOT part of this document — they are
+ * instance-local values (the datasource carries the default, the install may
+ * override it).
  */
 export interface BundledSimulation {
     /** Bundle-local handle of the datasource this scenario feeds (its title). */

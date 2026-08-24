@@ -63,6 +63,10 @@ spec:
             - name: SIMULATOR_API_URL
               value: {{ .Values.simulator.apiUrl | quote }}
             {{- end }}
+            {{- if .Values.simulator.brokerUrl }}
+            - name: SIMULATOR_BROKER_URL
+              value: {{ .Values.simulator.brokerUrl | quote }}
+            {{- end }}
             {{- if .Values.nodeTlsRejectUnauthorized }}
             # Self-signed cluster CA — see values.yaml note.
             - name: NODE_TLS_REJECT_UNAUTHORIZED

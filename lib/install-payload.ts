@@ -57,6 +57,24 @@ export function clampDescription(text: unknown): string | undefined {
  * What a *version* description answers is where this version came from, so that is what it says —
  * short by construction, and true for every package.
  */
+/**
+ * Applies the user's broker URL to every bundled datasource that DECLARES
+ * `urls` as an install parameter — and only to those. The manifest decides
+ * which connector fields are instance-local; a blanket rewrite would let the
+ * install dialog reach into fields the package never offered for override.
+ */
+export function applyDeclaredUrlOverride<
+    T extends { document: Record<string, unknown>; parameters?: { field: string }[] },
+>(dataSources: T[], brokerUrl: string): T[] {
+    const url = brokerUrl.trim()
+    if (!url) return dataSources
+    return dataSources.map((source) =>
+        source.parameters?.some((parameter) => parameter.field === 'urls')
+            ? { ...source, document: { ...source.document, urls: [url] } }
+            : source,
+    )
+}
+
 export function versionProvenance(displayName: string, version: string): string {
     const line = `Aus Paket ${displayName} ${version}`
     if (line.length <= DESCRIPTION_MAX_LENGTH) {

@@ -2,7 +2,7 @@ import { Check } from 'lucide-react'
 
 import { CatalogCard } from '@/components/catalog/catalog-card'
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
-import { InstallButton } from '@/components/catalog/install-button'
+import { InstallDialog } from '@/components/catalog/install-dialog'
 import { SamplePreview } from '@/components/catalog/sample-preview'
 import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
 import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
@@ -43,7 +43,13 @@ export default async function UseCasesPage() {
                             manifest={entry}
                             action={
                                 <div className="flex flex-wrap items-start gap-2">
-                                    <InstallButton entryId={entry.id} installed={installed} />
+                                    <InstallDialog
+                                        entryId={entry.id}
+                                        displayName={entry.displayName}
+                                        version={entry.version}
+                                        installed={installed}
+                                        demoAvailable={previewAvailable}
+                                    />
                                     {previewAvailable && <SamplePreview entryId={entry.id} />}
                                 </div>
                             }

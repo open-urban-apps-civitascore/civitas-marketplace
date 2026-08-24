@@ -6,14 +6,15 @@ import { Download } from 'lucide-react'
 import { SubmitButton } from '@/components/catalog/submit-button'
 import { installEntry, type InstallResult } from '@/lib/install-actions'
 
-const FEEDBACK_STYLES: Record<InstallResult['status'], string> = {
+/** Shared with the install dialog, so the two install surfaces read identically. */
+export const FEEDBACK_STYLES: Record<InstallResult['status'], string> = {
     created: 'text-success',
     conflict: 'text-warn',
     invalid: 'text-error',
     error: 'text-error',
 }
 
-function feedbackText(result: InstallResult): string {
+export function feedbackText(result: InstallResult): string {
     switch (result.status) {
         case 'created':
             return `Installiert — ${result.detail}`
