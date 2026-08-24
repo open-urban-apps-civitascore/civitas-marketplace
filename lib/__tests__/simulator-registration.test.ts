@@ -33,19 +33,39 @@ describe('planSimulations', () => {
         }
     })
 
-    it('derives ids from the installation prefix and topics from the topic base', () => {
+    it('derives ids from the installation prefix and topics from the datasource subscription', () => {
         for (const entry of useCaseEntries()) {
             const planned = planSimulations(entry, INSTALLATION_ID)
-            const topicBases = entry.bundle.simulations.map((simulation) => simulation.topicBase)
+            const subscriptions = entry.bundle.dataSources
+                .map((source) => (Array.isArray(source.document.topics) ? source.document.topics[0] : undefined))
+                .filter((topic): topic is string => typeof topic === 'string')
             for (const { id, input } of planned) {
                 // The prefix is the uninstall's only handle on these registrations.
                 expect(id.startsWith(simulationIdPrefix(INSTALLATION_ID))).toBe(true)
-                // One level below the base — exactly what the datasource's `+` matches.
-                const base = topicBases.find((candidate) => input.transport.topic.startsWith(`${candidate}/`))
-                expect(base, input.transport.topic).toBeDefined()
-                expect(input.transport.topic.slice(base!.length + 1)).not.toContain('/')
                 expect(input.enabled).toBe(true)
+                // The subscription decides: wildcard → own subtopic per stream,
+                // exact → the exact topic. Either way every published message is
+                // one the installed source actually receives.
+                const matches = subscriptions.some((subscription) =>
+                    subscription.endsWith('/+') || subscription.endsWith('/#')
+                        ? input.transport.topic.startsWith(subscription.slice(0, -1)) &&
+                          !input.transport.topic.slice(subscription.length - 1).includes('/')
+                        : input.transport.topic === subscription,
+                )
+                expect(matches, `${entry.manifest.id}: ${input.transport.topic}`).toBe(true)
             }
+        }
+    })
+
+    it('publishes to the exact topic when the datasource subscribes without a wildcard', () => {
+        // The traffic package is the regression case: its source subscribes to
+        // one exact topic, and the former topicBase/<stream> derivation published
+        // one level below it — running streams, zero rows.
+        const traffic = useCaseEntries().find((entry) => entry.manifest.id.includes('verkehr'))
+        expect(traffic).toBeDefined()
+        const subscription = traffic!.bundle.dataSources[0].document.topics as string[]
+        for (const { input } of planSimulations(traffic!, INSTALLATION_ID)) {
+            expect(input.transport.topic).toBe(subscription[0])
         }
     })
 
@@ -80,6 +100,24 @@ describe('planSimulations', () => {
                 }
             }
         }
+    })
+})
+
+describe('assembly topic validation', () => {
+    it('rejects a simulation whose topicBase does not match the datasource subscription', () => {
+        const pkg = mockPackages.find((candidate) => candidate.manifest.id.includes('luftqualitaet'))!
+        expect(() =>
+            assembleCatalogEntry(pkg.manifest, (file) => {
+                const content = pkg.files[file]
+                if (!content) throw new Error(`fixture misses '${file}'`)
+                if (file.endsWith('.datasource.json')) {
+                    // The subscription drifts away from the scenario's topicBase —
+                    // exactly the mismatch that shipped silently before this check.
+                    return { ...content, topics: ['openurbanapps/etwas-anderes/+'] }
+                }
+                return content
+            }),
+        ).toThrow(/topicBase/)
     })
 })
 

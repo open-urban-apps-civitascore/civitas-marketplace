@@ -200,12 +200,14 @@ export interface SimulationStream {
  * against that class (required coverage + subset), so scenario and structure
  * cannot drift apart silently.
  *
- * `topicBase` is the topic prefix: a stream publishes on
- * `topicBase/<streamName>`, which is exactly what the bundled datasource's
- * `topicBase/+` subscription matches — the shape a real station fleet would
- * use. Broker URLs are deliberately NOT part of this document — they are
- * instance-local values (the datasource carries the default, the install may
- * override it).
+ * `topicBase` names where the scenario publishes, and the assembly enforces
+ * that it agrees with the datasource's subscription: an exact subscription
+ * (`topicBase` verbatim) puts every stream on that one topic, a wildcard
+ * subscription (`topicBase/+`) gives each stream its own subtopic. The actual
+ * publish topic is derived from the SUBSCRIPTION at install time — the
+ * datasource is the authority on where the platform listens. Broker URLs are
+ * deliberately NOT part of this document — they are instance-local values
+ * (the datasource carries the default, the install may override it).
  */
 export interface BundledSimulation {
     /** Bundle-local handle of the datasource this scenario feeds (its title). */

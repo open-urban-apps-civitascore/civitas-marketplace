@@ -27,16 +27,22 @@ export interface PlannedSimulation {
 
 /**
  * Maps the entry's bundled scenarios onto simulator registrations, one per
- * stream: id `<installationId>--<streamName>`, topic `<topicBase>/<streamName>`
- * — the shape the bundled datasource's `topicBase/+` subscription matches.
+ * stream: id `<installationId>--<streamName>`; the publish topic derives from
+ * the DATASOURCE's subscription — it is the authority on where the installed
+ * platform actually listens. A `x/+` (or `x/#`) subscription puts every
+ * stream on its own subtopic, `x/<streamName>`; an exact subscription puts
+ * all streams on exactly `x`. Publishing `topicBase/<stream>` unconditionally
+ * once fed an exact-subscribing source a topic level it never received —
+ * perfectly running streams, zero rows [live 2026-08-24].
  *
  * The broker URL comes from the datasource document the scenario names
  * (`urls[0]`, the instance-local default the install just provisioned), unless
  * the caller overrides it — needed when the simulator runs outside the docker
  * network and the package's container-name URL does not resolve for it.
  *
- * Throws on an unresolvable broker instead of skipping: a silently skipped
- * stream would report a successful demo activation that publishes nothing.
+ * Throws on an unresolvable broker or subscription instead of skipping: a
+ * silently skipped stream would report a successful demo activation that
+ * publishes nothing.
  */
 export function planSimulations(
     entry: UseCaseEntry,
@@ -53,13 +59,14 @@ export function planSimulations(
                 `Simulation '${simulation.sourceRef}': Datenquelle nennt keine Broker-URL und kein Override ist gesetzt`,
             )
         }
+        const topicFor = topicPlanner(source, simulation.sourceRef)
         return simulation.streams.map((stream) => ({
             id: `${simulationIdPrefix(installationId)}${stream.name}`,
             input: {
                 transport: {
                     kind: 'mqtt' as const,
                     url: brokerUrl,
-                    topic: `${simulation.topicBase}/${stream.name}`,
+                    topic: topicFor(stream.name),
                 },
                 scenario: {
                     ...(simulation.intervalSeconds !== undefined
@@ -71,6 +78,23 @@ export function planSimulations(
             },
         }))
     })
+}
+
+/** Publish-topic rule for one datasource: subtopic per stream under a wildcard, verbatim otherwise. */
+function topicPlanner(
+    source: BundledDataSource | undefined,
+    sourceRef: string,
+): (streamName: string) => string {
+    const topics = source?.document.topics
+    const subscription = Array.isArray(topics) && typeof topics[0] === 'string' ? topics[0] : undefined
+    if (!subscription) {
+        throw new Error(`Simulation '${sourceRef}': Datenquelle nennt keine MQTT-Topics`)
+    }
+    if (subscription.endsWith('/+') || subscription.endsWith('/#')) {
+        const prefix = subscription.slice(0, -2)
+        return (streamName) => `${prefix}/${streamName}`
+    }
+    return () => subscription
 }
 
 function firstUrlOf(source: BundledDataSource | undefined): string | undefined {

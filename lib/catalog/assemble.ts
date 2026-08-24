@@ -337,6 +337,28 @@ export function assembleCatalogEntry(
                     `${where}: datasource '${simulation.sourceRef}' names structure '${String(source.document.element)}', which is not bundled`,
                 )
             }
+            // topicBase must agree with the datasource's subscription — exactly,
+            // or as its one-level-wildcard prefix. Field paths were validated from
+            // day one while the topic was not, and the gap shipped a scenario that
+            // published one level below an exact subscription: running streams,
+            // zero rows, no error anywhere.
+            const topics = source.document.topics
+            const subscription =
+                Array.isArray(topics) && typeof topics[0] === 'string' ? topics[0] : undefined
+            if (!subscription) {
+                throw new CatalogIntegrityError(
+                    `${where}: datasource '${simulation.sourceRef}' declares no MQTT topics to publish into`,
+                )
+            }
+            if (
+                subscription !== simulation.topicBase &&
+                subscription !== `${simulation.topicBase}/+` &&
+                subscription !== `${simulation.topicBase}/#`
+            ) {
+                throw new CatalogIntegrityError(
+                    `${where}: topicBase '${simulation.topicBase}' does not match the datasource subscription '${subscription}'`,
+                )
+            }
             validateSimulation(simulation, structure.model, where)
             return simulation
         })
