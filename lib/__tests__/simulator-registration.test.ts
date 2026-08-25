@@ -4,7 +4,13 @@ import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import type { UseCaseEntry } from '@/lib/catalog/types'
 import { applyDeclaredUrlOverride } from '@/lib/install-payload'
 import { mockPackages } from '@/lib/mock-catalog'
-import { planSimulations, simulationIdPrefix, streamsOfInstallation } from '@/lib/simulator/registration'
+import {
+    planSimulations,
+    registerPlanned,
+    simulationIdPrefix,
+    streamsOfInstallation,
+    type PlannedSimulation,
+} from '@/lib/simulator/registration'
 import type { SimulationStatus } from '@/lib/simulator/client'
 
 const INSTALLATION_ID = 'a1b2c3d4-0000-4000-8000-000000000000'
@@ -132,6 +138,44 @@ describe('streamsOfInstallation', () => {
         // installations — the '--' in the prefix is what prevents it.
         const rows = streamsOfInstallation([status('inst-10--stream')], 'inst-1')
         expect(rows).toEqual([])
+    })
+})
+
+describe('registerPlanned', () => {
+    const planned = (installationId: string, streamName: string): PlannedSimulation => ({
+        id: `${simulationIdPrefix(installationId)}${streamName}`,
+        input: {
+            transport: { kind: 'mqtt', url: 'tcp://broker:1883', topic: 'openurbanapps/x' },
+            scenario: { fields: {} },
+            enabled: true,
+        },
+    })
+
+    it('registers every stream and reports the names with the prefix stripped', async () => {
+        const seen: string[] = []
+        const outcome = await registerPlanned(
+            [planned('inst-1', 'ampel'), planned('inst-1', 'zaehler')],
+            'inst-1',
+            async (id) => {
+                seen.push(id)
+            },
+        )
+        expect(seen).toEqual(['inst-1--ampel', 'inst-1--zaehler'])
+        expect(outcome).toEqual({ registered: ['ampel', 'zaehler'], failed: [] })
+    })
+
+    it('collects a failure and keeps registering the rest', async () => {
+        // The reactivation button leans on this: one dead stream must not veto
+        // the other three, and a retry (idempotent PUTs) fills only the gap.
+        const outcome = await registerPlanned(
+            [planned('inst-1', 'a'), planned('inst-1', 'b'), planned('inst-1', 'c')],
+            'inst-1',
+            async (id) => {
+                if (id.endsWith('--b')) throw new Error('Broker weg')
+            },
+        )
+        expect(outcome.registered).toEqual(['a', 'c'])
+        expect(outcome.failed).toEqual([{ streamName: 'b', detail: 'Broker weg' }])
     })
 })
 

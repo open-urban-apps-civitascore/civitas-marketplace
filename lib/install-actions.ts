@@ -13,7 +13,7 @@ import {
     listSimulationIds,
     registerSimulation,
 } from '@/lib/simulator/client'
-import { planSimulations, simulationIdPrefix } from '@/lib/simulator/registration'
+import { planSimulations, registerPlanned, simulationIdPrefix } from '@/lib/simulator/registration'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
@@ -243,10 +243,17 @@ async function activateDemoStreams(
         if (planned.length === 0) {
             return ' · Demo-Daten: Paket bündelt keine Szenarien'
         }
-        for (const { id, input } of planned) {
-            await registerSimulation(id, input)
+        // Same core as the installed page's reactivation button: per-stream
+        // failure collection, so a partial activation names its gap instead of
+        // hiding the successes behind the first error.
+        const outcome = await registerPlanned(planned, installationId, registerSimulation)
+        if (outcome.failed.length === 0) {
+            return ` · Demo-Daten: ${outcome.registered.length} Stream(s) aktiv`
         }
-        return ` · Demo-Daten: ${planned.length} Stream(s) aktiv`
+        const failures = outcome.failed
+            .map(({ streamName, detail }) => `${streamName} (${detail})`)
+            .join(', ')
+        return ` · Demo-Daten: ${outcome.registered.length} Stream(s) aktiv, fehlgeschlagen: ${failures}`
     } catch (error) {
         return ` · Demo-Daten NICHT aktiviert: ${error instanceof Error ? error.message : String(error)}`
     }

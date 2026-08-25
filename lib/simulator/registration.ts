@@ -128,3 +128,39 @@ export function streamsOfInstallation(
         .map((status) => ({ streamName: status.id.slice(prefix.length), status }))
         .sort((a, b) => a.streamName.localeCompare(b.streamName))
 }
+
+/** Per-stream outcome of pushing a plan into the registry. */
+export interface RegistrationOutcome {
+    /** Stream names (id minus prefix) that are now registered. */
+    registered: string[]
+    failed: { streamName: string; detail: string }[]
+}
+
+/**
+ * Pushes a plan into the registry through the given register function,
+ * collecting per-stream failures instead of stopping at the first: the PUTs
+ * are idempotent, so a partial pass followed by a retry converges — but only
+ * if the caller learns WHICH streams are still missing. IO stays injected,
+ * keeping this module free of transport concerns (and testable without one).
+ */
+export async function registerPlanned(
+    planned: PlannedSimulation[],
+    installationId: string,
+    register: (id: string, input: SimulationInput) => Promise<void>,
+): Promise<RegistrationOutcome> {
+    const prefix = simulationIdPrefix(installationId)
+    const registered: string[] = []
+    const failed: { streamName: string; detail: string }[] = []
+    for (const { id, input } of planned) {
+        try {
+            await register(id, input)
+            registered.push(id.slice(prefix.length))
+        } catch (error) {
+            failed.push({
+                streamName: id.slice(prefix.length),
+                detail: error instanceof Error ? error.message : String(error),
+            })
+        }
+    }
+    return { registered, failed }
+}

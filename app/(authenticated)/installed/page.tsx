@@ -1,3 +1,4 @@
+import { ReactivateDemoPanel } from '@/components/installed/reactivate-demo-panel'
 import { SimulatorPanel } from '@/components/installed/simulator-panel'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import { getAccessToken, requireSession } from '@/lib/session'
@@ -52,17 +53,30 @@ const dateFormat = new Intl.DateTimeFormat('de-DE', {
     timeZone: 'Europe/Berlin',
 })
 
-/** The installation's simulator panel — or nothing, when no streams are registered for it. */
+/**
+ * The installation's simulator panel — or, when the registry holds no streams
+ * for an installation that could have them, the one-click reactivation row
+ * (the state a simulator restart leaves behind). A DATA_SOURCE artifact is the
+ * cheap tell for "could have them": demo streams publish into a datasource, so
+ * structure-only installs never show the row.
+ */
 function InstallationSimulator({
     simulations,
     installationId,
+    catalogEntryId,
+    hasDataSource,
 }: {
     simulations: SimulationStatus[]
     installationId: string
+    catalogEntryId?: string
+    hasDataSource: boolean
 }) {
     const streams = streamsOfInstallation(simulations, installationId)
-    if (streams.length === 0) return null
-    return <SimulatorPanel installationId={installationId} initialStreams={streams} />
+    if (streams.length > 0) {
+        return <SimulatorPanel installationId={installationId} initialStreams={streams} />
+    }
+    if (!catalogEntryId || !hasDataSource) return null
+    return <ReactivateDemoPanel installationId={installationId} catalogEntryId={catalogEntryId} />
 }
 
 /**
@@ -102,10 +116,18 @@ export default async function InstalledPage() {
 
     // One registry snapshot serves every panel; the panels poll on their own
     // while open. An unreachable simulator degrades to no panels at all — the
-    // same demo-day-safe default as the unset SIMULATOR_API_URL.
+    // same demo-day-safe default as the unset SIMULATOR_API_URL. The empty
+    // registry of a REACHABLE simulator is a different state: that is the
+    // restart case the reactivation row exists for, so the two must not blur.
     let simulations: SimulationStatus[] = []
+    let simulatorLive = false
     if (isSimulatorConfigured()) {
-        simulations = await listSimulations().catch(() => [])
+        try {
+            simulations = await listSimulations()
+            simulatorLive = true
+        } catch {
+            // degrade to no panels
+        }
     }
 
     return (
@@ -166,10 +188,14 @@ export default async function InstalledPage() {
                             </div>
                         </div>
 
-                        {!installation.uninstalledAt && (
+                        {!installation.uninstalledAt && simulatorLive && (
                             <InstallationSimulator
                                 simulations={simulations}
                                 installationId={installation.id}
+                                catalogEntryId={installation.catalogEntryId}
+                                hasDataSource={installation.artifacts.some(
+                                    (artifact) => artifact.artifactType === 'DATA_SOURCE',
+                                )}
                             />
                         )}
 
