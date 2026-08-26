@@ -18,6 +18,13 @@ import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.jso
 import airStaMapping from './luftqualitaet-sta/luftmessung-zu-station.mapping.json'
 import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
 import airStaSimulation from './luftqualitaet-sta/luftmessung.simulation.json'
+import treesManifest from './kiez-baumkataster/manifest.json'
+import treesSourceStructure from './kiez-baumkataster/baumkataster-zeile.datastructure.json'
+import treesTargetStructure from './kiez-baumkataster/kiez-baum.datastructure.json'
+import treesSourceDb from './kiez-baumkataster/baumkataster-db.datasource.json'
+import treesMapping from './kiez-baumkataster/kataster-import.mapping.json'
+import treesSinkTable from './kiez-baumkataster/kiez-baeume-tabelle.datasink.json'
+import treesPipeline from './kiez-baumkataster/kataster-import.pipeline.json'
 
 /**
  * Local catalogue fixtures: verbatim copies of the artifact-repo content
@@ -64,6 +71,20 @@ export const mockPackages: MockPackage[] = [
             'frost-observations.datasink.json': airStaSinkFrost,
             'luftqualitaets-import.pipeline.json': airStaPipeline,
             'luftmessung.simulation.json': airStaSimulation,
+        },
+    },
+    // SQL-sourced, simulation-less package: the seed SQL under
+    // kiez-baumkataster/seed/ is deliberately NOT a member — the source table
+    // belongs to the (demo) Fachverfahren, not to the platform install.
+    {
+        manifest: treesManifest as unknown as PackageManifest,
+        files: {
+            'baumkataster-zeile.datastructure.json': treesSourceStructure,
+            'kiez-baum.datastructure.json': treesTargetStructure,
+            'baumkataster-db.datasource.json': treesSourceDb,
+            'kataster-import.mapping.json': treesMapping,
+            'kiez-baeume-tabelle.datasink.json': treesSinkTable,
+            'kataster-import.pipeline.json': treesPipeline,
         },
     },
 ]

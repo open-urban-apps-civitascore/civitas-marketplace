@@ -213,15 +213,21 @@ describe('applyDeclaredUrlOverride', () => {
         expect(untouched.document.urls).toEqual(['tcp://paket:1883'])
     })
 
-    it('every shipped use case declares the broker override on at least one source', () => {
+    it('every shipped MQTT use case declares the broker override on at least one source', () => {
         // The dialog's "eigene Datenquelle" option is only honest if the packages
-        // actually expose the field it overrides.
+        // actually expose the field it overrides. The invariant is scoped to
+        // broker-fed packages: a SQL-sourced package has no broker URL, and
+        // declaring 'urls' there would let the MQTT-worded custom path corrupt
+        // its connection document.
         for (const entry of useCaseEntries()) {
+            const hasMqttSource = entry.bundle.dataSources.some(
+                (source) => source.document.connectionType === 'mqtt',
+            )
             const overridden = applyDeclaredUrlOverride(entry.bundle.dataSources, 'tcp://x:1')
             const changed = overridden.some(
                 (source, index) => source !== entry.bundle.dataSources[index],
             )
-            expect(changed, entry.manifest.id).toBe(true)
+            expect(changed, entry.manifest.id).toBe(hasMqttSource)
         }
     })
 
