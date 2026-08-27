@@ -5,7 +5,12 @@ import { revalidatePath } from 'next/cache'
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
-import { applyDeclaredUrlOverride, clampDescription, versionProvenance } from '@/lib/install-payload'
+import {
+    applyDeclaredUrlOverride,
+    clampDescription,
+    resolveBrokerOverride,
+    versionProvenance,
+} from '@/lib/install-payload'
 import { getAccessToken } from '@/lib/session'
 import {
     deleteSimulation,
@@ -99,18 +104,25 @@ export async function installEntry(
         return res.failure
     }
 
-    // 'custom' applies the user's broker URL to the datasources that declare it
-    // as an install parameter — the manifest decides what is instance-local.
-    const effectiveEntry: UseCaseEntry =
-        dataSourceMode === 'custom' && customBrokerUrl
-            ? {
-                  ...entry,
-                  bundle: {
-                      ...entry.bundle,
-                      dataSources: applyDeclaredUrlOverride(entry.bundle.dataSources, customBrokerUrl),
-                  },
-              }
-            : entry
+    // 'custom' applies the user's broker URL, 'demo' applies SIMULATOR_BROKER_URL —
+    // so the NiFi subscription and the simulator's stream registrations meet at the
+    // same broker (a demo install otherwise subscribes to the package default, which
+    // only resolves in the local compose network). Both paths touch only the
+    // datasources that declare `urls` as an install parameter.
+    const overrideBrokerUrl = resolveBrokerOverride(
+        dataSourceMode,
+        customBrokerUrl,
+        process.env.SIMULATOR_BROKER_URL,
+    )
+    const effectiveEntry: UseCaseEntry = overrideBrokerUrl
+        ? {
+              ...entry,
+              bundle: {
+                  ...entry.bundle,
+                  dataSources: applyDeclaredUrlOverride(entry.bundle.dataSources, overrideBrokerUrl),
+              },
+          }
+        : entry
 
     const res = await postImport('/v1/imports/datasets', buildUseCaseBundleBody(effectiveEntry))
     if (res.ok) {

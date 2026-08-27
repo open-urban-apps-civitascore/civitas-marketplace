@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { mockPackages } from '@/lib/mock-catalog'
-import { DESCRIPTION_MAX_LENGTH, clampDescription, versionProvenance } from '@/lib/install-payload'
+import {
+    DESCRIPTION_MAX_LENGTH,
+    clampDescription,
+    resolveBrokerOverride,
+    versionProvenance,
+} from '@/lib/install-payload'
 
 /** Every description the install path sends to the portal, across all shipped packages. */
 function shippedDescriptions(): { where: string; text: unknown }[] {
@@ -76,5 +81,28 @@ describe('versionProvenance', () => {
         // The version survives the truncation — it is the part that identifies which release the
         // structure came from.
         expect(line.endsWith('2.0.0')).toBe(true)
+    })
+})
+
+describe('resolveBrokerOverride', () => {
+    it('demo mode aligns the datasource with the simulator broker', () => {
+        expect(resolveBrokerOverride('demo', '', 'tcp://mosquitto.demo.svc:1883')).toBe(
+            'tcp://mosquitto.demo.svc:1883',
+        )
+    })
+
+    it('demo mode without SIMULATOR_BROKER_URL leaves the package default standing', () => {
+        expect(resolveBrokerOverride('demo', '', undefined)).toBe('')
+        expect(resolveBrokerOverride('demo', '', '   ')).toBe('')
+    })
+
+    it('custom mode uses the user address and ignores the simulator broker', () => {
+        expect(resolveBrokerOverride('custom', ' tcp://city-broker:1883 ', 'tcp://demo:1883')).toBe(
+            'tcp://city-broker:1883',
+        )
+    })
+
+    it('later mode never overrides, whatever is configured', () => {
+        expect(resolveBrokerOverride('later', 'tcp://typed-anyway:1883', 'tcp://demo:1883')).toBe('')
     })
 })

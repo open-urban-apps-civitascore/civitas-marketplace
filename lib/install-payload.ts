@@ -75,6 +75,27 @@ export function applyDeclaredUrlOverride<
     )
 }
 
+/**
+ * The broker URL an install applies to the datasources that declare `urls` as
+ * an install parameter. 'custom' is the user's address. 'demo' aligns the
+ * NiFi subscription with the broker the simulator publishes to —
+ * SIMULATOR_BROKER_URL, the same variable planSimulations applies to the
+ * stream registrations — so both ends of a demo install meet at one broker.
+ * With the variable unset the package default stands, which is correct in the
+ * local compose network where `civitas-mosquitto` resolves and the two sides
+ * already agree. The value must use the `tcp://` scheme: NiFi's MQTT
+ * processors reject `mqtt://`, while the simulator's client accepts both.
+ */
+export function resolveBrokerOverride(
+    mode: 'demo' | 'custom' | 'later',
+    customBrokerUrl: string,
+    simulatorBrokerUrl: string | undefined,
+): string {
+    if (mode === 'custom') return customBrokerUrl.trim()
+    if (mode === 'demo') return simulatorBrokerUrl?.trim() ?? ''
+    return ''
+}
+
 export function versionProvenance(displayName: string, version: string): string {
     const line = `Aus Paket ${displayName} ${version}`
     if (line.length <= DESCRIPTION_MAX_LENGTH) {
