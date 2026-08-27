@@ -104,15 +104,18 @@ export async function installEntry(
         return res.failure
     }
 
-    // 'custom' applies the user's broker URL, 'demo' applies SIMULATOR_BROKER_URL —
-    // so the NiFi subscription and the simulator's stream registrations meet at the
-    // same broker (a demo install otherwise subscribes to the package default, which
-    // only resolves in the local compose network). Both paths touch only the
+    // 'custom' applies the user's broker URL, 'demo' applies
+    // DEMO_DATASOURCE_BROKER_URL — the demo broker as the PLATFORM reaches it, so
+    // the NiFi subscription and the simulator's stream registrations meet at one
+    // broker on deployments where both run in the same network (the cluster).
+    // NOT SIMULATOR_BROKER_URL: locally that is the HOST's view of the broker,
+    // which NiFi inside the compose network cannot reach — there the variable
+    // stays unset and the package default stands. Both paths touch only the
     // datasources that declare `urls` as an install parameter.
     const overrideBrokerUrl = resolveBrokerOverride(
         dataSourceMode,
         customBrokerUrl,
-        process.env.SIMULATOR_BROKER_URL,
+        process.env.DEMO_DATASOURCE_BROKER_URL,
     )
     const effectiveEntry: UseCaseEntry = overrideBrokerUrl
         ? {

@@ -85,18 +85,18 @@ describe('versionProvenance', () => {
 })
 
 describe('resolveBrokerOverride', () => {
-    it('demo mode aligns the datasource with the simulator broker', () => {
+    it('demo mode applies the platform-side demo broker to the datasource', () => {
         expect(resolveBrokerOverride('demo', '', 'tcp://mosquitto.demo.svc:1883')).toBe(
             'tcp://mosquitto.demo.svc:1883',
         )
     })
 
-    it('demo mode without SIMULATOR_BROKER_URL leaves the package default standing', () => {
+    it('demo mode without DEMO_DATASOURCE_BROKER_URL leaves the package default standing', () => {
         expect(resolveBrokerOverride('demo', '', undefined)).toBe('')
         expect(resolveBrokerOverride('demo', '', '   ')).toBe('')
     })
 
-    it('custom mode uses the user address and ignores the simulator broker', () => {
+    it('custom mode uses the user address and ignores the demo broker', () => {
         expect(resolveBrokerOverride('custom', ' tcp://city-broker:1883 ', 'tcp://demo:1883')).toBe(
             'tcp://city-broker:1883',
         )
