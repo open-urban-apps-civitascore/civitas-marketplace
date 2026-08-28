@@ -56,8 +56,8 @@ export default async function InstancePage() {
                     Keine Datenstrukturen vorhanden.
                 </p>
             ) : (
-                <div className="overflow-hidden rounded-xl border bg-card">
-                    <table className="w-full text-sm">
+                <div className="overflow-x-auto rounded-xl border bg-card">
+                    <table className="w-full min-w-[32rem] text-sm">
                         <thead className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                             <tr>
                                 <th className="px-4 py-2.5 font-medium">Name</th>

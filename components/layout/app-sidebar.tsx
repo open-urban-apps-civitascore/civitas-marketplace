@@ -64,7 +64,7 @@ export function AppSidebar({
     return (
         <nav
             aria-label="Hauptnavigation"
-            className="flex h-svh w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground"
+            className="flex h-full w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground lg:h-svh"
         >
             <div className="flex items-center gap-2.5 p-3">
                 <div className="flex size-9 items-center justify-center rounded-lg bg-primary">

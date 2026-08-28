@@ -199,7 +199,10 @@ export default async function InstalledPage() {
                             />
                         )}
 
-                        <table className="w-full text-sm">
+                        {/* URNs are wide; on narrow screens the table scrolls inside
+                            its own container instead of stretching the page. */}
+                        <div className="overflow-x-auto">
+                        <table className="w-full min-w-[40rem] text-sm">
                             <thead className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                                 <tr>
                                     <th className="px-4 py-2 font-medium">Typ</th>
@@ -239,6 +242,7 @@ export default async function InstalledPage() {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 ))
             )}

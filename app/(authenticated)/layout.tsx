@@ -1,4 +1,5 @@
 import { AppHeader } from '@/components/layout/app-header'
+import { AppShell } from '@/components/layout/app-shell'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { requireSession } from '@/lib/session'
 
@@ -20,12 +21,9 @@ export default async function AuthenticatedLayout({
     const userName = session.user?.name ?? session.user?.email ?? undefined
 
     return (
-        <div className="flex">
-            <AppSidebar userName={userName} />
-            <main className="flex h-svh flex-1 flex-col overflow-hidden">
-                <AppHeader userName={userName} />
-                <div className="flex-1 overflow-y-auto bg-muted/40 p-6">{children}</div>
-            </main>
-        </div>
+        <AppShell sidebar={<AppSidebar userName={userName} />}>
+            <AppHeader />
+            <div className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">{children}</div>
+        </AppShell>
     )
 }
