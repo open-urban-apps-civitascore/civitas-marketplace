@@ -66,7 +66,7 @@ export default async function AddonsPage() {
                             vorschlagbar.
                         </p>
                     </div>
-                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                         {curated.map((entry) => (
                             <AddonListingCard key={entry.listing.id} entry={entry} />
                         ))}
@@ -87,7 +87,7 @@ export default async function AddonsPage() {
                             der Katalog als Nächstes aufnehmen kann.
                         </p>
                     </div>
-                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                         {ecosystem.map((entry) => (
                             <AddonListingCard key={entry.listing.id} entry={entry} />
                         ))}

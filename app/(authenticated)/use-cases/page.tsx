@@ -33,7 +33,7 @@ export default async function UseCasesPage() {
                 </div>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {useCases.map((entry) => {
                     const installed = installedIds.has(entry.id)
 

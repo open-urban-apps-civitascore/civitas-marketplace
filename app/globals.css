@@ -157,8 +157,10 @@
     @apply border-border outline-ring/50;
   }
 
+  /* Page titles at the prototype's weight — its pages set text-3xl font-bold
+     on every listing heading; centralised here so all pages agree. */
   h1 {
-    @apply font-sans font-semibold text-xl text-foreground;
+    @apply font-sans font-bold text-3xl text-foreground;
   }
 
   h2,
