@@ -91,6 +91,15 @@
   --error: oklch(67.512% 0.20416 358.512);
   --experimental: oklch(0.72 0.12 300);
   --status-label: oklch(90.196% 0.02539 233.145);
+
+  /* Die Marke. Identisch in Landing Page, Clickdummy und Marketplace — wer
+     einen dieser Werte ändert, ändert ihn in allen dreien, sonst hat dasselbe
+     Logo drei Blautöne. Bewusst in Hex statt oklch: dieselben Werte stehen so
+     auch in app/icon.svg, das keine CSS-Variablen kennt. */
+  --logo-frame: #0b7c9c;
+  --logo-cube-top: #22ccf2;
+  --logo-cube-left: #12b6e0;
+  --logo-cube-right: #0c9bc8;
 }
 
 /* Dark theme. Every value carries a faint CIVITAS tint (hue 242.772) instead of

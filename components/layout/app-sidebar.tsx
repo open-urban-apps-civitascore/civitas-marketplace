@@ -5,12 +5,13 @@ import { usePathname } from 'next/navigation'
 import {
     Database,
     FileQuestion,
-    Hexagon,
     LayoutGrid,
     type LucideIcon,
     PackageCheck,
 } from 'lucide-react'
 
+import { Logo } from '@/components/brand/logo'
+import { Wordmark } from '@/components/brand/wordmark'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -50,13 +51,18 @@ const NAV_SECTIONS: NavSection[] = [
 ]
 
 export function AppSidebar({
-    tenantName = 'Stadt Musterstadt',
     userName,
-    userRole = 'Plattform-Admin',
+    organisation,
 }: {
-    tenantName?: string
     userName?: string
-    userRole?: string
+    /**
+     * The municipality or utility the person belongs to. Deliberately NOT the
+     * role: a role ("Plattform-Admin") describes what someone may do, which the
+     * UI already shows by what it offers them. Which house they act for is the
+     * thing the screen cannot otherwise tell — and the thing that matters when
+     * a package is contributed under that name. Absent when nothing is set.
+     */
+    organisation?: string
 }) {
     const pathname = usePathname()
     const initials = (userName ?? 'CV').substring(0, 2).toUpperCase()
@@ -66,12 +72,14 @@ export function AppSidebar({
             aria-label="Hauptnavigation"
             className="flex h-full w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground lg:h-svh"
         >
+            {/* Oben links steht das Produkt, nicht der Mandant: Wer die
+                Anwendung benutzt, steht unten links am Benutzerblock — dort,
+                wo auch die Kommune steht. Vorher stand ein Mandantenname hier,
+                den in Wahrheit niemand gesetzt hat. */}
             <div className="flex items-center gap-2.5 p-3">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-primary">
-                    <Hexagon className="size-5 text-primary-foreground" />
-                </div>
+                <Logo className="size-9 shrink-0" />
                 <div className="grid leading-tight">
-                    <span className="truncate text-sm font-semibold">{tenantName}</span>
+                    <Wordmark className="truncate text-sm" />
                     <span className="truncate text-xs text-muted-foreground">CIVITAS/CORE</span>
                 </div>
             </div>
@@ -132,7 +140,11 @@ export function AppSidebar({
                 </div>
                 <div className="grid leading-tight">
                     <span className="truncate text-sm font-medium">{userName ?? 'Angemeldet'}</span>
-                    <span className="truncate text-xs text-muted-foreground">{userRole}</span>
+                    {organisation ? (
+                        <span className="truncate text-xs text-muted-foreground">
+                            {organisation}
+                        </span>
+                    ) : null}
                 </div>
             </div>
         </nav>
