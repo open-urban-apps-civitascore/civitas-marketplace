@@ -25,51 +25,46 @@ function installableRow(deploymentRef: Record<string, unknown>): Record<string, 
 }
 
 describe('parseCatalogAddon pin handling', () => {
-    it('legacy tag pin: the tag doubles as the release name', () => {
-        const parsed = parseCatalogAddon(installableRow({ ref: 'v2.0-rc', refType: 'tag' }))!
-        expect(parsed.missingForInstall).toEqual([])
-        expect(parsed.listing.install?.source).toMatchObject({
-            ref: 'v2.0-rc',
-            releaseTag: 'v2.0-rc',
-        })
-    })
-
-    it('legacy commit pin: no release name to show', () => {
-        const parsed = parseCatalogAddon(installableRow({ ref: SHA, refType: 'commit' }))!
-        expect(parsed.listing.install?.source).toMatchObject({ ref: SHA, releaseTag: null })
-    })
-
-    it('new shape: commit pin with explicit releaseTag', () => {
+    it('a commit pin with explicit releaseTag is installable', () => {
         const parsed = parseCatalogAddon(installableRow({ ref: SHA, releaseTag: 'v2.1.0' }))!
+        expect(parsed.missingForInstall).toEqual([])
         expect(parsed.listing.install?.source).toMatchObject({ ref: SHA, releaseTag: 'v2.1.0' })
     })
 
-    it('a legacy tag pin with a curated resolvedCommit is pinned to that commit', () => {
+    it('a commit pin without a release shows no release name', () => {
+        const parsed = parseCatalogAddon(installableRow({ ref: SHA }))!
+        expect(parsed.listing.install?.source).toMatchObject({ ref: SHA, releaseTag: null })
+    })
+
+    it('leftover v2 fields are inert: refType/resolvedCommit neither pin nor label', () => {
+        const parsed = parseCatalogAddon(
+            installableRow({ ref: SHA, refType: 'commit', resolvedCommit: SHA }),
+        )!
+        expect(parsed.listing.install?.source).toMatchObject({ ref: SHA, releaseTag: null })
+    })
+
+    it('a tag as ref is no longer a pin — the release name belongs in releaseTag', () => {
+        const parsed = parseCatalogAddon(installableRow({ ref: 'v2.0-rc' }))!
+        expect(parsed.listing.install).toBeUndefined()
+        expect(parsed.missingForInstall.join(' ')).toMatch(/Commit-Pin statt „v2.0-rc"/)
+    })
+
+    it('a tag pin with a curated resolvedCommit no longer substitutes — migrate the row', () => {
         const parsed = parseCatalogAddon(
             installableRow({ ref: 'v2.0-rc', refType: 'tag', resolvedCommit: SHA }),
         )!
-        expect(parsed.missingForInstall).toEqual([])
-        expect(parsed.listing.install?.source).toMatchObject({
-            ref: SHA,
-            releaseTag: 'v2.0-rc',
-        })
+        expect(parsed.listing.install).toBeUndefined()
     })
 
     it('a row without a pin stays listed but uninstallable', () => {
         const parsed = parseCatalogAddon(installableRow({}))!
         expect(parsed.listing.install).toBeUndefined()
-        expect(parsed.missingForInstall.join(' ')).toMatch(/Feste Version/)
+        expect(parsed.missingForInstall.join(' ')).toMatch(/Commit-Pin/)
     })
 
-    it('a branch ref stays uninstallable even with a curated resolvedCommit', () => {
+    it('a branch ref stays uninstallable, resolvedCommit or not', () => {
         const parsed = parseCatalogAddon(installableRow({ ref: 'main', resolvedCommit: SHA }))!
         expect(parsed.listing.install).toBeUndefined()
-        expect(parsed.missingForInstall.join(' ')).toMatch(/Unveränderliche Version/)
-    })
-
-    it('still refuses a branch-like ref as mutable', () => {
-        const parsed = parseCatalogAddon(installableRow({ ref: 'main', refType: 'tag' }))!
-        expect(parsed.listing.install).toBeUndefined()
-        expect(parsed.missingForInstall.join(' ')).toMatch(/Unveränderliche Version/)
+        expect(parsed.missingForInstall.join(' ')).toMatch(/Commit-Pin statt „main"/)
     })
 })

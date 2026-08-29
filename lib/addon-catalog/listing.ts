@@ -59,15 +59,11 @@ export interface AddonInstallSpec {
 export interface AddonPackageRef {
     /** Full project path on the forge, e.g. `group/subgroup/project`. */
     project: string
-    /**
-     * An immutable pin: a commit hash (target shape), or a tag on legacy rows
-     * — the fetcher resolves it to a commit and refuses when it cannot.
-     */
+    /** The pin: a full 40-hex commit SHA — the only thing ever fetched. */
     ref: string
     /**
      * Upstream's release name for the pinned commit — display and drift
      * detection only, never fetched. Null when upstream has no release.
-     * Legacy tag pins carry their tag here.
      */
     releaseTag: string | null
     /** Folder inside the project holding the package; `.` for the root. */
@@ -83,12 +79,8 @@ export interface ParsedAddon {
     missingForInstall: string[]
 }
 
-/** A version tag or a commit hash — anything else is mutable. */
-const IMMUTABLE_REF = /^(v?\d+(\.\d+)*([-.][0-9A-Za-z][0-9A-Za-z.-]*)?|[0-9a-f]{7,40})$/
-/** A ref that IS a commit hash — needs no releaseTag fallback. */
-const COMMIT_LIKE = /^[0-9a-f]{7,40}$/i
+/** The only installable pin: a full commit SHA (catalogue format v3). */
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
-const BRANCH_LIKE = new Set(['main', 'master', 'develop', 'trunk', 'HEAD'])
 /**
  * Component names the deployment repository ships itself. Helmfile prefers
  * `deployment/addons/<name>/` over `components/<name>/`, so an add-on carrying
@@ -202,22 +194,11 @@ export function parseCatalogAddon(raw: unknown): ParsedAddon | null {
     const project = gitlabProject(str(deployment.url))
     const path = str(deployment.path) ?? '.'
     const declaredRef = str(deployment.ref)
-    const resolvedCommit = str(deployment.resolvedCommit)
-    // A legacy tag row that recorded the commit it was curated at: that commit
-    // IS the pin — a tag moved later then changes nothing. Otherwise the
-    // declared ref is the pin; hash pins are normalised to lowercase.
-    // (`refType` of legacy rows stays ignored — the ref's own shape decides.)
-    const ref =
-        declaredRef && !COMMIT_LIKE.test(declaredRef) && resolvedCommit && COMMIT_SHA.test(resolvedCommit)
-            ? resolvedCommit.toLowerCase()
-            : declaredRef && COMMIT_LIKE.test(declaredRef)
-              ? declaredRef.toLowerCase()
-              : declaredRef
-    // New rows carry the release name in `releaseTag`; on legacy rows the tag
-    // pin doubles as the release name. A commit pin without releaseTag has no
-    // release to show.
-    const releaseTag =
-        str(deployment.releaseTag) ?? (declaredRef && !COMMIT_LIKE.test(declaredRef) ? declaredRef : null)
+    // Catalogue format v3: the ref IS the commit (normalised to lowercase),
+    // and the release name lives only in releaseTag. Anything else is not a
+    // pin and leaves the row uninstallable below.
+    const ref = declaredRef && COMMIT_SHA.test(declaredRef) ? declaredRef.toLowerCase() : declaredRef
+    const releaseTag = str(deployment.releaseTag) ?? null
 
     const missingForInstall: string[] = []
     if (!componentName) {
@@ -230,13 +211,13 @@ export function parseCatalogAddon(raw: unknown): ParsedAddon | null {
     }
     if (!subdomain) missingForInstall.push('Subdomain, unter der das Add-on erreichbar wird')
     if (!project) missingForInstall.push('Auf GitLab gehostetes Repository mit dem Paket')
-    // Gated on the DECLARED ref, not the substituted pin: a row that names a
-    // branch stays uninstallable even when it carries a resolvedCommit —
-    // same policy as the summary parser, and no 'Version main' label.
     if (!declaredRef) {
-        missingForInstall.push('Feste Version (Tag oder Commit) des Deployment-Pakets')
-    } else if (BRANCH_LIKE.has(declaredRef) || !IMMUTABLE_REF.test(declaredRef.toLowerCase())) {
-        missingForInstall.push(`Unveränderliche Version — „${declaredRef}" kann sich jederzeit ändern`)
+        missingForInstall.push('Commit-Pin (40-stellige SHA) des Deployment-Pakets')
+    } else if (!COMMIT_SHA.test(declaredRef)) {
+        missingForInstall.push(
+            `Commit-Pin statt „${declaredRef}" — nur eine 40-stellige SHA ist unveränderlich ` +
+                `(der Release-Name gehört nach releaseTag)`,
+        )
     }
 
     if (!listing.curation) {

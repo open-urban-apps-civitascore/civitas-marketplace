@@ -269,7 +269,7 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                                     Die Dateien werden unverändert aus{' '}
                                     <Code>{install.source.project}</Code> geholt, festgelegt auf{' '}
                                     <Code>{install.source.releaseTag ?? install.source.ref.slice(0, 12)}</Code>
-                                    {install.source.releaseTag && /^[0-9a-f]{40}$/i.test(install.source.ref) && (
+                                    {install.source.releaseTag && (
                                         <>
                                             {' '}
                                             (Commit <Code>{install.source.ref.slice(0, 12)}</Code>)

@@ -12,6 +12,8 @@ const TAG_REF: AddonPackageRef = {
     path: '.',
 }
 
+const SHA_REF: AddonPackageRef = { ...TAG_REF, ref: SHA, releaseTag: 'v2.0-rc' }
+
 function jsonResponse(body: unknown): Response {
     return new Response(JSON.stringify(body), {
         status: 200,
@@ -19,15 +21,13 @@ function jsonResponse(body: unknown): Response {
     })
 }
 
-/** Stubs the commits, tree and raw-file API of one tiny two-file package. */
+/** Stubs the tree and raw-file API of one tiny two-file package. */
 function stubGitlab() {
     return vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input)
-        if (url.includes('/repository/tags/')) {
-            expect(url).toContain(encodeURIComponent('v2.0-rc'))
-            return jsonResponse({ name: 'v2.0-rc', commit: { id: SHA } })
-        }
-        // Tree and file reads must happen at the resolved commit, never the tag.
+        // Nothing may ever be resolved — the pin IS the commit.
+        expect(url).not.toContain('/repository/tags/')
+        expect(url).not.toContain('/repository/commits/')
         expect(url).toContain(`ref=${SHA}`)
         if (url.includes('/repository/tree')) {
             return jsonResponse([
@@ -52,56 +52,27 @@ describe('resolvePinnedCommit', () => {
         expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    it('refuses a pin the API cannot turn into a commit (fail-closed)', async () => {
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ name: 'v2.0-rc' })))
-        const failure = await resolvePinnedCommit(TAG_REF).catch((error: unknown) => error)
-        expect(failure).toBeInstanceOf(PackageFetchError)
-        expect((failure as PackageFetchError).message).toMatch(/Commit auflösen/)
-    })
-
-    it('a branch name fails: the tags endpoint has nothing to answer', async () => {
-        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-            void input
-            return new Response('no tag', { status: 404 })
-        })
+    it('refuses any non-commit pin without touching the network', async () => {
+        const fetchMock = vi.fn()
         vi.stubGlobal('fetch', fetchMock)
-        const failure = await resolvePinnedCommit({ ...TAG_REF, ref: 'feature-x' }).catch(
-            (error: unknown) => error,
-        )
-        expect(failure).toBeInstanceOf(PackageFetchError)
-        expect((failure as PackageFetchError).status).toBe(404)
-        // Never offered to the commits endpoint, which WOULD resolve a branch.
-        const calls = fetchMock.mock.calls.map((call) => String(call[0]))
-        expect(calls.every((url) => url.includes('/repository/tags/'))).toBe(true)
-    })
-
-    it('a short-hash pin must be a prefix of the commit it resolves to', async () => {
-        // The commits endpoint resolves branch NAMES too — a branch named in
-        // hex ('cafebabe') answers with an unrelated head SHA and is refused.
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ id: SHA })))
-        const failure = await resolvePinnedCommit({ ...TAG_REF, ref: 'cafebabe' }).catch(
-            (error: unknown) => error,
-        )
-        expect(failure).toBeInstanceOf(PackageFetchError)
-        expect((failure as PackageFetchError).message).toMatch(/Commit auflösen/)
-        // While a genuine short hash resolves fine.
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ id: SHA })))
-        await expect(resolvePinnedCommit({ ...TAG_REF, ref: SHA.slice(0, 8) })).resolves.toBe(SHA)
+        for (const ref of ['v2.0-rc', 'main', 'cafebabe', SHA.slice(0, 8)]) {
+            const failure = await resolvePinnedCommit({ ...TAG_REF, ref }).catch(
+                (error: unknown) => error,
+            )
+            expect(failure).toBeInstanceOf(PackageFetchError)
+            expect((failure as PackageFetchError).message).toMatch(/kein Commit-Pin/)
+        }
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 })
 
 describe('fetchAddonPackage', () => {
-    it('resolves the pin once and fetches every file at that commit', async () => {
+    it('fetches every file at the pinned commit', async () => {
         const fetchMock = stubGitlab()
         vi.stubGlobal('fetch', fetchMock)
 
-        const { files, commit } = await fetchAddonPackage(TAG_REF)
+        const { files, commit } = await fetchAddonPackage(SHA_REF)
         expect(commit).toBe(SHA)
         expect(Object.keys(files).sort()).toEqual(['charts/values.yaml', 'civitas-component.yaml'])
-
-        const resolutionCalls = fetchMock.mock.calls
-            .map((call) => String(call[0]))
-            .filter((url) => url.includes('/repository/tags/'))
-        expect(resolutionCalls).toHaveLength(1)
     })
 })

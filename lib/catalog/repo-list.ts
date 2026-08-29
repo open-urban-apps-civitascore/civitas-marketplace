@@ -68,9 +68,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
-const COMMIT_LIKE = /^[0-9a-f]{7,40}$/i
-/** Names that are conventionally branches — never acceptable as a pin. */
-const BRANCH_LIKE = new Set(['main', 'master', 'develop', 'trunk', 'HEAD'])
 /**
  * One segment of a package path as the raw-URL fetch embeds it. Deliberately
  * an allowlist: URL parsers normalise dot segments (plain AND percent-encoded),
@@ -81,7 +78,10 @@ const BRANCH_LIKE = new Set(['main', 'master', 'develop', 'trunk', 'HEAD'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 function parsePinPath(value: unknown, where: string): string {
-    if (value === undefined || value === '.') return '.'
+    // Explicit null counts as absent, like deploymentRef/releaseTag: one
+    // serializer writing null instead of omitting the key must not blank
+    // every instance's catalogue (any malformed row rejects the whole index).
+    if (value === undefined || value === null || value === '.') return '.'
     if (typeof value !== 'string' || !value.split('/').every((s) => SAFE_PATH_SEGMENT.test(s))) {
         throw new Error(`${where} must be a plain relative path`)
     }
@@ -89,64 +89,39 @@ function parsePinPath(value: unknown, where: string): string {
 }
 
 /**
- * The row's content pointer, in either wire shape: `deploymentRef` (catalogue
- * format v3: commit-SHA pin + releaseTag) or the legacy `source.{repoUrl,
- * gitIdentifier}` pair. Both normalise to one DeploymentRef — for a legacy row
- * the pinned tag becomes `ref` AND `releaseTag` (unless it already is a commit
- * hash), and the install resolves it to a commit before fetching anything.
+ * The row's content pointer (catalogue format v3): a `deploymentRef` whose
+ * `ref` IS the commit. Anything else — a tag, a branch — belongs in
+ * `releaseTag` or nowhere: a name here would resolve to a fresh commit on
+ * every install, laundering mutable content through the pin. The legacy
+ * `source.{repoUrl,gitIdentifier}` shape is no longer read; the migrated
+ * catalogue no longer publishes it on live rows.
  */
 function parseDeploymentRef(row: Record<string, unknown>, where: string): DeploymentRef {
     const deployment = row.deploymentRef
-    if (deployment !== undefined && deployment !== null) {
-        if (
-            !isRecord(deployment) ||
-            typeof deployment.url !== 'string' ||
-            !deployment.url ||
-            typeof deployment.ref !== 'string' ||
-            !deployment.ref
-        ) {
-            throw new Error(`${where}.deploymentRef needs string fields 'url' and 'ref'`)
-        }
-        // The v3 contract: the pin IS the commit. Anything else (a tag, a
-        // branch) belongs in releaseTag or nowhere — a branch name here would
-        // resolve to a fresh commit on every install, laundering mutable
-        // content through the pin.
-        if (!COMMIT_SHA.test(deployment.ref)) {
-            throw new Error(`${where}.deploymentRef.ref must be a full 40-hex commit SHA`)
-        }
-        if (deployment.releaseTag !== undefined && deployment.releaseTag !== null &&
-            typeof deployment.releaseTag !== 'string') {
-            throw new Error(`${where}.deploymentRef.releaseTag must be a string or null`)
-        }
-        return {
-            url: deployment.url,
-            ref: deployment.ref.toLowerCase(),
-            releaseTag: typeof deployment.releaseTag === 'string' ? deployment.releaseTag : null,
-            path: parsePinPath(deployment.path, `${where}.deploymentRef.path`),
-        }
-    }
-
-    const source = row.source
     if (
-        !isRecord(source) ||
-        typeof source.repoUrl !== 'string' ||
-        !source.repoUrl ||
-        typeof source.gitIdentifier !== 'string' ||
-        !source.gitIdentifier
+        !isRecord(deployment) ||
+        typeof deployment.url !== 'string' ||
+        !deployment.url ||
+        typeof deployment.ref !== 'string' ||
+        !deployment.ref
     ) {
-        throw new Error(`${where} needs a deploymentRef (or legacy source.repoUrl/gitIdentifier)`)
+        throw new Error(`${where} needs a deploymentRef with string fields 'url' and 'ref'`)
     }
-    if (BRANCH_LIKE.has(source.gitIdentifier)) {
-        throw new Error(
-            `${where}: legacy pin '${source.gitIdentifier}' is a branch, not an immutable ref`,
-        )
+    if (!deployment.url.startsWith('https://')) {
+        throw new Error(`${where}.deploymentRef.url must be an https URL`)
     }
-    const looksLikeCommit = COMMIT_LIKE.test(source.gitIdentifier)
+    if (!COMMIT_SHA.test(deployment.ref)) {
+        throw new Error(`${where}.deploymentRef.ref must be a full 40-hex commit SHA`)
+    }
+    if (deployment.releaseTag !== undefined && deployment.releaseTag !== null &&
+        typeof deployment.releaseTag !== 'string') {
+        throw new Error(`${where}.deploymentRef.releaseTag must be a string or null`)
+    }
     return {
-        url: source.repoUrl,
-        ref: looksLikeCommit ? source.gitIdentifier.toLowerCase() : source.gitIdentifier,
-        releaseTag: looksLikeCommit ? null : source.gitIdentifier,
-        path: '.',
+        url: deployment.url,
+        ref: deployment.ref.toLowerCase(),
+        releaseTag: typeof deployment.releaseTag === 'string' ? deployment.releaseTag : null,
+        path: parsePinPath(deployment.path, `${where}.deploymentRef.path`),
     }
 }
 
@@ -173,10 +148,18 @@ function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
         if (!Array.isArray(row.keywords)) {
             throw new Error(`${where}[${index}].keywords is not an array`)
         }
-        const deploymentRef = parseDeploymentRef(row, `${where}[${index}]`)
         const rest = Object.fromEntries(
-            Object.entries(row).filter(([key]) => key !== 'source'),
+            Object.entries(row).filter(([key]) => key !== 'source' && key !== 'deploymentRef'),
         )
+        // A tombstone exists to be seen in history, never installed — its
+        // historical pin data (possibly a pre-v3 shape) is deliberately not
+        // parsed, so an old shape can never take the live index down. The
+        // flag is normalised to a strict boolean here, so the pin-skip and
+        // the visibility filters can never disagree on a truthy oddity.
+        if (row.revoked) {
+            return { ...rest, revoked: true } as unknown as CatalogSummary
+        }
+        const deploymentRef = parseDeploymentRef(row, `${where}[${index}]`)
         return { ...rest, deploymentRef } as unknown as CatalogSummary
     })
 }
