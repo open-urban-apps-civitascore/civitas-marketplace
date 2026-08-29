@@ -1,6 +1,7 @@
 import { parse } from 'yaml'
 
 import type { AddonPackageRef } from './listing'
+import { resolvePinnedCommit } from './package-source'
 
 
 
@@ -90,11 +91,19 @@ export async function fetchAddonPackageFacts(ref: AddonPackageRef): Promise<Addo
     const cached = cache.get(key)
     if (cached) return cached
 
+    // Best-effort, unlike the install path's fail-closed pin: an unresolvable
+    // ref costs the page its facts section (uncached — the next view retries).
+    // It never falls back to reading at the raw, possibly mutable ref: facts
+    // that disagree with what an install would vendor are worse than no facts.
+    const commit = await resolvePinnedCommit(ref).catch(() => null)
+    if (!commit) return EMPTY
+    const pinned: AddonPackageRef = { ...ref, ref: commit }
+
     const [component, keycloak, images, charts] = await Promise.all([
-        readYaml(ref, 'civitas-component.yaml'),
-        readYaml(ref, 'keycloak-clients.yaml'),
-        readYaml(ref, 'images.yaml'),
-        readYaml(ref, 'charts.yaml'),
+        readYaml(pinned, 'civitas-component.yaml'),
+        readYaml(pinned, 'keycloak-clients.yaml'),
+        readYaml(pinned, 'images.yaml'),
+        readYaml(pinned, 'charts.yaml'),
     ])
 
     const facts: AddonPackageFacts = {

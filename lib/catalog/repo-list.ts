@@ -1,4 +1,10 @@
-import type { AddonEntry, CatalogMeta, CatalogSummary, RepoListIndex } from '@/lib/catalog/types'
+import type {
+    AddonEntry,
+    CatalogMeta,
+    CatalogSummary,
+    DeploymentRef,
+    RepoListIndex,
+} from '@/lib/catalog/types'
 
 /**
  * The repo-list: a single git-hosted `index.json` (F-Droid model) that every
@@ -61,6 +67,89 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/i
+const COMMIT_LIKE = /^[0-9a-f]{7,40}$/i
+/** Names that are conventionally branches — never acceptable as a pin. */
+const BRANCH_LIKE = new Set(['main', 'master', 'develop', 'trunk', 'HEAD'])
+/**
+ * One segment of a package path as the raw-URL fetch embeds it. Deliberately
+ * an allowlist: URL parsers normalise dot segments (plain AND percent-encoded),
+ * so a `..` anywhere in the path would consume the pinned-SHA URL segment and
+ * re-target the fetch at a mutable ref. No legitimate package path needs
+ * anything outside this set.
+ */
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+function parsePinPath(value: unknown, where: string): string {
+    if (value === undefined || value === '.') return '.'
+    if (typeof value !== 'string' || !value.split('/').every((s) => SAFE_PATH_SEGMENT.test(s))) {
+        throw new Error(`${where} must be a plain relative path`)
+    }
+    return value
+}
+
+/**
+ * The row's content pointer, in either wire shape: `deploymentRef` (catalogue
+ * format v3: commit-SHA pin + releaseTag) or the legacy `source.{repoUrl,
+ * gitIdentifier}` pair. Both normalise to one DeploymentRef — for a legacy row
+ * the pinned tag becomes `ref` AND `releaseTag` (unless it already is a commit
+ * hash), and the install resolves it to a commit before fetching anything.
+ */
+function parseDeploymentRef(row: Record<string, unknown>, where: string): DeploymentRef {
+    const deployment = row.deploymentRef
+    if (deployment !== undefined && deployment !== null) {
+        if (
+            !isRecord(deployment) ||
+            typeof deployment.url !== 'string' ||
+            !deployment.url ||
+            typeof deployment.ref !== 'string' ||
+            !deployment.ref
+        ) {
+            throw new Error(`${where}.deploymentRef needs string fields 'url' and 'ref'`)
+        }
+        // The v3 contract: the pin IS the commit. Anything else (a tag, a
+        // branch) belongs in releaseTag or nowhere — a branch name here would
+        // resolve to a fresh commit on every install, laundering mutable
+        // content through the pin.
+        if (!COMMIT_SHA.test(deployment.ref)) {
+            throw new Error(`${where}.deploymentRef.ref must be a full 40-hex commit SHA`)
+        }
+        if (deployment.releaseTag !== undefined && deployment.releaseTag !== null &&
+            typeof deployment.releaseTag !== 'string') {
+            throw new Error(`${where}.deploymentRef.releaseTag must be a string or null`)
+        }
+        return {
+            url: deployment.url,
+            ref: deployment.ref.toLowerCase(),
+            releaseTag: typeof deployment.releaseTag === 'string' ? deployment.releaseTag : null,
+            path: parsePinPath(deployment.path, `${where}.deploymentRef.path`),
+        }
+    }
+
+    const source = row.source
+    if (
+        !isRecord(source) ||
+        typeof source.repoUrl !== 'string' ||
+        !source.repoUrl ||
+        typeof source.gitIdentifier !== 'string' ||
+        !source.gitIdentifier
+    ) {
+        throw new Error(`${where} needs a deploymentRef (or legacy source.repoUrl/gitIdentifier)`)
+    }
+    if (BRANCH_LIKE.has(source.gitIdentifier)) {
+        throw new Error(
+            `${where}: legacy pin '${source.gitIdentifier}' is a branch, not an immutable ref`,
+        )
+    }
+    const looksLikeCommit = COMMIT_LIKE.test(source.gitIdentifier)
+    return {
+        url: source.repoUrl,
+        ref: looksLikeCommit ? source.gitIdentifier.toLowerCase() : source.gitIdentifier,
+        releaseTag: looksLikeCommit ? null : source.gitIdentifier,
+        path: '.',
+    }
+}
+
 function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
     if (value === undefined) return []
     if (!Array.isArray(value)) throw new Error(`${where} is not an array`)
@@ -84,15 +173,11 @@ function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
         if (!Array.isArray(row.keywords)) {
             throw new Error(`${where}[${index}].keywords is not an array`)
         }
-        const source = row.source
-        if (
-            !isRecord(source) ||
-            typeof source.repoUrl !== 'string' ||
-            typeof source.gitIdentifier !== 'string'
-        ) {
-            throw new Error(`${where}[${index}].source needs repoUrl and gitIdentifier`)
-        }
-        return row as unknown as CatalogSummary
+        const deploymentRef = parseDeploymentRef(row, `${where}[${index}]`)
+        const rest = Object.fromEntries(
+            Object.entries(row).filter(([key]) => key !== 'source'),
+        )
+        return { ...rest, deploymentRef } as unknown as CatalogSummary
     })
 }
 
