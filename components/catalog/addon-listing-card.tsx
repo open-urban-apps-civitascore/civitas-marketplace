@@ -69,9 +69,8 @@ export function AddonListingCard({ entry }: { entry: ParsedAddon }) {
                     {installable ? (
                         <span className="text-xs text-muted-foreground">
                             Version{' '}
-                            {listing.install?.source.refType === 'tag'
-                                ? listing.install.source.ref
-                                : listing.install?.source.ref.slice(0, 7)}
+                            {listing.install?.source.releaseTag ??
+                                listing.install?.source.ref.slice(0, 7)}
                         </span>
                     ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-warn">

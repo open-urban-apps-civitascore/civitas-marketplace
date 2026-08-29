@@ -49,7 +49,17 @@ function parseMembers(value: unknown, where: string): PackageMember[] {
         if (!isRecord(member)) {
             throw new CatalogIntegrityError(`${where}[${index}] is not an object`)
         }
-        requireString(member, 'file', `${where}[${index}]`)
+        const file = requireString(member, 'file', `${where}[${index}]`)
+        // Member files live flat inside core-ir/ and are embedded verbatim in
+        // raw fetch URLs. URL parsers normalise dot segments (plain AND
+        // percent-encoded), so a hostile name ('../…') would consume the
+        // pinned-SHA URL segment and re-target the fetch at a mutable ref —
+        // an allowlist is the only reliable guard.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file)) {
+            throw new CatalogIntegrityError(
+                `${where}[${index}].file '${file}' is not a plain file name`,
+            )
+        }
         const parameters = member.parameters
         if (parameters !== undefined && !Array.isArray(parameters)) {
             throw new CatalogIntegrityError(`${where}[${index}].parameters is not an array`)

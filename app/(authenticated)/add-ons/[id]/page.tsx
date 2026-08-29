@@ -54,8 +54,7 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
     // its correctness.
     const facts = install ? await fetchAddonPackageFacts(install.source) : NO_PACKAGE_FACTS
 
-    const version =
-        install && (install.source.refType === 'tag' ? install.source.ref : install.source.ref.slice(0, 12))
+    const version = install && (install.source.releaseTag ?? install.source.ref.slice(0, 12))
 
     // Images and charts are named per part — several parts may share one chart
     // (the geoportal's three all use charts/general), so the part is what tells
@@ -269,8 +268,14 @@ export default async function AddonDetailPage({ params }: { params: Promise<{ id
                                 <p className="mt-3 text-sm text-muted-foreground">
                                     Die Dateien werden unverändert aus{' '}
                                     <Code>{install.source.project}</Code> geholt, festgelegt auf{' '}
-                                    <Code>{install.source.ref}</Code> — der Marktplatz hält keine
-                                    eigene Kopie.
+                                    <Code>{install.source.releaseTag ?? install.source.ref.slice(0, 12)}</Code>
+                                    {install.source.releaseTag && /^[0-9a-f]{40}$/i.test(install.source.ref) && (
+                                        <>
+                                            {' '}
+                                            (Commit <Code>{install.source.ref.slice(0, 12)}</Code>)
+                                        </>
+                                    )}{' '}
+                                    — der Marktplatz hält keine eigene Kopie.
                                 </p>
                             </>
                         ) : (

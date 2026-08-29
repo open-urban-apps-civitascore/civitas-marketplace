@@ -243,10 +243,21 @@ export function isDataStructureEntry(entry: CatalogEntry): entry is DataStructur
     return entry.manifest.type === 'datastructure'
 }
 
-/** Where a catalogue row's package content lives: git repo + pinned ref (tag/commit). */
-export interface RepoSource {
-    repoUrl: string
-    gitIdentifier: string
+/**
+ * Where a catalogue row's content lives: git repo + immutable pin. The pin is
+ * `ref` — a full 40-hex commit SHA, the ONLY thing an install ever fetches.
+ * `releaseTag` carries the upstream release name the SHA was curated from; it
+ * exists for display and drift detection and is never used to fetch anything
+ * (null when upstream has no release yet). Legacy index rows that still pin a
+ * tag are normalised into this shape at parse time and their tag is resolved
+ * to a commit — fail-closed — before any content is fetched.
+ */
+export interface DeploymentRef {
+    url: string
+    ref: string
+    releaseTag: string | null
+    /** Folder inside the repo holding the content; '.' for the root. */
+    path: string
 }
 
 /**
@@ -257,8 +268,13 @@ export interface RepoSource {
  * id and version between row and fetched manifest and refuses on mismatch.
  */
 export interface CatalogSummary extends CatalogManifest {
-    /** Absent only for local mock fixtures, which need no fetch. */
-    source?: RepoSource
+    /**
+     * Absent only for local mock fixtures, which need no fetch. On the wire
+     * this arrives either as `deploymentRef` (catalogue format v3) or as the
+     * legacy `source.{repoUrl,gitIdentifier}` pair — the parser normalises
+     * both into this one shape.
+     */
+    deploymentRef?: DeploymentRef
     /** Tombstone: entry withdrawn — hidden from the catalogue, never deleted. */
     revoked?: boolean
     revokedReason?: string
@@ -282,9 +298,13 @@ export interface AddonEntry {
     compatibility: { coreVersion: string; branch?: string; lastUpdated?: string }[]
     requiredCapabilities?: string[]
     /**
-     * `ref`/`refType` pin the package to an immutable version; `resolvedCommit`
-     * records what that tag pointed at when it was curated, so a moved tag can
-     * be detected. Absent on rows that are listable but not installable.
+     * `ref` pins the package to an immutable version — target shape: a 40-hex
+     * commit SHA, with `releaseTag` carrying the upstream release name for
+     * display and drift detection (never fetched). Legacy rows still pin a
+     * tag in `ref`; when they carry the curated `resolvedCommit`, THAT is
+     * used as the pin (a later tag move then changes nothing), otherwise the
+     * tag is resolved fail-closed at install time. They are tolerated until
+     * the catalogue migrates. Absent `ref`: listable, not installable.
      */
     deploymentRef: {
         type: string
@@ -292,7 +312,10 @@ export interface AddonEntry {
         chartName?: string
         path?: string
         ref?: string
+        releaseTag?: string | null
+        /** Legacy (pre-releaseTag rows); ignored — the ref's shape decides. */
         refType?: 'tag' | 'commit'
+        /** Legacy; on a tag-pinned row this curated commit becomes the pin. */
         resolvedCommit?: string
     }
     /** Longer text; `description` stays the one-sentence summary a card shows. */

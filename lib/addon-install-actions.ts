@@ -25,12 +25,13 @@ export interface AddonInstallResult {
 }
 
 /** Human-readable provenance of the package, for the pull-request body. */
-function provenanceOf(listing: AddonListing): string | undefined {
+function provenanceOf(listing: AddonListing, commit: string): string | undefined {
     const source = listing.install?.source
     if (!source) return undefined
-    const { project, ref, path } = source
+    const { project, releaseTag, path } = source
     const location = path === '.' ? '' : ` (${path})`
-    return `\`${project}\`${location} at \`${ref}\``
+    const release = releaseTag ? ` at \`${releaseTag}\`` : ''
+    return `\`${project}\`${location}${release}, commit \`${commit}\``
 }
 
 /**
@@ -38,24 +39,27 @@ function provenanceOf(listing: AddonListing): string | undefined {
  * the pinned version. The marketplace never stores a copy, so what lands in the
  * pull request is what the maintainer published at that version.
  */
-async function resolveCandidate(listing: AddonListing): Promise<InstallCandidate> {
+async function resolveCandidate(
+    listing: AddonListing,
+): Promise<{ candidate: InstallCandidate; commit: string }> {
     const install = listing.install
     if (!install) {
         throw new PackageFetchError('Diese Listung enthält keine Installationsangaben.', 400)
     }
 
+    const { files, commit } = await fetchAddonPackage(install.source)
     return {
-        componentName: install.componentName,
-        subdomain: install.subdomain,
-        displayName: listing.displayName,
-        description: listing.description ?? listing.summary,
-        publisher: listing.publisher,
-        license: listing.license,
-        version:
-            install.source.refType === 'tag'
-                ? install.source.ref
-                : install.source.ref.slice(0, 7),
-        files: await fetchAddonPackage(install.source),
+        candidate: {
+            componentName: install.componentName,
+            subdomain: install.subdomain,
+            displayName: listing.displayName,
+            description: listing.description ?? listing.summary,
+            publisher: listing.publisher,
+            license: listing.license,
+            version: install.source.releaseTag ?? commit.slice(0, 7),
+            files,
+        },
+        commit,
     }
 }
 
@@ -150,7 +154,7 @@ export async function proposeAddonInstall(
             }
         }
 
-        const candidate = await resolveCandidate(listing)
+        const { candidate, commit } = await resolveCandidate(listing)
         const change = composeAddonInstall(candidate, config)
 
         const result = await openPullRequest(config, {
@@ -161,7 +165,7 @@ export async function proposeAddonInstall(
                 change,
                 registration.line,
                 session.user?.name ?? session.user?.email ?? 'unbekannt',
-                provenanceOf(listing),
+                provenanceOf(listing, commit),
             ),
             files: {
                 ...change.files,
