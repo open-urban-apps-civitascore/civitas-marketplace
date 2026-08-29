@@ -16,7 +16,7 @@ const traffic = mockPackages.find(
 )!
 
 const REPO_URL =
-    'https://gitlab.example/civitascore-openurbanapps/commune-mittelerde-trafficcounter'
+    'https://gitlab.example/civitascore-openurbanapps/commune-musterhausen-trafficcounter'
 
 const COMMIT = '9bef74ce374647c776e0249337a4af111bc7cd3b'
 
