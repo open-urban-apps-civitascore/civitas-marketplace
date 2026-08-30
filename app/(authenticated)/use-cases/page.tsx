@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { ArrowUpRight, Check } from 'lucide-react'
 
 import { CatalogCard } from '@/components/catalog/catalog-card'
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
@@ -26,7 +26,8 @@ export default async function UseCasesPage() {
                 <h1>Use Cases</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
                     Vollständige Anwendungsfälle: Datenmodell, Datenquellen und – künftig –
-                    Pipeline und Dashboard, installierbar in einem Schritt.
+                    Pipeline und Dashboard, installierbar in einem Schritt. Dazu
+                    Praxisbeispiele, die andernorts laufen und hier beschrieben sind.
                 </p>
                 <div className="mt-2">
                     <CatalogFreshness meta={meta} />
@@ -43,14 +44,35 @@ export default async function UseCasesPage() {
                             manifest={entry}
                             action={
                                 <div className="flex flex-wrap items-start gap-2">
-                                    <InstallDialog
-                                        entryId={entry.id}
-                                        displayName={entry.displayName}
-                                        version={entry.version}
-                                        installed={installed}
-                                        demoAvailable={previewAvailable}
-                                    />
-                                    {previewAvailable && <SamplePreview entryId={entry.id} />}
+                                    {/* Installability is decided by the pin and nothing else.
+                                        A described entry documents an implementation running
+                                        elsewhere — offering it an install button would promise
+                                        something the catalogue cannot deliver. */}
+                                    {entry.deploymentRef ? (
+                                        <>
+                                            <InstallDialog
+                                                entryId={entry.id}
+                                                displayName={entry.displayName}
+                                                version={entry.version}
+                                                installed={installed}
+                                                demoAvailable={previewAvailable}
+                                            />
+                                            {previewAvailable && <SamplePreview entryId={entry.id} />}
+                                        </>
+                                    ) : (
+                                        entry.implementation?.reference && (
+                                            <a
+                                                href={entry.implementation.reference.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                                            >
+                                                {entry.implementation.reference.source ??
+                                                    'Zum Praxisbeispiel'}
+                                                <ArrowUpRight className="size-4" />
+                                            </a>
+                                        )
+                                    )}
                                 </div>
                             }
                             badge={

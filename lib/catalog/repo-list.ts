@@ -125,6 +125,41 @@ function parseDeploymentRef(row: Record<string, unknown>, where: string): Deploy
     }
 }
 
+/**
+ * Validates the optional `implementation` block. Only the reference URL is
+ * checked, because it is the one field the UI turns into a link — a typo there
+ * would render a dead button rather than fail visibly. Everything else is
+ * curated prose we would only be guessing about.
+ */
+function checkImplementation(row: Record<string, unknown>, where: string): void {
+    const implementation = row.implementation
+    if (implementation === undefined) return
+    if (!isRecord(implementation)) {
+        throw new Error(`${where}.implementation is not an object`)
+    }
+    const reference = implementation.reference
+    if (reference === undefined) return
+    if (
+        !isRecord(reference) ||
+        typeof reference.url !== 'string' ||
+        !reference.url.startsWith('https://')
+    ) {
+        throw new Error(`${where}.implementation.reference needs an https 'url'`)
+    }
+}
+
+/**
+ * True for a row that documents an implementation running elsewhere: no repo,
+ * no commit, nothing to install. Recognised by the reference link and NEVER by
+ * a missing pin alone — a row that simply forgot its `deploymentRef` must keep
+ * failing loudly instead of quietly degrading into a link card.
+ */
+function isDescribedRow(row: Record<string, unknown>): boolean {
+    if (row.deploymentRef !== undefined) return false
+    const implementation = row.implementation
+    return isRecord(implementation) && isRecord(implementation.reference)
+}
+
 function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
     if (value === undefined) return []
     if (!Array.isArray(value)) throw new Error(`${where} is not an array`)
@@ -158,6 +193,14 @@ function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
         // the visibility filters can never disagree on a truthy oddity.
         if (row.revoked) {
             return { ...rest, revoked: true } as unknown as CatalogSummary
+        }
+        checkImplementation(row, `${where}[${index}]`)
+        // A described entry documents an implementation elsewhere: listable,
+        // never installable. Without this branch a single such row would throw
+        // and take the WHOLE index down to last-known-good on every instance —
+        // silently, since the catalogue keeps serving the previous state.
+        if (isDescribedRow(row)) {
+            return { ...rest } as unknown as CatalogSummary
         }
         const deploymentRef = parseDeploymentRef(row, `${where}[${index}]`)
         return { ...rest, deploymentRef } as unknown as CatalogSummary

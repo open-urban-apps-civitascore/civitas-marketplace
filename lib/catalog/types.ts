@@ -259,6 +259,64 @@ export interface DeploymentRef {
 }
 
 /**
+ * How a use case was realised in practice, by whom, at what cost — the part of
+ * a catalogue entry that describes an implementation rather than shipping one.
+ *
+ * Deliberately ORTHOGONAL to installability. A packaged entry may carry it too
+ * ("this is who runs it in production"), so there are not two kinds of row in
+ * the schema, only one optional block. What decides installability stays
+ * `deploymentRef` and nothing else.
+ *
+ * Every field is optional except the shape itself: these entries are curated
+ * from other people's public descriptions, and demanding completeness would
+ * mean inventing values. The one field that carries weight is `reference` —
+ * it is what allows the description here to stay short, because everything
+ * else can live at the source.
+ */
+export interface Implementation {
+    /** The organisation running it — the strongest credibility signal there is. */
+    operator?: string
+    parties?: {
+        /** Units and organisations involved (Ämter, Werke, Verbände). */
+        stakeholders?: string[]
+        /** Contractors and vendors, with their role in brackets. */
+        serviceProviders?: string[]
+    }
+    /** Components it was built with — the anchor for "we use that too". */
+    stack?: string[]
+    resources?: {
+        /** Rough effort band, e.g. "M, unter 50 Tage". */
+        effort?: string
+        /** Rough cost band, e.g. "S, unter 1.000 Euro". */
+        cost?: string
+        /** Programme or budget line that paid for it. */
+        funding?: string
+    }
+    /** Wirkungslogik: what went in, what came out, what it changed. */
+    logicModel?: {
+        input?: string
+        output?: string
+        impact?: string
+        outcome?: string
+    }
+    /**
+     * Structured rather than free text on purpose: `wanted` makes "is this
+     * operator looking for partners" a filter instead of a sentence someone
+     * has to read — which is the one thing a marketplace can do that a
+     * collection of PDFs cannot.
+     */
+    collaboration?: {
+        wanted: boolean
+        seeking?: string
+    }
+    /** Where the full description lives. `source` names the collection it came from. */
+    reference?: {
+        url: string
+        source?: string
+    }
+}
+
+/**
  * One row of the repo-list index: the catalogue manifest (everything the list
  * page renders — no per-entry fetch needed for browsing) plus the source
  * pointer the install resolves the package from. The duplication with the
@@ -267,10 +325,20 @@ export interface DeploymentRef {
  */
 export interface CatalogSummary extends CatalogManifest {
     /**
-     * Absent for local mock fixtures (which need no fetch) and for tombstoned
-     * rows, whose historical pin data is deliberately not parsed.
+     * Absent for local mock fixtures (which need no fetch), for tombstoned rows
+     * whose historical pin data is deliberately not parsed, and for DESCRIBED
+     * entries — those document an implementation running elsewhere and have
+     * nothing to fetch. Presence of this field is the single test for
+     * installability; nothing else decides it.
      */
     deploymentRef?: DeploymentRef
+    /**
+     * How this was realised in practice. On a described entry it carries the
+     * whole substance and its `reference` is what marks the row as deliberately
+     * pin-less; on a packaged entry it is extra context about a real
+     * deployment. See {@link Implementation}.
+     */
+    implementation?: Implementation
     /** Tombstone: entry withdrawn — hidden from the catalogue, never deleted. */
     revoked?: boolean
     revokedReason?: string
