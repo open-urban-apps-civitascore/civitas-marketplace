@@ -89,3 +89,16 @@ also checks, but only so the shell is not rendered for signed-out visitors - it
 cannot be the guard, because layouts are cached client-side and do not re-render
 when navigating between pages that share them (see the Next.js authentication
 guide, "Layouts and auth checks").
+
+## Funding
+
+This project is funded by the **Federal Ministry of Research, Technology and Space (BMFTR)** as part of the **[Prototype Fund](https://prototypefund.de/)**, an initiative by the Open Knowledge Foundation Germany. 
+
+<div style="display: flex; gap: 20px; align-items: center; margin-top: 20px;">
+  <a href="https://www.bmbf.de/" target="_blank">
+    <img src="./logo/bmftr.svg" height="80" alt="BMFTR Logo" />
+  </a>
+  <a href="https://prototypefund.de/" target="_blank">
+    <img src="./logo/ptf.svg" height="80" alt="Prototype Fund Logo" />
+  </a>
+</div>
