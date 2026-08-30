@@ -1,0 +1,56 @@
+{
+  "name": "Kataster-Import",
+  "description": "Cron-getriggerter Vollabzug der Kataster-Tabelle, Mapping ins Zielformat mit Geometrie, UPSERT in die PostGIS-Tabelle.",
+  "model": {
+    "nodes": [
+      {
+        "id": "n-start",
+        "kind": "start",
+        "label": "Start",
+        "x-ui-position": { "x": -520, "y": 120 }
+      },
+      {
+        "id": "n-cron",
+        "kind": "cron",
+        "label": "Jede Minute",
+        "cronExpression": "0 * * * * ?",
+        "cronPreview": "jede Minute",
+        "x-ui-position": { "x": -260, "y": 120 }
+      },
+      {
+        "id": "n-source",
+        "kind": "source",
+        "label": "Baumkataster-DB",
+        "sourceRef": "Baumkataster-DB",
+        "x-ui-position": { "x": 0, "y": 120 }
+      },
+      {
+        "id": "n-mapping",
+        "kind": "mapping",
+        "label": "Kataster → Kiez-Baum",
+        "mappingRef": "urn:core:standard:openurbanapps:mapping:environment:katasterzukiezbaum:jd1uf7qtd1",
+        "x-ui-position": { "x": 260, "y": 120 }
+      },
+      {
+        "id": "n-sink",
+        "kind": "sink",
+        "label": "Kiez-Bäume-Tabelle",
+        "sinkRef": "Kiez-Bäume-Tabelle",
+        "x-ui-position": { "x": 520, "y": 120 }
+      },
+      {
+        "id": "n-end",
+        "kind": "end",
+        "label": "Ende",
+        "x-ui-position": { "x": 780, "y": 120 }
+      }
+    ],
+    "edges": [
+      { "id": "e-start-cron", "source": "n-start", "target": "n-cron" },
+      { "id": "e-cron-source", "source": "n-cron", "target": "n-source" },
+      { "id": "e-source-mapping", "source": "n-source", "target": "n-mapping" },
+      { "id": "e-mapping-sink", "source": "n-mapping", "target": "n-sink" },
+      { "id": "e-sink-end", "source": "n-sink", "target": "n-end" }
+    ]
+  }
+}

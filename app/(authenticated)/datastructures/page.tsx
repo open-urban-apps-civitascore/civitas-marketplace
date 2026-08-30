@@ -1,23 +1,52 @@
-import { getAccessToken, requireSession } from '@/lib/session'
+import { Check } from 'lucide-react'
 
-export default async function DataStructuresPage() {
+import { CatalogCard } from '@/components/catalog/catalog-card'
+import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
+import { InstallButton } from '@/components/catalog/install-button'
+import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
+import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
+import { requireSession } from '@/lib/session'
+
+export default async function DataStructuresCatalogPage() {
     await requireSession()
-    const accessToken = await getAccessToken()
+    const structures = await getCatalogSummaries('datastructure')
+    const meta = await getCatalogMeta()
+    const installedIds = await fetchInstalledCatalogEntryIds()
 
-    // Through the APISIX gateway (:9080), never straight to portal-backend:
-    // the gateway is what makes OPA compute the scope header the backend needs.
-    const res = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/datastructures`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        cache: 'no-store',
-    })
-    if (!res.ok) return <p>Backend: {res.status} {res.statusText}</p>
-
-    const page = await res.json()
     return (
-        <ul>
-            {page.content?.map((ds: { id: string; name: string }) => (
-                <li key={ds.id}>{ds.name}</li>
-            ))}
-        </ul>
+        <div className="flex flex-col gap-6">
+            <div>
+                <h1>Datenstrukturen</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                    Wiederverwendbare Fachmodelle — einzeln installierbar und von mehreren Use
+                    Cases gemeinsam nutzbar.
+                </p>
+                <div className="mt-2">
+                    <CatalogFreshness meta={meta} />
+                </div>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {structures.map((entry) => {
+                    const installed = installedIds.has(entry.id)
+
+                    return (
+                        <CatalogCard
+                            key={entry.id}
+                            manifest={entry}
+                            action={<InstallButton entryId={entry.id} installed={installed} />}
+                            badge={
+                                installed ? (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-success/10 dark:bg-success/20 px-2 py-1 text-xs font-medium text-success">
+                                        <Check className="size-3.5" />
+                                        Bereits installiert
+                                    </span>
+                                ) : undefined
+                            }
+                        />
+                    )
+                })}
+            </div>
+        </div>
     )
 }

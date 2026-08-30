@@ -2,6 +2,8 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getToken } from 'next-auth/jwt'
 import { auth } from '@/auth'
+import { sessionCookieName } from '@/auth.config'
+import { isTokenExpired, refreshAccessToken } from '@/lib/tokenUtils'
 
 /**
  * Guard for authenticated pages. Every protected page calls this itself — the
@@ -18,14 +20,30 @@ export async function requireSession() {
 /**
  * The Keycloak access token for server-side backend calls. It lives only in the
  * encrypted session cookie and is never exposed to the browser.
+ *
+ * Access tokens live ~5 minutes, and Server Components cannot write cookies —
+ * so the stored token WILL be stale for any session older than that. Instead
+ * of failing with 401s, an expired token is exchanged on the fly via the
+ * refresh token; the cookie stays stale, which is harmless (the exchange just
+ * repeats per request) until a proxy.ts persists refreshes centrally.
  */
 export async function getAccessToken(): Promise<string> {
     const requestHeaders = await headers()
+    const secureCookie = requestHeaders.get('x-forwarded-proto') === 'https'
     const token = await getToken({
         req: { headers: requestHeaders },
         secret: process.env.NEXTAUTH_SECRET,
-        secureCookie: requestHeaders.get('x-forwarded-proto') === 'https',
+        secureCookie,
+        // Must match the namespaced name from auth.config.ts — getToken looks the
+        // cookie up by name and would otherwise find nothing.
+        cookieName: sessionCookieName(secureCookie),
     })
     if (!token?.access_token) redirect('/login')
+
+    if (isTokenExpired(token.expires_at)) {
+        const refreshed = await refreshAccessToken(token)
+        if (refreshed.error || !refreshed.access_token) redirect('/login')
+        return refreshed.access_token
+    }
     return token.access_token
 }

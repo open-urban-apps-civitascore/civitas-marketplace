@@ -1,0 +1,106 @@
+{
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:luftmessung:8vuby3re7d",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Luftmessung",
+  "description": "Rohmessung einer Luftqualitäts-Station, publiziert über MQTT. Feinstaub (PM2,5 als Pflichtwert, PM10 optional) plus optionale Gaswerte und meteorologischer Kontext — abgestimmt auf günstige Stationshardware (SDS011-Feinstaubsensor, DHT22-Klimasensor), die keine NO₂-/CO-Messung liefert.",
+  "$ref": "#/$defs/Luftmessung",
+  "$defs": {
+    "Luftmessung": {
+      "type": "object",
+      "title": "Luftmessung",
+      "description": "Ein Messzyklus einer Station: Pflichtfelder Kennung, Zeitstempel und PM2,5.",
+      "required": ["stationId", "timestamp", "pm25"],
+      "properties": {
+        "stationId": {
+          "type": "string",
+          "description": "Stations-Kennung, z. B. 'KIEZ-001'."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601-UTC-Zeitstempel des Messzyklus."
+        },
+        "pm25": {
+          "$ref": "#/$defs/Measurement",
+          "description": "Feinstaub PM2,5."
+        },
+        "pm10": {
+          "$ref": "#/$defs/Measurement",
+          "description": "Feinstaub PM10."
+        },
+        "no2": {
+          "$ref": "#/$defs/Measurement",
+          "description": "Stickstoffdioxid (NO₂), falls die Station einen Gassensor hat."
+        },
+        "co": {
+          "$ref": "#/$defs/Measurement",
+          "description": "Kohlenmonoxid (CO), falls die Station einen Gassensor hat."
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Lufttemperatur in Grad Celsius."
+        },
+        "humidity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Relative Luftfeuchtigkeit in Prozent."
+        },
+        "location": {
+          "$ref": "#/$defs/GeoPoint",
+          "description": "Aktuelle GPS-Position, falls die Station ein GPS-Modul hat; übersteuert den Stations-Standort."
+        }
+      }
+    },
+    "Measurement": {
+      "type": "object",
+      "title": "Messwert",
+      "description": "Ein einzelner Schadstoff-Messwert mit Qualitätskennzeichen und optionalem Rohwert.",
+      "required": ["value", "unit"],
+      "properties": {
+        "value": {
+          "type": "number",
+          "description": "Kalibrierter Messwert in der angegebenen Einheit."
+        },
+        "unit": {
+          "type": "string",
+          "description": "Physikalische Einheit, z. B. 'µg/m³', 'mg/m³'."
+        },
+        "quality": {
+          "type": "string",
+          "enum": ["good", "suspect", "bad", "unknown"],
+          "default": "unknown",
+          "description": "Qualitätskennzeichen der Sensor-Firmware."
+        },
+        "rawValue": {
+          "type": "number",
+          "description": "Unkalibrierter Rohwert, falls die Kalibrierung nachgelagert erfolgt."
+        }
+      }
+    },
+    "GeoPoint": {
+      "type": "object",
+      "title": "GeoPunkt",
+      "description": "WGS-84-Koordinate, optional mit Höhe über dem Meeresspiegel.",
+      "required": ["lat", "lon"],
+      "properties": {
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "Breitengrad in Dezimalgrad (WGS-84)."
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "Längengrad in Dezimalgrad (WGS-84)."
+        },
+        "elevation": {
+          "type": "number",
+          "description": "Höhe über dem Meeresspiegel in Metern."
+        }
+      }
+    }
+  }
+}

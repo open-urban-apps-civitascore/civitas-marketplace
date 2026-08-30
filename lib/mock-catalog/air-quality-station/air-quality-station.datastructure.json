@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:airqualitystation:q7it0vhxlx",
+  "title": "Luftqualitäts-Messstation",
+  "description": "Stationäre Luftqualitätsmessung: Stationen mit Standort, Messwerte je Station und Zeitpunkt.",
+  "$defs": {
+    "Messstation": {
+      "type": "object",
+      "properties": {
+        "stationsId": { "type": "string", "description": "Eindeutige Kennung der Station" },
+        "name": { "type": "string", "description": "Anzeigename, z. B. Straße/Platz" },
+        "lat": { "type": "number", "description": "Breitengrad (WGS84)" },
+        "lon": { "type": "number", "description": "Längengrad (WGS84)" }
+      },
+      "required": ["stationsId", "lat", "lon"]
+    },
+    "Messwert": {
+      "type": "object",
+      "properties": {
+        "stationsId": { "type": "string", "description": "Kennung der messenden Station" },
+        "zeitstempel": { "type": "string", "format": "date-time" },
+        "pm10": { "type": "number", "description": "Feinstaub PM10 in µg/m³" },
+        "pm25": { "type": "number", "description": "Feinstaub PM2.5 in µg/m³" },
+        "no2": { "type": "number", "description": "Stickstoffdioxid in µg/m³" }
+      },
+      "required": ["stationsId", "zeitstempel"]
+    }
+  }
+}

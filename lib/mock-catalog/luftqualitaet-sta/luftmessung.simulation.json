@@ -1,0 +1,49 @@
+{
+  "sourceRef": "Luftmessungs-Feed",
+  "messageClass": "#/$defs/Luftmessung",
+  "topicBase": "openurbanapps/luftqualitaet",
+  "intervalSeconds": 10,
+  "streams": [
+    {
+      "name": "station-kiez-nord",
+      "fields": {
+        "stationId": { "kind": "constant", "value": "KIEZ-001" },
+        "timestamp": { "kind": "now" },
+        "pm25.value": { "kind": "dailyProfile", "min": 4, "max": 38, "peakHours": [8, 18], "noise": 0.25 },
+        "pm25.unit": { "kind": "constant", "value": "µg/m³" },
+        "pm25.quality": { "kind": "enum", "values": ["good", "good", "good", "suspect"] },
+        "temperature": { "kind": "dailyProfile", "min": 12, "max": 27, "peakHours": [14, 15] },
+        "humidity": { "kind": "randomWalk", "min": 35, "max": 85, "step": 4 },
+        "location.lat": { "kind": "constant", "value": 51.968 },
+        "location.lon": { "kind": "constant", "value": 7.612 }
+      }
+    },
+    {
+      "name": "station-kiez-sued",
+      "fields": {
+        "stationId": { "kind": "constant", "value": "KIEZ-002" },
+        "timestamp": { "kind": "now" },
+        "pm25.value": { "kind": "dailyProfile", "min": 6, "max": 52, "peakHours": [7, 8, 17, 18], "noise": 0.3 },
+        "pm25.unit": { "kind": "constant", "value": "µg/m³" },
+        "temperature": { "kind": "dailyProfile", "min": 13, "max": 29, "peakHours": [14, 15] },
+        "humidity": { "kind": "randomWalk", "min": 30, "max": 80, "step": 4 },
+        "location.lat": { "kind": "constant", "value": 51.949 },
+        "location.lon": { "kind": "constant", "value": 7.628 }
+      }
+    },
+    {
+      "name": "station-am-park",
+      "fields": {
+        "stationId": { "kind": "constant", "value": "KIEZ-003" },
+        "timestamp": { "kind": "now" },
+        "pm25.value": { "kind": "randomWalk", "min": 2, "max": 18, "step": 2 },
+        "pm25.unit": { "kind": "constant", "value": "µg/m³" },
+        "pm25.quality": { "kind": "constant", "value": "good" },
+        "temperature": { "kind": "dailyProfile", "min": 11, "max": 25, "peakHours": [15] },
+        "humidity": { "kind": "randomWalk", "min": 40, "max": 90, "step": 3 },
+        "location.lat": { "kind": "constant", "value": 51.957 },
+        "location.lon": { "kind": "constant", "value": 7.595 }
+      }
+    }
+  ]
+}
