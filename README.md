@@ -54,6 +54,7 @@ browser ──▶ marketplace ──▶ APISIX :9080 ──▶ portal-backend :8
 | `lib/tokenUtils.ts` | Access-token refresh against Keycloak |
 | `lib/addon-catalog/` | Add-on rows from the repo-list: normalisation and installability (`listing.ts`), package fetching (`package-source.ts`), package facts for the detail page (`package-facts.ts`) |
 | `lib/deployment-repo/` | Composing an add-on install as a deployment-repo change and opening it as a pull request |
+| `lib/export/` | Exporting a dataset as a CORE-IR package: reading the instance (`portal-reader.ts`), the package transformation (`transform.ts`), the validator port (`package-check.ts`), the catalogue row (`catalog-entry.ts`), GitLab merge requests incl. the fork flow (`gitlab.ts`) |
 | `app/(authenticated)/` | Route group for signed-in pages: shared shell plus sign-out |
 | `app/login/` | Sign-in page, deliberately outside that group |
 
@@ -81,6 +82,39 @@ which is the case for every v1-era entry today. Only a complete row offers
 The detail page additionally reads the add-on's own package at that ref to show
 what it really brings: Keycloak roles, container images, Helm charts, parts
 (`lib/addon-catalog/package-facts.ts`).
+
+## Exporting a use case ("Teilen")
+
+The inverse of the install: `/export` reads a dataset of this instance with
+the signed-in user's token — pipelines with their models, the sources and
+sinks they link, the structure versions those reference, the mappings the
+graphs name — and turns it into a CORE-IR package in the exact layout the
+artifact repositories use (`core-ir/manifest.json` + one file per member,
+plus `README.md` and `ci/validate-bundle.py`).
+
+Three things change on the way out, all shown in the preview before anything
+leaves the instance:
+
+1. **Identity.** Artifacts that came from a catalogue package (URN scope
+   `standard`) keep their identity. Everything the instance minted itself is
+   re-identified as `urn:core:standard:<publisher>:<type>:<domain>:<name>:<derived>`,
+   with the disambiguator derived exactly as Model Forge does (SHA-256 over
+   `<publisher>#<name>`) — so every instance computes the same identity, and a
+   later install elsewhere reuses instead of duplicating.
+2. **References.** Versioned URNs become logical ones; pipeline source/sink
+   references become the bundle-local titles the package format demands.
+3. **Credentials never travel.** Fields whose name says secret, values the
+   platform masked on read, and passwords inside URL-shaped values are
+   stripped and declared as install parameters instead.
+
+Proposing is a **two-step** flow by construction: the bundle goes as a merge
+request into a configured target repository (`EXPORT_TARGET_REPOS` — the
+catalogue repository itself works, in a sub-folder, because rows carry a
+`path`); only once that merge request is merged can the catalogue entry be
+proposed, because its `ref` pins the merged commit and nothing else. The
+status of both steps is read fresh from GitLab on every click. A target the
+bot token cannot push to is served through the bot's fork — the usual way to
+contribute to a public repository one has no rights on.
 
 ## Where auth checks belong
 

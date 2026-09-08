@@ -8,6 +8,7 @@ import {
     LayoutGrid,
     type LucideIcon,
     PackageCheck,
+    Share2,
 } from 'lucide-react'
 
 import { Logo } from '@/components/brand/logo'
@@ -42,6 +43,7 @@ const NAV_SECTIONS: NavSection[] = [
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
             { title: 'In der Instanz', href: '/instance', icon: Database },
+            { title: 'Teilen', href: '/export', icon: Share2 },
         ],
     },
     {
