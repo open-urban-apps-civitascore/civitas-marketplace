@@ -54,7 +54,19 @@ describe('assembleCatalogEntry', () => {
             CatalogIntegrityError,
         )
     })
+
+    it('assembles dashboard members when present in the manifest', () => {
+        const traffic = mockPackages.find(
+            (pkg) => pkg.manifest.id === 'urn:openurbanapps:usecase:verkehrszaehlung',
+        )!
+        const entry = assembleCatalogEntry(traffic.manifest, readerFor(traffic.files))
+        if (isDataStructureEntry(entry)) throw new Error('expected a use case')
+        expect(entry.bundle.dashboards).toHaveLength(1)
+        expect(entry.bundle.dashboards?.[0].tool).toBe('superset')
+        expect(entry.bundle.dashboards?.[0].bindings?.database).toBe('payload_data')
+    })
 })
+
 
 describe('simulation validation', () => {
     const traffic = mockPackages.find(

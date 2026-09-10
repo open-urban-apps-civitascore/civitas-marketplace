@@ -48,6 +48,17 @@
     ],
     "simulations": [
       { "file": "zaehlstellen.simulation.json" }
+    ],
+    "dashboards": [
+      {
+        "file": "verkehrsmessung.dashboard.json",
+        "tool": "superset",
+        "bindings": {
+          "database": "payload_data",
+          "schema": "ds_${datasetId}",
+          "table": "verkehrsmessung"
+        }
+      }
     ]
   },
   "dependencies": []

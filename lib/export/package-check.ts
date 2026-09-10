@@ -6,7 +6,7 @@
  */
 
 const CORE = 'core-ir'
-const MEMBER_KINDS = ['dataStructures', 'dataSources', 'mappings', 'dataSinks', 'pipelines', 'simulations'] as const
+const MEMBER_KINDS = ['dataStructures', 'dataSources', 'mappings', 'dataSinks', 'pipelines', 'simulations', 'dashboards'] as const
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -60,7 +60,7 @@ export function checkPackage(files: Record<string, string>): string[] {
 
     const onDisk = new Set(
         Object.keys(files)
-            .filter((path) => path.startsWith(`${CORE}/`) && path.endsWith('.json'))
+            .filter((path) => path.startsWith(`${CORE}/`) && (path.endsWith('.json') || path.endsWith('.zip')))
             .map((path) => path.slice(CORE.length + 1)),
     )
     for (const { kind, name } of listed) {
