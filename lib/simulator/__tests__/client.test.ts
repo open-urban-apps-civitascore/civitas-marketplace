@@ -10,6 +10,10 @@ import {
 import { mockPackages } from '@/lib/mock-catalog'
 import type { BundledSimulation } from '@/lib/catalog/types'
 
+vi.mock('@/lib/session', () => ({
+    getAccessToken: vi.fn(async () => 'test-access-token'),
+}))
+
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -58,6 +62,33 @@ describe('simulator client', () => {
         // the simulator's zod schema is the shared contract.
         expect(body.scenario.fields.vehicleCount.kind).toBe('dailyProfile')
         expect(body.scenario.fields.timestamp.kind).toBe('now')
+    })
+
+    it('carries the signed-in person\u2019s token on every call', async () => {
+        const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ records: [], simulations: [] }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await fetchSample({ fields: {} })
+        await listSimulations()
+        await switchSimulation('inst--stream', true)
+
+        for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+            const headers = init.headers as Record<string, string>
+            expect(headers.Authorization).toBe('Bearer test-access-token')
+        }
+        expect(fetchMock.mock.calls.length).toBe(3)
+    })
+
+    it('keeps the token when a caller sends headers of its own', async () => {
+        const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ records: [] }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await fetchSample({ fields: {} })
+
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        const headers = init.headers as Record<string, string>
+        expect(headers['Content-Type']).toBe('application/json')
+        expect(headers.Authorization).toBe('Bearer test-access-token')
     })
 
     it('surfaces the simulator error body on a non-ok response', async () => {

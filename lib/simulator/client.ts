@@ -1,4 +1,5 @@
 import type { GeneratorSpec } from '@/lib/catalog/types'
+import { getAccessToken } from '@/lib/session'
 
 /**
  * Thin client for the in-cluster demo-data simulator
@@ -45,26 +46,12 @@ export interface SampleScenario {
  * curves visibly move across the returned records.
  */
 export async function fetchSample(scenario: SampleScenario, count = 5): Promise<Record<string, unknown>[]> {
-    const base = simulatorApiUrl()
-    if (!base) throw new SimulatorError('SIMULATOR_API_URL is not configured', 0)
-
-    const response = await fetch(`${base}/sample`, {
+    const response = await simulatorRequest('/sample', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario, count }),
-        cache: 'no-store',
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    }).catch((error) => {
-        throw new SimulatorError(
-            `Simulator nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`,
-            0,
-        )
     })
-
-    if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new SimulatorError(body?.error ?? `Simulator antwortet mit ${response.status}`, response.status)
-    }
+    if (!response.ok) throw await rejectionOf(response)
     const body = (await response.json()) as { records?: Record<string, unknown>[] }
     return body.records ?? []
 }
@@ -76,11 +63,18 @@ export interface SimulationInput {
     enabled: boolean
 }
 
-async function simulatorRequest(path: string, init: RequestInit): Promise<Response> {
+async function simulatorRequest(path: string, init: RequestInit = {}): Promise<Response> {
     const base = simulatorApiUrl()
     if (!base) throw new SimulatorError('SIMULATOR_API_URL is not configured', 0)
+
+    const accessToken = await getAccessToken()
+
     return fetch(`${base}${path}`, {
         ...init,
+        headers: {
+            ...((init.headers as Record<string, string> | undefined) ?? {}),
+            Authorization: `Bearer ${accessToken}`,
+        },
         cache: 'no-store',
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     }).catch((error) => {
