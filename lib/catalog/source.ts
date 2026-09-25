@@ -9,6 +9,7 @@ import {
 } from '@/lib/catalog/repo-list'
 import type { AddonEntry, CatalogEntry, CatalogMeta, CatalogSummary } from '@/lib/catalog/types'
 import { mockPackages } from '@/lib/mock-catalog'
+import { resolveEntryPath } from '@/lib/use-case-catalog/path'
 
 /**
  * The catalogue source switch — the only module pages and actions talk to.
@@ -38,6 +39,27 @@ export async function getCatalogSummaries(
 ): Promise<CatalogSummary[]> {
     if (isMockCatalog()) return mockSummaries(type)
     return getRepoListSummaries(type)
+}
+
+export async function getCatalogSummary(id: string): Promise<CatalogSummary | undefined> {
+    if (isMockCatalog()) {
+        return mockPackages.find((pkg) => pkg.manifest.id === id)?.manifest
+    }
+    return findRepoListSummary(id)
+}
+
+/**
+ * One use case by its readable address (`/use-cases/<publisher>/<slug>`).
+ *
+ * Scoped to use cases on purpose: the address drops the type segment, so
+ * searching both sections would let a data structure answer a use-case URL.
+ * Revoked rows are already filtered out by `getCatalogSummaries`.
+ */
+export async function findUseCaseByPath(
+    publisher: string,
+    slug: string,
+): Promise<CatalogSummary | undefined> {
+    return resolveEntryPath(await getCatalogSummaries('usecase'), publisher, slug)
 }
 
 /**
