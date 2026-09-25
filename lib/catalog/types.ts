@@ -17,6 +17,9 @@
  * recognising the artifact.
  */
 
+import type { Contact, Curation, Implementation, MediaItem } from '@/lib/catalog/schema'
+import type { Theme } from '@/lib/catalog/vocabulary'
+
 /**
  * Catalogue metadata for one installable entry — the "packaging".
  *
@@ -85,6 +88,16 @@ export interface PackageManifest extends CatalogManifest {
     members: PackageMembers
     /** Reserved: future add-on/package requirements. Always present, [] for now. */
     dependencies: unknown[]
+    /**
+     * The author-owned catalogue metadata, copied into the package so it is
+     * self-describing away from the index. The export writes these (see
+     * lib/export/transform); they were being spread in without being declared
+     * here, so no consumer could see them.
+     */
+    themes?: Theme[]
+    contact?: Contact
+    media?: MediaItem[]
+    implementation?: Implementation
 }
 
 /** A bundled data structure: name + the opaque artifact (its `$id` is the identity). */
@@ -267,54 +280,20 @@ export interface DeploymentRef {
  * the schema, only one optional block. What decides installability stays
  * `deploymentRef` and nothing else.
  *
- * Every field is optional except the shape itself: these entries are curated
- * from other people's public descriptions, and demanding completeness would
- * mean inventing values. The one field that carries weight is `reference` —
- * it is what allows the description here to stay short, because everything
- * else can live at the source.
+ * DEFINED IN `lib/catalog/schema`, not here: this block is the part of an
+ * entry a municipality fills in itself, so its shape is a form contract before
+ * it is a display type, and one definition has to serve the form, the export
+ * writer, this parser and the catalogue's CI. Re-exported so the 17 modules
+ * that already import from this file keep one place to look.
  */
-export interface Implementation {
-    /** The organisation running it — the strongest credibility signal there is. */
-    operator?: string
-    parties?: {
-        /** Units and organisations involved (Ämter, Werke, Verbände). */
-        stakeholders?: string[]
-        /** Contractors and vendors, with their role in brackets. */
-        serviceProviders?: string[]
-    }
-    /** Components it was built with — the anchor for "we use that too". */
-    stack?: string[]
-    resources?: {
-        /** Rough effort band, e.g. "M, unter 50 Tage". */
-        effort?: string
-        /** Rough cost band, e.g. "S, unter 1.000 Euro". */
-        cost?: string
-        /** Programme or budget line that paid for it. */
-        funding?: string
-    }
-    /** Wirkungslogik: what went in, what came out, what it changed. */
-    logicModel?: {
-        input?: string
-        output?: string
-        impact?: string
-        outcome?: string
-    }
-    /**
-     * Structured rather than free text on purpose: `wanted` makes "is this
-     * operator looking for partners" a filter instead of a sentence someone
-     * has to read — which is the one thing a marketplace can do that a
-     * collection of PDFs cannot.
-     */
-    collaboration?: {
-        wanted: boolean
-        seeking?: string
-    }
-    /** Where the full description lives. `source` names the collection it came from. */
-    reference?: {
-        url: string
-        source?: string
-    }
-}
+export type {
+    Contact,
+    Curation,
+    Implementation,
+    MediaItem,
+    Reference,
+    Resources,
+} from '@/lib/catalog/schema'
 
 /**
  * One row of the repo-list index: the catalogue manifest (everything the list
@@ -339,6 +318,22 @@ export interface CatalogSummary extends CatalogManifest {
      * deployment. See {@link Implementation}.
      */
     implementation?: Implementation
+    /**
+     * Subject areas, from a closed vocabulary — the catalogue's primary facet.
+     * Separate from `keywords`, which is free text and carries technical tags
+     * (`frost`, `sql`): one list doing both jobs is how the live data ended up
+     * offering `Umwelt` and `umwelt` as two different filter options.
+     */
+    themes?: Theme[]
+    /** Who to contact about this entry — modelled on `dcat:contactPoint`. */
+    contact?: Contact
+    /**
+     * How closely we checked it (D11) — the same block add-on rows carry, so
+     * the whole catalogue speaks one trust vocabulary. Absent means unreviewed.
+     */
+    curation?: Curation
+    /** Screenshots of the running thing, supplied by the operating municipality. */
+    media?: MediaItem[]
     /** Tombstone: entry withdrawn — hidden from the catalogue, never deleted. */
     revoked?: boolean
     revokedReason?: string
@@ -385,12 +380,8 @@ export interface AddonEntry {
      * marketplace may propose for installation — see lib/addon-catalog.
      */
     install?: { componentName: string; subdomain: string }
-    curation?: {
-        tier: 'experimental' | 'community' | 'verified'
-        reviewedBy: string
-        reviewedAt: string
-        notes?: string
-    }
+    /** One trust vocabulary for the whole catalogue (D11) — see {@link Curation}. */
+    curation?: Curation
     deprecated?: { reason: string; successorId?: string }
     revoked?: boolean
     revokedReason?: string

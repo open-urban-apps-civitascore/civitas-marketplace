@@ -5,7 +5,9 @@
   "packageManager": "pnpm@10.34.5",
   "scripts": {
     "dev": "next dev -p 3001",
+    "catalog:serve": "python3 -m http.server 8787 --bind 127.0.0.1 --directory ../civitas-marketplace-catalog",
     "build": "next build",
+    "generate-schema": "tsx scripts/generate-schema.ts",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"
@@ -18,7 +20,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.6.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.11"
   }
