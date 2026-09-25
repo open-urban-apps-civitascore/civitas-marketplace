@@ -1,3 +1,13 @@
+import { z } from 'zod'
+
+import {
+    addonRowSchema,
+    deploymentRefSchema,
+    describedRowSchema,
+    indexEnvelopeSchema,
+    pinnedRowSchema,
+    revokedRowSchema,
+} from '@/lib/catalog/schema'
 import type {
     AddonEntry,
     CatalogMeta,
@@ -67,84 +77,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-const COMMIT_SHA = /^[0-9a-f]{40}$/i
 /**
- * One segment of a package path as the raw-URL fetch embeds it. Deliberately
- * an allowlist: URL parsers normalise dot segments (plain AND percent-encoded),
- * so a `..` anywhere in the path would consume the pinned-SHA URL segment and
- * re-target the fetch at a mutable ref. No legitimate package path needs
- * anything outside this set.
+ * Turns a schema failure into the flat Error this module has always thrown.
+ * The message names the field path because it is read in a server log — see
+ * the `[repo-list] fetch/validate failed` line below — where a nested issue
+ * tree would be noise. Only the first issue is reported: the whole index is
+ * rejected either way, so the second one changes no decision.
  */
-const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+function fail(where: string, error: z.ZodError): never {
+    const issue = error.issues[0]
+    const path = issue.path.length > 0 ? `${where}.${issue.path.join('.')}` : where
+    throw new Error(`${path} ${issue.message}`)
+}
 
-function parsePinPath(value: unknown, where: string): string {
-    // Explicit null counts as absent, like deploymentRef/releaseTag: one
-    // serializer writing null instead of omitting the key must not blank
-    // every instance's catalogue (any malformed row rejects the whole index).
-    if (value === undefined || value === null || value === '.') return '.'
-    if (typeof value !== 'string' || !value.split('/').every((s) => SAFE_PATH_SEGMENT.test(s))) {
-        throw new Error(`${where} must be a plain relative path`)
-    }
-    return value
+function parseRow<T extends z.ZodType>(schema: T, row: unknown, where: string): z.infer<T> {
+    const result = schema.safeParse(row)
+    if (!result.success) fail(where, result.error)
+    return result.data
+}
+
+/** Keys the parser deliberately does not carry into the served index. */
+function omit(row: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(row).filter(([key]) => !keys.includes(key)))
 }
 
 /**
- * The row's content pointer (catalogue format v3): a `deploymentRef` whose
- * `ref` IS the commit. Anything else — a tag, a branch — belongs in
- * `releaseTag` or nowhere: a name here would resolve to a fresh commit on
- * every install, laundering mutable content through the pin. The legacy
- * `source.{repoUrl,gitIdentifier}` shape is no longer read; the migrated
- * catalogue no longer publishes it on live rows.
+ * The one place a parsed row is narrowed to the served type.
+ *
+ * Rows are LOOSE by design (unknown keys survive — see lib/catalog/schema), so
+ * their inferred type carries an index signature that a plain interface cannot
+ * satisfy. That needs a cast exactly once; repeating it at every branch below
+ * would turn a considered decision into a habit.
  */
-function parseDeploymentRef(row: Record<string, unknown>, where: string): DeploymentRef {
-    const deployment = row.deploymentRef
-    if (
-        !isRecord(deployment) ||
-        typeof deployment.url !== 'string' ||
-        !deployment.url ||
-        typeof deployment.ref !== 'string' ||
-        !deployment.ref
-    ) {
-        throw new Error(`${where} needs a deploymentRef with string fields 'url' and 'ref'`)
-    }
-    if (!deployment.url.startsWith('https://')) {
-        throw new Error(`${where}.deploymentRef.url must be an https URL`)
-    }
-    if (!COMMIT_SHA.test(deployment.ref)) {
-        throw new Error(`${where}.deploymentRef.ref must be a full 40-hex commit SHA`)
-    }
-    if (deployment.releaseTag !== undefined && deployment.releaseTag !== null &&
-        typeof deployment.releaseTag !== 'string') {
-        throw new Error(`${where}.deploymentRef.releaseTag must be a string or null`)
-    }
+function asSummary(row: Record<string, unknown>): CatalogSummary {
+    return row as unknown as CatalogSummary
+}
+
+/** As `asSummary`, for the add-on section — shape owned by lib/addon-catalog. */
+function asAddon(row: Record<string, unknown>): AddonEntry {
+    return row as unknown as AddonEntry
+}
+
+/**
+ * The only normalisation this module applies. The schema validates what is on
+ * the wire and returns it unchanged; this turns that into what the rest of the
+ * app expects: a commit compared case-insensitively but stored lower-case, and
+ * an absent or explicitly null path meaning the repository root.
+ */
+function normalisePin(pin: z.infer<typeof deploymentRefSchema>): DeploymentRef {
     return {
-        url: deployment.url,
-        ref: deployment.ref.toLowerCase(),
-        releaseTag: typeof deployment.releaseTag === 'string' ? deployment.releaseTag : null,
-        path: parsePinPath(deployment.path, `${where}.deploymentRef.path`),
-    }
-}
-
-/**
- * Validates the optional `implementation` block. Only the reference URL is
- * checked, because it is the one field the UI turns into a link — a typo there
- * would render a dead button rather than fail visibly. Everything else is
- * curated prose we would only be guessing about.
- */
-function checkImplementation(row: Record<string, unknown>, where: string): void {
-    const implementation = row.implementation
-    if (implementation === undefined) return
-    if (!isRecord(implementation)) {
-        throw new Error(`${where}.implementation is not an object`)
-    }
-    const reference = implementation.reference
-    if (reference === undefined) return
-    if (
-        !isRecord(reference) ||
-        typeof reference.url !== 'string' ||
-        !reference.url.startsWith('https://')
-    ) {
-        throw new Error(`${where}.implementation.reference needs an https 'url'`)
+        url: pin.url,
+        ref: pin.ref.toLowerCase(),
+        releaseTag: typeof pin.releaseTag === 'string' ? pin.releaseTag : null,
+        path: typeof pin.path === 'string' ? pin.path : '.',
     }
 }
 
@@ -160,83 +145,81 @@ function isDescribedRow(row: Record<string, unknown>): boolean {
     return isRecord(implementation) && isRecord(implementation.reference)
 }
 
+/**
+ * One entry row, in one of its three states. The states are branched here
+ * rather than parsed through `catalogSummarySchema`'s union so that a bad row
+ * reports its own field path — through the union every row would fail all
+ * three branches and report three sets of issues, none of them the point.
+ */
 function parseSummaryRows(value: unknown, where: string): CatalogSummary[] {
     if (value === undefined) return []
     if (!Array.isArray(value)) throw new Error(`${where} is not an array`)
     return value.map((row, index) => {
-        if (!isRecord(row)) throw new Error(`${where}[${index}] is not an object`)
-        for (const field of [
-            'id',
-            'displayName',
-            'description',
-            'version',
-            'maintainer',
-            'license',
-        ]) {
-            if (typeof row[field] !== 'string') {
-                throw new Error(`${where}[${index}].${field} is missing or not a string`)
-            }
-        }
-        if (row.type !== 'usecase' && row.type !== 'datastructure') {
-            throw new Error(`${where}[${index}].type must be 'usecase' or 'datastructure'`)
-        }
-        if (!Array.isArray(row.keywords)) {
-            throw new Error(`${where}[${index}].keywords is not an array`)
-        }
-        const rest = Object.fromEntries(
-            Object.entries(row).filter(([key]) => key !== 'source' && key !== 'deploymentRef'),
-        )
-        // A tombstone exists to be seen in history, never installed — its
-        // historical pin data (possibly a pre-v3 shape) is deliberately not
-        // parsed, so an old shape can never take the live index down. The
-        // flag is normalised to a strict boolean here, so the pin-skip and
-        // the visibility filters can never disagree on a truthy oddity.
-        if (row.revoked) {
-            return { ...rest, revoked: true } as unknown as CatalogSummary
-        }
-        checkImplementation(row, `${where}[${index}]`)
-        // A described entry documents an implementation elsewhere: listable,
-        // never installable. Without this branch a single such row would throw
-        // and take the WHOLE index down to last-known-good on every instance —
-        // silently, since the catalogue keeps serving the previous state.
-        if (isDescribedRow(row)) {
-            return { ...rest } as unknown as CatalogSummary
-        }
-        const deploymentRef = parseDeploymentRef(row, `${where}[${index}]`)
-        return { ...rest, deploymentRef } as unknown as CatalogSummary
-    })
-}
+        const at = `${where}[${index}]`
+        if (!isRecord(row)) throw new Error(`${at} is not an object`)
 
-function parseAddonRows(value: unknown): AddonEntry[] {
-    if (value === undefined) return []
-    if (!Array.isArray(value)) throw new Error('addons is not an array')
-    return value.map((row, index) => {
-        if (!isRecord(row)) throw new Error(`addons[${index}] is not an object`)
-        for (const field of ['id', 'name', 'description', 'author']) {
-            if (typeof row[field] !== 'string') {
-                throw new Error(`addons[${index}].${field} is missing or not a string`)
-            }
+        // A tombstone exists to be seen in history, never installed. Its pin
+        // may carry any historical shape — a pre-v3 `source`, or outright
+        // garbage — and is dropped unread, so an old row can never take the
+        // live index down. `revoked` is coerced to a strict boolean before
+        // parsing: the schema demands a real `true`, because that is the
+        // contract a writer owes the catalogue, but at runtime the pin-skip
+        // and the visibility filters must never disagree over a truthy oddity.
+        if (row.revoked) {
+            const parsed = parseRow(revokedRowSchema, { ...row, revoked: true }, at)
+            return asSummary(omit(parsed, ['source', 'deploymentRef']))
         }
-        return row as unknown as AddonEntry
+
+        // A described entry documents an implementation running elsewhere:
+        // listable, never installable. Without this branch a single such row
+        // would throw and take the WHOLE index down to last-known-good on
+        // every instance — silently, since the catalogue keeps serving the
+        // previous state.
+        if (isDescribedRow(row)) {
+            return asSummary(omit(parseRow(describedRowSchema, row, at), ['source']))
+        }
+
+        const parsed = parseRow(pinnedRowSchema, row, at)
+        return asSummary({
+            ...omit(parsed, ['source']),
+            deploymentRef: normalisePin(parsed.deploymentRef),
+        })
     })
 }
 
 /**
- * Structural validation of a fetched index. Throws on ANY malformed row: a
- * half-broken catalogue falls back to last-known-good as a whole, instead of
- * silently serving a partial one. (Zod as the normative schema source is the
- * planned follow-up; this stays the runtime gate until then.)
+ * Add-on rows are checked for identity only — their real shape belongs to
+ * lib/addon-catalog, which parses them into a listing and decides for itself
+ * what is installable. Unknown keys therefore have to survive untouched.
+ */
+function parseAddonRows(value: unknown): AddonEntry[] {
+    if (value === undefined) return []
+    if (!Array.isArray(value)) throw new Error('addons is not an array')
+    return value.map(
+        (row, index) => asAddon(parseRow(addonRowSchema, row, `addons[${index}]`)),
+    )
+}
+
+/**
+ * Structural validation of a fetched index against `lib/catalog/schema`.
+ *
+ * The same schema is rendered for the catalogue repository's CI — see
+ * lib/catalog/json-schema for what that gate does and does not yet cover. Until
+ * it is in place the catalogue is gated only by its own `ci/validate-index.py`,
+ * so a merge request can pass review and still be rejected here — and a
+ * rejection blanks the whole index into last-known-good.
+ *
+ * Throws on ANY malformed row: a half-broken catalogue falls back to
+ * last-known-good as a whole, instead of silently serving a partial one.
  */
 export function parseRepoListIndex(value: unknown): RepoListIndex {
-    if (!isRecord(value)) throw new Error('index is not an object')
-    if (typeof value.version !== 'string') throw new Error('index.version is missing')
-    if (typeof value.updatedAt !== 'string') throw new Error('index.updatedAt is missing')
+    const envelope = parseRow(indexEnvelopeSchema, value, 'index')
     return {
-        version: value.version,
-        updatedAt: value.updatedAt,
-        addons: parseAddonRows(value.addons),
-        useCases: parseSummaryRows(value.useCases, 'useCases'),
-        dataStructures: parseSummaryRows(value.dataStructures, 'dataStructures'),
+        version: envelope.version,
+        updatedAt: envelope.updatedAt,
+        addons: parseAddonRows(envelope.addons),
+        useCases: parseSummaryRows(envelope.useCases, 'useCases'),
+        dataStructures: parseSummaryRows(envelope.dataStructures, 'dataStructures'),
     }
 }
 
