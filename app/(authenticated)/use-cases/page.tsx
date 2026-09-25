@@ -2,12 +2,10 @@ import { ArrowUpRight, Check } from 'lucide-react'
 
 import { CatalogCard } from '@/components/catalog/catalog-card'
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
-import { InstallDialog } from '@/components/catalog/install-dialog'
-import { SamplePreview } from '@/components/catalog/sample-preview'
 import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
+import { catalogEntryHref } from '@/lib/use-case-catalog/path'
 import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
 import { requireSession } from '@/lib/session'
-import { isSimulatorConfigured } from '@/lib/simulator/client'
 
 export default async function UseCasesPage() {
     await requireSession()
@@ -16,9 +14,6 @@ export default async function UseCasesPage() {
     // Which bundles are installed comes from the platform's provenance, not from
     // marketplace bookkeeping — the catalogue id is recorded on every install.
     const installedIds = await fetchInstalledCatalogEntryIds()
-    // Sample preview needs the in-cluster simulator; without it the button
-    // simply does not render.
-    const previewAvailable = isSimulatorConfigured()
 
     return (
         <div className="flex flex-col gap-6">
@@ -42,38 +37,19 @@ export default async function UseCasesPage() {
                         <CatalogCard
                             key={entry.id}
                             manifest={entry}
+                            href={catalogEntryHref(entry.id)}
                             action={
-                                <div className="flex flex-wrap items-start gap-2">
-                                    {/* Installability is decided by the pin and nothing else.
-                                        A described entry documents an implementation running
-                                        elsewhere — offering it an install button would promise
-                                        something the catalogue cannot deliver. */}
-                                    {entry.deploymentRef ? (
-                                        <>
-                                            <InstallDialog
-                                                entryId={entry.id}
-                                                displayName={entry.displayName}
-                                                version={entry.version}
-                                                installed={installed}
-                                                demoAvailable={previewAvailable}
-                                            />
-                                            {previewAvailable && <SamplePreview entryId={entry.id} />}
-                                        </>
-                                    ) : (
-                                        entry.implementation?.reference && (
-                                            <a
-                                                href={entry.implementation.reference.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
-                                            >
-                                                {entry.implementation.reference.source ??
-                                                    'Zum Praxisbeispiel'}
-                                                <ArrowUpRight className="size-4" />
-                                            </a>
-                                        )
-                                    )}
-                                </div>
+                                !entry.deploymentRef && entry.implementation?.reference ? (
+                                    <a
+                                        href={entry.implementation.reference.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                                    >
+                                        {entry.implementation.reference.source ?? 'Zum Praxisbeispiel'}
+                                        <ArrowUpRight className="size-4" />
+                                    </a>
+                                ) : undefined
                             }
                             badge={
                                 installed ? (

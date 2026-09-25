@@ -40,8 +40,8 @@ const TONE_CLASSES: Record<
 // Generic, always-available header art derived from the listing's keywords —
 // no per-entry image needed, never a broken image, and it themes with the
 // listing identity. A catalogue `image` field could later override this.
-function illustrationForKeywords(keywords: string[]): IllustrationKind {
-    const haystack = keywords.join(' ').toLowerCase()
+function illustrationForSubject(terms: string[]): IllustrationKind {
+    const haystack = terms.join(' ').toLowerCase()
     if (/(umwelt|klima|luft|wasser|regen|sensor)/.test(haystack)) return 'line'
     if (/(energie|solar|strom|lade)/.test(haystack)) return 'gauge'
     if (/(grün|gruen|baum|natur|abfall|kataster)/.test(haystack)) return 'bars'
@@ -114,14 +114,16 @@ function IllustrationBody({ kind, tone }: { kind: IllustrationKind; tone: Illust
 
 export function CatalogIllustration({
     keywords,
+    themes = [],
     tone = 'emerald',
     className = 'h-32',
 }: {
     keywords: string[]
+    themes?: string[]
     tone?: IllustrationTone
     className?: string
 }) {
-    const kind = illustrationForKeywords(keywords)
+    const kind = illustrationForSubject([...themes, ...keywords])
     return (
         <div className={`w-full ${TONE_CLASSES[tone].surface} ${className}`}>
             <svg
