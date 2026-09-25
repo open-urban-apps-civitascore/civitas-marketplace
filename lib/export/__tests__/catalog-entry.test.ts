@@ -65,5 +65,10 @@ describe('applyCatalogEntry', () => {
         expect(isListed(index([entry()]), 'urn:musterstadt:usecase:kiez-baumkataster', '1.0.0')).toBe(true)
         expect(isListed(index([entry()]), 'urn:musterstadt:usecase:kiez-baumkataster', '1.1.0')).toBe(false)
         expect(isListed('not json', 'x', '1')).toBe(false)
+        // A tombstone is in the file but hidden everywhere else. Counting it as
+        // listed is how the status step came to contradict the catalog step,
+        // which refuses a re-share onto a withdrawn id outright.
+        const withdrawn = index([{ ...entry(), revoked: true }])
+        expect(isListed(withdrawn, 'urn:musterstadt:usecase:kiez-baumkataster', '1.0.0')).toBe(false)
     })
 })

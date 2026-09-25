@@ -4,7 +4,6 @@ import { useActionState, useState } from 'react'
 import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
-import { SamplePreview } from '@/components/catalog/sample-preview'
 import { SubmitButton } from '@/components/catalog/submit-button'
 import { installEntry } from '@/lib/install-actions'
 
@@ -113,7 +112,6 @@ export function InstallDialog({
                         <div className="flex-1 overflow-auto px-5 py-4">
                             {step === 0 && (
                                 <DataSourceStep
-                                    entryId={entryId}
                                     mode={mode}
                                     onMode={setMode}
                                     brokerUrl={brokerUrl}
@@ -239,14 +237,12 @@ function OptionCard({
 }
 
 function DataSourceStep({
-    entryId,
     mode,
     onMode,
     brokerUrl,
     onBrokerUrl,
     demoAvailable,
 }: {
-    entryId: string
     mode: DataSourceMode
     onMode: (mode: DataSourceMode) => void
     brokerUrl: string
@@ -269,9 +265,7 @@ function DataSourceStep({
                         ? 'Der Anwendungsfall sendet nach der Freigabe mitgelieferte Beispieldaten — ohne eigene Sensoren, ohne Konfiguration. Ideal, um zu sehen, ob er zu Ihrer Kommune passt.'
                         : 'Nicht verfügbar: Der Demo-Daten-Simulator ist auf dieser Instanz nicht konfiguriert (SIMULATOR_API_URL).'
                 }
-            >
-                <SamplePreview entryId={entryId} />
-            </OptionCard>
+            />
             <OptionCard
                 selected={mode === 'custom'}
                 onSelect={() => onMode('custom')}

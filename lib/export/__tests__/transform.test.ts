@@ -211,3 +211,11 @@ describe('transformSnapshot', () => {
         expect(out.warnings.some((w) => w.includes('sourceRef'))).toBe(true)
     })
 })
+
+
+it('keeps catalog metadata in an installable, validator-compatible package', () => {
+    const metadata = { contact: { email: 'amt@stadt.example' }, implementation: { operator: 'Stadtverwaltung', collaboration: { wanted: false } } }
+    const pkg = transformSnapshot(snapshot(), { ...options, metadata })
+    expect(JSON.parse(pkg.files['core-ir/manifest.json'])).toMatchObject(metadata)
+    expect(checkPackage(pkg.files)).toEqual([])
+})

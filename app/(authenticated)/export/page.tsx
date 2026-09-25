@@ -1,6 +1,8 @@
 import { ExportPanel } from '@/components/export/export-panel'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
-import { listDatasets, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
+import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
+import { getCatalogSummaries } from '@/lib/catalog/source'
+import { exportSources } from '@/lib/export/sources'
 import { getAccessToken, requireSession } from '@/lib/session'
 
 /**
@@ -24,15 +26,19 @@ export default async function ExportPage() {
         datasetsError = error instanceof PortalReadError ? error.message : String(error)
     }
 
+    const [installations, catalog] = await Promise.allSettled([
+        listExportInstallations(accessToken), getCatalogSummaries('usecase'),
+    ])
+    const sources = exportSources(datasets,
+        installations.status === 'fulfilled' ? installations.value : [],
+        catalog.status === 'fulfilled' ? catalog.value : [])
+
     return (
         <div className="flex flex-col gap-6">
             <div>
                 <h1>Teilen</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Einen Use Case dieser Instanz als CORE-IR-Paket exportieren: Datenmodelle, Quellen,
-                    Mapping, Senken und Pipeline werden aus dem Portal gelesen, Zugangsdaten entfernt,
-                    Identitäten katalogfähig gemacht - und als Merge Request in ein Zielrepository
-                    vorgeschlagen. Nichts wird gemergt; das bleibt ein Mensch.
+                    Wähle einen Use Case dieser Instanz aus, ergänze seinen Steckbrief und teile ihn mit anderen Kommunen.
                 </p>
             </div>
 
@@ -51,7 +57,8 @@ export default async function ExportPage() {
                 </p>
             ) : (
                 <ExportPanel
-                    datasets={datasets}
+                    sources={sources}
+                    sourceNotice={installations.status === 'rejected' || catalog.status === 'rejected' ? 'Katalogzuordnungen konnten nicht vollständig geladen werden. Du kannst lokale Use Cases trotzdem teilen.' : undefined}
                     targets={config.targets}
                     readiness={readiness}
                     catalogUrl={config.catalog?.url}
