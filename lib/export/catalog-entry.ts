@@ -1,3 +1,6 @@
+import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
+import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
+
 /**
  * The catalogue side of an export: the v3 repo-list row for the package, and
  * the edit that places it in `index.json`.
@@ -7,6 +10,7 @@
  */
 
 export interface CatalogEntryInput {
+    metadata?: ExportMetadata
     id: string
     displayName: string
     description: string
@@ -23,6 +27,7 @@ export interface CatalogEntryInput {
 }
 
 export function buildCatalogEntry(input: CatalogEntryInput): Record<string, unknown> {
+    const { themes, ...described } = exportMetadataSchema.parse(input.metadata ?? {})
     return {
         id: input.id,
         type: 'usecase',
@@ -32,16 +37,20 @@ export function buildCatalogEntry(input: CatalogEntryInput): Record<string, unkn
         maintainer: input.maintainer,
         license: input.license,
         keywords: input.keywords,
+        ...(themes ? { themes } : {}),
         deploymentRef: {
             url: input.repoUrl,
             ref: input.commitSha.toLowerCase(),
             releaseTag: null,
             path: input.path,
         },
+        ...described,
     }
 }
 
 export type CatalogEdit =
+    | { status: 'conflict'; indexVersion: string; conflictingId: string }
+    | { status: 'withdrawn'; indexVersion: string; reason?: string }
     | { status: 'added'; content: string; indexVersion: string }
     | { status: 'replaced'; content: string; indexVersion: string; previousVersion?: string }
     | { status: 'unchanged'; indexVersion: string }
@@ -69,16 +78,46 @@ export function applyCatalogEntry(
     const useCases = Array.isArray(index.useCases) ? (index.useCases as Record<string, unknown>[]) : []
     const existingAt = useCases.findIndex((row) => row.id === entry.id)
 
-    if (existingAt >= 0) {
-        const existing = useCases[existingAt]
-        const existingRef = existing.deploymentRef as Record<string, unknown> | undefined
-        const entryRef = entry.deploymentRef as Record<string, unknown>
-        if (existing.version === entry.version && existingRef?.ref === entryRef.ref) {
-            return { status: 'unchanged', indexVersion: String(index.version ?? '') }
+    const tombstone = useCases.find((row) => row.id === entry.id && row.revoked)
+    if (tombstone) {
+        return {
+            status: 'withdrawn',
+            indexVersion: String(index.version ?? ''),
+            reason:
+                typeof tombstone.revokedReason === 'string' ? tombstone.revokedReason : undefined,
         }
     }
 
-    const next = existingAt >= 0 ? useCases.map((row, i) => (i === existingAt ? entry : row)) : [...useCases, entry]
+    const address = catalogEntryPath(String(entry.id))
+    const collision = useCases.find(
+        (row) =>
+            row.id !== entry.id &&
+            !row.revoked &&
+            matchesEntryPath(String(row.id), address.publisher, address.slug),
+    )
+    if (collision) {
+        return {
+            status: 'conflict',
+            indexVersion: String(index.version ?? ''),
+            conflictingId: String(collision.id),
+        }
+    }
+
+    const existing = existingAt >= 0 ? useCases[existingAt] : undefined
+    const carriedOver = existing
+        ? Object.fromEntries(
+              Object.entries(existing).filter(
+                  ([key]) => key !== 'curation' && !EXPORT_OWNED_KEYS.has(key),
+              ),
+          )
+        : {}
+    const merged = { ...entry, ...carriedOver, ...keptReleaseTag(existing, entry) }
+
+    if (existing && canonical(withoutCuration(existing)) === canonical(merged)) {
+        return { status: 'unchanged', indexVersion: String(index.version ?? '') }
+    }
+
+    const next = existingAt >= 0 ? useCases.map((row, i) => (i === existingAt ? merged : row)) : [...useCases, merged]
     const indexVersion = bumpPatch(index.version)
     const updated = {
         ...index,
@@ -99,12 +138,55 @@ export function applyCatalogEntry(
     return { status: 'added', content, indexVersion }
 }
 
-/** True when the index already lists this id at this version — the "already listed" state of the status panel. */
+const EXPORT_OWNED_KEYS: ReadonlySet<string> = new Set([
+    'id',
+    'type',
+    'displayName',
+    'description',
+    'version',
+    'maintainer',
+    'license',
+    'keywords',
+    'deploymentRef',
+    ...Object.keys(exportMetadataSchema.shape),
+])
+
+function keptReleaseTag(
+    existing: Record<string, unknown> | undefined,
+    entry: Record<string, unknown>,
+): { deploymentRef?: Record<string, unknown> } {
+    const before = asRecord(existing?.deploymentRef)
+    const after = asRecord(entry.deploymentRef)
+    if (!before || !after) return {}
+    if (before.ref !== after.ref || typeof before.releaseTag !== 'string') return {}
+    return { deploymentRef: { ...after, releaseTag: before.releaseTag } }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined
+}
+
+function withoutCuration(row: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'curation'))
+}
+
 export function isListed(indexJson: string, id: string, version: string): boolean {
     try {
-        const index = JSON.parse(indexJson) as { useCases?: { id?: unknown; version?: unknown }[] }
-        return (index.useCases ?? []).some((row) => row.id === id && row.version === version)
+        const index = JSON.parse(indexJson) as {
+            useCases?: { id?: unknown; version?: unknown; revoked?: unknown }[]
+        }
+        return (index.useCases ?? []).some(
+            (row) => row.id === id && row.version === version && !row.revoked,
+        )
     } catch {
         return false
     }
+}
+
+function canonical(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+    if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
+    return JSON.stringify(value)
 }

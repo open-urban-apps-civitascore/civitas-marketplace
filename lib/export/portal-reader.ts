@@ -1,3 +1,4 @@
+import type { ExportInstallation } from '@/lib/export/sources'
 import { isCoreUrn, logicalUrn } from '@/lib/export/urn'
 
 /**
@@ -109,14 +110,32 @@ async function getJson<T>(accessToken: string, path: string): Promise<T | undefi
 
 interface Page<T> {
     content?: T[]
+    last?: boolean
+    totalPages?: number
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
 
+async function listPages<T>(accessToken: string, path: string): Promise<T[]> {
+    const rows: T[] = []
+    for (let page = 0; ; page++) {
+        const result = await getJson<Page<T>>(accessToken, `${path}?size=200&page=${page}`)
+        const content = result?.content ?? []
+        rows.push(...content)
+        if (!content.length || result?.last === true || (result?.totalPages !== undefined
+            ? page + 1 >= result.totalPages : result?.last === undefined)) break
+    }
+    return rows
+}
+
+export async function listExportInstallations(accessToken: string): Promise<ExportInstallation[]> {
+    return listPages<ExportInstallation>(accessToken, '/v1/installations')
+}
+
 export async function listDatasets(accessToken: string): Promise<DatasetListing[]> {
-    const page = await getJson<Page<Record<string, unknown>>>(accessToken, '/v1/datasets?size=200')
-    return (page?.content ?? []).map((row) => ({
+    const rows = await listPages<Record<string, unknown>>(accessToken, '/v1/datasets')
+    return rows.map((row) => ({
         id: String(row.id),
         name: typeof row.name === 'string' ? row.name : String(row.id),
         description: typeof row.description === 'string' ? row.description : undefined,
@@ -185,7 +204,16 @@ function versionSummary(value: unknown): { versionId: string; dataStructureId?: 
     }
 }
 
+const DATASET_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
+
+export function isSafeDatasetId(datasetId: string): boolean {
+    return DATASET_ID.test(datasetId)
+}
+
 export async function readUseCase(accessToken: string, datasetId: string): Promise<InstanceSnapshot> {
+    if (!isSafeDatasetId(datasetId)) {
+        throw new PortalReadError(`Ungültige Dataset-Kennung: ${datasetId}`, 400)
+    }
     const warnings: string[] = []
     const dataset = await getJson<Record<string, unknown>>(accessToken, `/v1/datasets/${datasetId}`)
     if (!dataset) throw new PortalReadError(`Dataset ${datasetId} nicht gefunden`, 404)

@@ -1,5 +1,6 @@
 'use server'
 
+import { useCaseSlugPattern } from '@/lib/catalog/schema'
 import { applyCatalogEntry, buildCatalogEntry } from '@/lib/export/catalog-entry'
 import {
     bundleBranch,
@@ -18,6 +19,9 @@ import {
     parseProjectUrl,
     readFile,
 } from '@/lib/export/gitlab'
+import { parseExportMetadata } from '@/lib/export/metadata'
+import { getCatalogSummaries } from '@/lib/catalog/source'
+import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
 import { PortalReadError, readUseCase } from '@/lib/export/portal-reader'
 import { readBundleStatus, readCatalogStatus, type BundleStatus, type CatalogStatus } from '@/lib/export/status'
@@ -56,7 +60,7 @@ interface ExportForm {
     options: Omit<ExportOptions, 'provenance'>
 }
 
-const SLUG = /^[a-z0-9][a-z0-9-]{1,60}$/
+const SLUG = useCaseSlugPattern
 const SEGMENT = /^[a-z0-9]{2,40}$/
 const VERSION = /^\d+\.\d+\.\d+$/
 
@@ -76,7 +80,7 @@ function parseForm(formData: FormData): ExportForm | string {
     const publisher = field(formData, 'publisher').toLowerCase()
     if (!SEGMENT.test(publisher)) return 'Publisher: 2-40 Kleinbuchstaben oder Ziffern (er wird URN-Owner).'
     const slug = field(formData, 'slug').toLowerCase()
-    if (!SLUG.test(slug)) return 'Paket-Slug: Kleinbuchstaben, Ziffern und Bindestriche, 2-61 Zeichen.'
+    if (!SLUG.test(slug)) return 'Paket-Slug: Kleinbuchstaben, Ziffern und Bindestriche, 2-60 Zeichen, Anfang und Ende alphanumerisch.'
     const version = field(formData, 'version') || '1.0.0'
     if (!VERSION.test(version)) return 'Version muss SemVer sein (z. B. 1.0.0).'
     const domain = field(formData, 'domain').toLowerCase() || 'general'
@@ -92,11 +96,13 @@ function parseForm(formData: FormData): ExportForm | string {
         .split(',')
         .map((k) => k.trim().toLowerCase())
         .filter(Boolean)
+    const metadata = parseExportMetadata(field(formData, 'catalogMetadata'))
+    if (metadata.error) return metadata.error
     return {
         intent,
         datasetId,
         targetKey,
-        options: { publisher, slug, version, domain, displayName, description, maintainer, license, keywords },
+        options: { publisher, slug, version, domain, displayName, description, maintainer, license, keywords, metadata: metadata.data },
     }
 }
 
@@ -205,6 +211,22 @@ function mergeRequestBody(
  * propose the catalogue entry and re-read the status without four copies of
  * the same field handling. The intent comes from the submit button's name.
  */
+async function addressAlreadyTaken(id: string): Promise<string[]> {
+    const { publisher, slug } = catalogEntryPath(id)
+    try {
+        const taken = (await getCatalogSummaries('usecase')).find(
+            (row) => row.id !== id && matchesEntryPath(row.id, publisher, slug),
+        )
+        if (!taken) return []
+        return [
+            `Die Katalogseite /use-cases/${publisher}/${slug} ist bereits von \`${taken.id}\` belegt. ` +
+                'Der Katalog-Eintrag würde später abgelehnt — bitte jetzt einen anderen Paket-Slug wählen.',
+        ]
+    } catch {
+        return []
+    }
+}
+
 export async function exportAction(
     _prev: ExportActionResult | null,
     formData: FormData,
@@ -226,6 +248,7 @@ export async function exportAction(
             const accessToken = await getAccessToken()
             const pkg = await buildPackage(accessToken, form, requestedBy)
             const preview = summarise(pkg, target, form)
+            preview.warnings = [...preview.warnings, ...(await addressAlreadyTaken(id))]
             return {
                 intent: 'preview',
                 status: preview.errors.length ? 'invalid' : 'ok',
@@ -344,11 +367,28 @@ export async function exportAction(
             maintainer: form.options.maintainer,
             license: form.options.license,
             keywords: form.options.keywords,
+            metadata: form.options.metadata,
             repoUrl: target.url,
             path: packageDir(target, form.options.slug),
             commitSha: bundle.sha,
         })
         const edit = applyCatalogEntry(indexRaw, entry)
+        if (edit.status === 'withdrawn') {
+            return {
+                intent: 'catalog',
+                status: 'invalid',
+                detail: `Dieser Eintrag wurde aus dem Katalog zurückgezogen${edit.reason ? `: ${edit.reason}` : ''}. Ein erneutes Teilen macht ihn nicht wieder sichtbar — bitte die Katalog-Pflege ansprechen.`,
+                bundle,
+            }
+        }
+        if (edit.status === 'conflict') {
+            return {
+                intent: 'catalog',
+                status: 'invalid',
+                detail: `Die Adresse dieses Anwendungsfalls ist schon belegt — \`${edit.conflictingId}\` führt zur selben Katalogseite. Bitte einen anderen Paket-Slug wählen.`,
+                bundle,
+            }
+        }
         if (edit.status === 'unchanged') {
             return { intent: 'catalog', status: 'unchanged', detail: 'Der Katalog listet dieses Paket bereits in dieser Version an diesem Commit.', bundle }
         }
@@ -421,5 +461,28 @@ function gitlabMessage(error: GitLabError): string {
             return `GitLab: ${error.message} — bei privaten Projekten auch, wenn der Token dort keinen Zugriff hat.`
         default:
             return `GitLab-Fehler (${error.status}): ${error.message}`
+    }
+}
+
+export async function inspectExportSource(datasetId: string): Promise<{
+    artifacts: { kind: string; name: string }[]; warnings: string[]; error?: string
+}> {
+    await requireSession()
+    if (!datasetId) return { artifacts: [], warnings: [], error: 'Ungültige Auswahl.' }
+    try {
+        const snapshot = await readUseCase(await getAccessToken(), datasetId)
+        return {
+            artifacts: [
+                ...snapshot.structures.map((row) => ({ kind: 'Datenstruktur', name: row.name })),
+                ...snapshot.sources.map((row) => ({ kind: 'Datenquelle', name: row.name })),
+                ...snapshot.mappings.map((row) => ({ kind: 'Mapping', name: row.urn })),
+                ...snapshot.sinks.map((row) => ({ kind: 'Datensenke', name: row.name })),
+                ...snapshot.pipelines.map((row) => ({ kind: 'Pipeline', name: row.name })),
+            ],
+            warnings: snapshot.warnings,
+        }
+    } catch (error) {
+        if (error instanceof PortalReadError) return { artifacts: [], warnings: [], error: error.message }
+        throw error
     }
 }

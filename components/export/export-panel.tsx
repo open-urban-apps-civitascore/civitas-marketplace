@@ -1,243 +1,183 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 'lucide-react'
-
-import { exportAction, type ExportActionResult } from '@/lib/export-actions'
+import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
-import type { DatasetListing } from '@/lib/export/portal-reader'
+import type { ExportSource } from '@/lib/export/sources'
+import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
+import { catalogEntryPath } from '@/lib/use-case-catalog/path'
+import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
+import { MetadataForm } from '@/components/export/metadata-form'
 
+const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
+const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
 const FEEDBACK_STYLES: Record<ExportActionResult['status'], string> = {
-    ok: 'text-success',
-    'already-open': 'text-warn',
-    unchanged: 'text-warn',
-    'not-merged': 'text-warn',
-    unconfigured: 'text-warn',
-    invalid: 'text-error',
-    error: 'text-error',
+    ok: 'text-success', 'already-open': 'text-warn', unchanged: 'text-warn', 'not-merged': 'text-warn',
+    unconfigured: 'text-warn', invalid: 'text-error', error: 'text-error',
 }
-
-const inputClass =
-    'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
-const labelClass = 'flex flex-col gap-1 text-xs font-medium text-muted-foreground'
-
-function Field({
-    label,
-    name,
-    value,
-    onChange,
-    hint,
-    required,
-}: {
-    label: string
-    name: string
-    value: string
-    onChange: (value: string) => void
-    hint?: string
-    required?: boolean
-}) {
-    return (
-        <label className={labelClass}>
-            <span>{label}</span>
-            <input
-                name={name}
-                value={value}
-                required={required}
-                onChange={(event) => onChange(event.target.value)}
-                className={inputClass}
-            />
-            {hint && <span className="font-normal">{hint}</span>}
-        </label>
-    )
-}
-
-/**
- * One form, four submit buttons: preview, propose the bundle, re-read the
- * status, propose the catalogue entry. The button's `name=intent` travels in
- * the FormData, so a single server action serves all four without four copies
- * of the field handling.
- *
- * The catalogue step is a SECOND merge request by design: its entry pins the
- * merged commit, which does not exist before the bundle merge request is
- * merged. The status is read fresh from GitLab on every click - no timer, no
- * bookkeeping in the marketplace.
- */
-export function ExportPanel({
-    datasets,
-    targets,
-    readiness,
-    catalogUrl,
-    defaults,
-}: {
-    datasets: DatasetListing[]
+interface PanelProps {
+    sources: ExportSource[]
+    sourceNotice?: string
     targets: ExportTarget[]
     readiness: ExportReadiness
     catalogUrl?: string
     defaults: { publisher: string; maintainer: string }
-}) {
-    const [result, formAction, pending] = useActionState(exportAction, null)
-    const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
-    const [slug, setSlug] = useState(datasets[0] ? slugify(datasets[0].name) : '')
-    const [displayName, setDisplayName] = useState(datasets[0]?.name ?? '')
-    const [description, setDescription] = useState(datasets[0]?.description ?? '')
-    const [publisher, setPublisher] = useState(defaults.publisher)
-    const [version, setVersion] = useState('1.0.0')
-    const [domain, setDomain] = useState('general')
-    const [maintainer, setMaintainer] = useState(defaults.maintainer)
-    const [license, setLicense] = useState('EUPL-1.2')
-    const [keywords, setKeywords] = useState('')
-    const [touched, setTouched] = useState(false)
-
+}
+function Steps({ current }: { current: number }) {
+    return <ol aria-label="Fortschritt" className="grid gap-2 sm:grid-cols-4">
+        {STEPS.map((label, index) => <li key={label} aria-current={current === index + 1 ? 'step' : undefined}
+            className={`rounded-lg border px-3 py-3 text-sm ${current === index + 1 ? 'border-primary bg-primary/5 font-semibold text-primary' : 'text-muted-foreground'}`}>
+            <span className="mr-2">{index + 1}.</span>{label}
+        </li>)}
+    </ol>
+}
+export function ExportPanel(props: PanelProps) {
+    const [selection, setSelection] = useState('')
+    const [active, setActive] = useState('')
+    const source = props.sources.find((row) => row.id === active)
+    if (!props.sources.length) return <p className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">Diese Instanz hat noch keinen Use Case, auf den du zugreifen kannst.</p>
+    if (source) return <ExportEditor key={source.id} {...props} source={source} onChoose={() => setActive('')} />
+    return <div className="flex flex-col gap-6">
+        <Steps current={1} />
+        <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
+            <h2 className="text-xl font-semibold">Welchen Use Case möchtest du teilen?</h2>
+            <p className="text-sm text-muted-foreground">Wähle einen installierten oder selbst erstellten Use Case dieser Instanz.</p>
+            {props.sourceNotice && <p className="text-sm text-warn">{props.sourceNotice}</p>}
+            <label className="flex flex-col gap-2 text-sm">
+                <span>Lokaler Use Case</span>
+                <select className={inputClass} value={selection} onChange={(event) => setSelection(event.target.value)}>
+                    <option value="">Bitte auswählen …</option>
+                    {props.sources.map((row) => <option key={row.id} value={row.id}>{row.catalog?.displayName ?? row.name} · {row.catalog ? `installiert (${row.name})` : 'lokaler Bestand'}</option>)}
+                </select>
+            </label>
+            <button type="button" disabled={!selection} className={`${buttonClass('primary')} self-start`} onClick={() => setActive(selection)}>Bestand prüfen</button>
+        </section>
+    </div>
+}
+function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoose }: PanelProps & { source: ExportSource; onChoose: () => void }) {
+    const [step, setStep] = useState(2)
+    const stepHeading = useRef<HTMLHeadingElement>(null)
+    useEffect(() => {
+        stepHeading.current?.focus()
+        stepHeading.current?.scrollIntoView({ block: 'start' })
+    }, [step])
+    const [inventory, setInventory] = useState<Awaited<ReturnType<typeof inspectExportSource>> | null>(null)
+    const [inventoryAttempt, setInventoryAttempt] = useState(0)
+    const [pending, startTransition] = useTransition()
+    const [result, setResult] = useState<ExportActionResult | null>(null)
+    const [preview, setPreview] = useState<ExportActionResult['preview']>()
+    const catalog = source.catalog
+    // The catalogue's own split, not a fourth regex for it: a looser pattern here
+    // seeds a slug the server then rejects, and the author finds out on submit.
+    const address = catalog ? catalogEntryPath(catalog.id) : undefined
+    const nextVersion = catalog?.version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+    const [basics, setBasics] = useState({
+        displayName: catalog?.displayName ?? source.name,
+        description: catalog?.description ?? source.description ?? '',
+        slug: address?.slug ?? slugify(source.name), publisher: address?.publisher ?? defaults.publisher,
+        version: nextVersion ? `${nextVersion[1]}.${nextVersion[2]}.${Number(nextVersion[3]) + 1}` : '1.0.0',
+        domain: 'general', maintainer: catalog?.maintainer ?? defaults.maintainer,
+        license: catalog?.license ?? 'EUPL-1.2', keywords: catalog?.keywords.join(', ') ?? '',
+    })
+    const [metadata, setMetadata] = useState(() => metadataDraft(catalog?.metadata))
+    const [targetKey, setTargetKey] = useState(targets[0]?.key ?? '')
     const forgeReady = readiness === 'ready' && targets.length > 0
     const bundleOnBase = result?.bundle?.state === 'on-base'
-
-    const chooseDataset = (id: string) => {
-        setDatasetId(id)
-        const dataset = datasets.find((d) => d.id === id)
-        // Pre-fill from the dataset until the user edited a field; afterwards their text wins.
-        if (dataset && !touched) {
-            setSlug(slugify(dataset.name))
-            setDisplayName(dataset.name)
-            setDescription(dataset.description ?? '')
+    useEffect(() => {
+        let cancelled = false
+        inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
+            .catch(() => { if (!cancelled) setInventory({ artifacts: [], warnings: [], error: 'Bestand konnte nicht geladen werden. Bitte erneut versuchen.' }) })
+        return () => { cancelled = true }
+    }, [source.id, inventoryAttempt])
+    const run = (intent: ExportIntent) => startTransition(async () => {
+        const data = new FormData()
+        for (const [key, value] of Object.entries(basics)) data.set(key, value)
+        data.set('datasetId', source.id)
+        data.set('targetKey', targetKey)
+        data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
+        data.set('intent', intent)
+        try {
+            const next = await exportAction(null, data)
+            setResult(next)
+            if (next.preview) setPreview(next.preview)
+            if (intent === 'preview' && next.status === 'ok') setStep(4)
+        } catch {
+            setResult({ intent, status: 'error', detail: 'Die Anfrage ist fehlgeschlagen. Bitte erneut versuchen.' })
         }
-    }
-    const edit = (setter: (value: string) => void) => (value: string) => {
-        setTouched(true)
-        setter(value)
-    }
-
-    if (datasets.length === 0) {
-        return (
-            <p className="rounded-lg border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
-                Diese Instanz hat kein Dataset, das du lesen darfst - nichts zu exportieren.
-            </p>
-        )
-    }
-
-    return (
-        <form action={formAction} className="flex flex-col gap-6">
-            <section className="grid gap-4 rounded-xl border bg-card p-4 md:grid-cols-2">
-                <label className={`${labelClass} md:col-span-2`}>
-                    <span>Dataset</span>
-                    <select
-                        name="datasetId"
-                        value={datasetId}
-                        onChange={(event) => chooseDataset(event.target.value)}
-                        className={inputClass}
-                    >
-                        {datasets.map((dataset) => (
-                            <option key={dataset.id} value={dataset.id}>
-                                {dataset.name}
-                                {dataset.status ? ` (${dataset.status})` : ''}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <label className={`${labelClass} md:col-span-2`}>
-                    <span>Zielrepository</span>
-                    <select name="targetKey" className={inputClass} disabled={targets.length === 0}>
-                        {targets.length === 0 ? (
-                            <option value="">nicht konfiguriert</option>
-                        ) : (
-                            targets.map((target) => (
-                                <option key={target.key} value={target.key}>
-                                    {target.label} - {target.pathPrefix === '.' ? '/' : `${target.pathPrefix}/`}
-                                    &lt;slug&gt; auf {target.baseBranch}
-                                </option>
-                            ))
-                        )}
-                    </select>
-                </label>
-                <Field label="Anzeigename" name="displayName" value={displayName} onChange={edit(setDisplayName)} required />
-                <Field
-                    label="Paket-Slug"
-                    name="slug"
-                    value={slug}
-                    onChange={edit(setSlug)}
-                    hint="Ordnername und Teil der Katalog-ID: urn:<publisher>:usecase:<slug>"
-                    required
-                />
-                <label className={`${labelClass} md:col-span-2`}>
-                    <span>Beschreibung</span>
-                    <textarea
-                        name="description"
-                        value={description}
-                        onChange={(event) => edit(setDescription)(event.target.value)}
-                        rows={3}
-                        required
-                        className={inputClass}
-                    />
-                </label>
-                <Field
-                    label="Publisher"
-                    name="publisher"
-                    value={publisher}
-                    onChange={edit(setPublisher)}
-                    hint="Wird URN-Owner der neu identifizierten Artefakte (Kleinbuchstaben, Ziffern)"
-                    required
-                />
-                <Field label="Version" name="version" value={version} onChange={edit(setVersion)} hint="SemVer, z. B. 1.0.0" />
-                <Field label="URN-Domain" name="domain" value={domain} onChange={edit(setDomain)} hint="z. B. environment, mobility, general" />
-                <Field label="Maintainer" name="maintainer" value={maintainer} onChange={edit(setMaintainer)} required />
-                <Field label="Lizenz" name="license" value={license} onChange={edit(setLicense)} />
-                <Field label="Schlagworte" name="keywords" value={keywords} onChange={edit(setKeywords)} hint="kommagetrennt, klein, ohne Umlaute (Katalog-Schlüssel)" />
+    })
+    const editBasics = (key: keyof typeof basics, value: string) => setBasics({ ...basics, [key]: value })
+    return <div className="flex flex-col gap-6">
+        <Steps current={step} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm"><span className="text-muted-foreground">Ausgewählt: </span><strong>{source.name}</strong></p>
+            <button type="button" disabled={pending} className="text-sm underline disabled:opacity-50" onClick={onChoose}>Andere Auswahl (Eingaben verwerfen)</button>
+        </div>
+        {step === 2 && <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
+            <h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Was wird geteilt?</h2>
+            <p className="text-sm text-muted-foreground">Diese Artefakte sind aktuell mit dem Use Case verbunden. Die Vorschau liest den Bestand erneut und zeigt, welche Zugangsdaten entfernt werden.</p>
+            {!inventory ? <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Bestand wird geladen …</p>
+                : inventory.error ? <><p role="alert" className="text-sm text-error">{inventory.error}</p><button type="button" className={buttonClass('secondary')} onClick={() => { setInventory(null); setInventoryAttempt((n) => n + 1) }}>Erneut laden</button></>
+                : <>
+                    {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
+                        {inventory.artifacts.map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
+                    </ul> : <p className="text-sm text-warn">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</p>}
+                    {!!inventory.warnings.length && <List title="Hinweise zum Bestand" items={inventory.warnings} tone="warn" />}
+                    <button type="button" className={`${buttonClass('primary')} self-start`} onClick={() => setStep(3)}>Steckbrief ergänzen</button>
+                </>}
+        </section>}
+        {step === 3 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
+            <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
+                {source.notice && <p className="mt-2 text-sm text-muted-foreground">{source.notice}</p>}</div>
+            <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
+                <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
+                    <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
+                    {([{ key: 'displayName', label: 'Anzeigename *' }, { key: 'maintainer', label: 'Herausgeber / Maintainer *' },
+                        { key: 'license', label: 'Lizenz *' }, { key: 'keywords', label: 'Schlagworte (kommagetrennt)' }] as const).map(({ key, label }) =>
+                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required={key !== 'keywords'} onChange={(event) => editBasics(key, event.target.value)} /></label>)}
+                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Beschreibung *</span><textarea rows={4} className={inputClass} value={basics.description} required onChange={(event) => editBasics('description', event.target.value)} /></label>
+                </section>
+                <MetadataForm value={metadata} onChange={setMetadata} />
+                <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
+                    <h3 className="font-semibold md:col-span-2">Paket & Veröffentlichung</h3>
+                    <p className="text-sm text-muted-foreground md:col-span-2">{catalog ? 'Die nächste Patch-Version ist vorgeschlagen. Für eine eigenständige Variante kannst du Publisher und Paket-Slug ändern.' : 'Lege die Kennung für das neue Paket fest.'}</p>
+                    {([{ key: 'publisher', label: 'Publisher *', hint: '2–40 Kleinbuchstaben oder Ziffern.' }, { key: 'slug', label: 'Paket-Slug *', hint: '2–60 Kleinbuchstaben, Ziffern oder Bindestriche, nicht am Rand.' },
+                        { key: 'version', label: 'Version *', hint: 'Zum Beispiel 1.0.0.' }, { key: 'domain', label: 'URN-Domain *', hint: 'Zum Beispiel environment, mobility oder general.' }] as const).map(({ key, label, hint }) =>
+                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required onChange={(event) => editBasics(key, event.target.value)} /><span className="text-xs text-muted-foreground">{hint}</span></label>)}
+                    <p className="break-all text-xs text-muted-foreground md:col-span-2">Katalog-ID: urn:{basics.publisher}:usecase:{basics.slug}</p>
+                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><select className={inputClass} value={targetKey} disabled={!targets.length} onChange={(event) => setTargetKey(event.target.value)}>
+                        {!targets.length && <option value="">Nicht konfiguriert — Vorschau verfügbar</option>}
+                        {targets.map((target) => <option key={target.key} value={target.key}>{target.label} · {target.baseBranch}</option>)}
+                    </select></label>
+                </section>
+                <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass('secondary')} onClick={() => setStep(2)}>Zurück zum Bestand</button>
+                    <button type="submit" className={buttonClass('primary')}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}Vorschau erstellen</button></div>
+            </fieldset>
+        </form>}
+        {step === 4 && preview && <>
+            <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Vorschau & Teilen</h2><p className="mt-1 text-sm text-muted-foreground">Prüfe den Steckbrief und das Paket. Zuerst wird das Paket zur Prüfung vorgeschlagen. Nach dessen Merge kann der Katalogeintrag folgen.</p></div>
+            <section className="rounded-xl border bg-card p-5">
+                <h3 className="text-lg font-semibold">{basics.displayName}</h3><p className="mt-2 whitespace-pre-wrap text-sm">{basics.description}</p>
+                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">{Object.entries(basics).filter(([key]) => !['displayName', 'description'].includes(key)).map(([key, value]) => <div key={key}><dt className="text-muted-foreground">{{ maintainer: 'Herausgeber', license: 'Lizenz', keywords: 'Schlagworte', version: 'Version', domain: 'URN-Domain', publisher: 'Publisher', slug: 'Paket-Slug' }[key]}</dt><dd className="break-words">{value || 'Keine Angabe'}</dd></div>)}</dl>
+                <div className="mt-5"><MetadataReview metadata={metadata} /></div>
             </section>
-
-            <div className="flex flex-wrap items-center gap-2">
-                <button type="submit" name="intent" value="preview" disabled={pending} className={buttonClass('secondary')}>
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-                    Vorschau
-                </button>
-                <button type="submit" name="intent" value="bundle" disabled={pending || !forgeReady} className={buttonClass('primary')}>
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
-                    Bundle-MR erstellen
-                </button>
-                <button type="submit" name="intent" value="status" disabled={pending || !forgeReady} className={buttonClass('secondary')}>
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                    Status prüfen
-                </button>
-                <button
-                    type="submit"
-                    name="intent"
-                    value="catalog"
-                    disabled={pending || !forgeReady || !catalogUrl}
-                    title={
-                        !catalogUrl
-                            ? 'Kein Katalog-Repository konfiguriert'
-                            : bundleOnBase
-                              ? undefined
-                              : 'Erst „Status prüfen": der Eintrag pinnt den gemergten Commit'
-                    }
-                    className={buttonClass(bundleOnBase ? 'primary' : 'secondary')}
-                >
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <GitMerge className="size-4" />}
-                    Katalog-Eintrag vorschlagen
-                </button>
+            <Preview preview={preview} />
+            <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={pending} className={buttonClass('secondary')} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</button>
+                <button type="button" disabled={pending || !forgeReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('bundle')}><GitPullRequest className="size-4" />Bundle-MR erstellen</button>
+                <button type="button" disabled={pending || !forgeReady} className={buttonClass('secondary')} onClick={() => run('status')}><RefreshCw className="size-4" />Status prüfen</button>
+                <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleOnBase || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>
             </div>
-
-            {result && (
-                <div className={`flex flex-col gap-1 text-sm leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
-                    <p>{result.detail}</p>
-                    {result.mrUrl && (
-                        <a href={result.mrUrl} target="_blank" rel="noreferrer" className="inline-flex w-fit items-center gap-1 font-medium underline underline-offset-2">
-                            Merge Request öffnen
-                            <ExternalLink className="size-3" />
-                        </a>
-                    )}
-                </div>
-            )}
-
-            {result?.bundle && (
-                <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />
-                    {result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}
-                </div>
-            )}
-
-            {result?.preview && <Preview preview={result.preview} />}
-        </form>
-    )
+            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten.</p>
+        </>}
+        {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
+        {result && <div role={result.status === 'invalid' || result.status === 'error' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
+            {result.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
+        </div>}
+        {step === 3 && result?.preview && !!result.preview.errors.length && <List title="Paketprüfung" items={result.preview.errors} tone="error" />}
+        {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
+    </div>
 }
 
 function buttonClass(kind: 'primary' | 'secondary'): string {
@@ -369,4 +309,13 @@ function List({ title, items, tone }: { title: string; items: string[]; tone: 'e
             </ul>
         </div>
     )
+}
+
+function MetadataReview({ metadata }: { metadata: MetadataDraft }) {
+    return <dl className="grid gap-4 text-sm sm:grid-cols-2">
+        {!!metadata.themes.length && <div className="sm:col-span-2"><dt className="text-muted-foreground">Themengebiete</dt><dd>{metadata.themes.map((theme) => THEME_LABELS[theme as Theme]).join(', ')}</dd></div>}
+        {METADATA_GROUPS.flatMap((group) => group.fields).filter((field) => metadata.fields[field.path]?.trim()).map((field) =>
+            <div key={field.path}><dt className="text-muted-foreground">{field.label}</dt><dd className="whitespace-pre-wrap break-words">{field.options?.[metadata.fields[field.path]] ?? metadata.fields[field.path]}</dd></div>)}
+        {metadata.media.map((item, index) => <div key={index} className="sm:col-span-2"><dt className="text-muted-foreground">Bild {index + 1}</dt><dd className="break-all">{item.src}</dd><dd>{item.alt}</dd>{item.caption && <dd className="text-muted-foreground">{item.caption}</dd>}</div>)}
+    </dl>
 }

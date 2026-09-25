@@ -1,3 +1,4 @@
+import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
 import type { InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
@@ -19,6 +20,7 @@ import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
  */
 
 export interface ExportOptions {
+    metadata?: ExportMetadata
     /** URN owner of everything re-identified, and the id scheme (`urn:<publisher>:usecase:<slug>`). */
     publisher: string
     slug: string
@@ -345,6 +347,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     }
 
     const manifest: PackageManifest = {
+        ...exportMetadataSchema.parse(options.metadata ?? {}),
         id: `urn:${publisher}:usecase:${options.slug}`,
         type: 'usecase',
         displayName: options.displayName,
