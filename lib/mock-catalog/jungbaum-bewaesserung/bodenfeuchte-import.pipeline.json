@@ -1,0 +1,78 @@
+{
+  "name": "Bodenfeuchte-Import",
+  "description": "Jede eintreffende Sensormeldung wird flachgezogen und an die Messreihe angehängt — die Datenbasis des Dashboards.",
+  "model": {
+    "nodes": [
+      {
+        "id": "n-start",
+        "kind": "start",
+        "label": "Start",
+        "x-ui-position": {
+          "x": -260,
+          "y": 120
+        }
+      },
+      {
+        "id": "n-source",
+        "kind": "source",
+        "label": "Bodenfeuchte-Feed",
+        "sourceRef": "Bodenfeuchte-Feed",
+        "x-ui-position": {
+          "x": 0,
+          "y": 120
+        }
+      },
+      {
+        "id": "n-mapping",
+        "kind": "mapping",
+        "label": "Messung → Feuchtewert",
+        "mappingRef": "urn:core:standard:openurbanapps:mapping:environment:messungzufeuchtewert:bhs19gzuki",
+        "x-ui-position": {
+          "x": 260,
+          "y": 120
+        }
+      },
+      {
+        "id": "n-sink",
+        "kind": "sink",
+        "label": "Bodenfeuchte-Tabelle",
+        "sinkRef": "Bodenfeuchte-Tabelle",
+        "x-ui-position": {
+          "x": 520,
+          "y": 120
+        }
+      },
+      {
+        "id": "n-end",
+        "kind": "end",
+        "label": "Ende",
+        "x-ui-position": {
+          "x": 780,
+          "y": 120
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-start-source",
+        "source": "n-start",
+        "target": "n-source"
+      },
+      {
+        "id": "e-source-mapping",
+        "source": "n-source",
+        "target": "n-mapping"
+      },
+      {
+        "id": "e-mapping-sink",
+        "source": "n-mapping",
+        "target": "n-sink"
+      },
+      {
+        "id": "e-sink-end",
+        "source": "n-sink",
+        "target": "n-end"
+      }
+    ]
+  }
+}

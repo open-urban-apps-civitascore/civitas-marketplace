@@ -1,0 +1,9 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:environment:jungbaeumetabelle:ekhnn58a86",
+  "title": "Jungbäume-Tabelle",
+  "description": "Schreibt die Bäume per UPSERT (Schlüssel baumId) in eine PostGIS-Tabelle mit Geometriespalte — die Datenbasis des Karten-Layers.",
+  "connectionType": "postgis",
+  "tableName": "jungbaeume",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:jungbaum:rkk0n3xr1e"
+}

@@ -25,6 +25,21 @@ import treesSourceDb from './kiez-baumkataster/baumkataster-db.datasource.json'
 import treesMapping from './kiez-baumkataster/kataster-import.mapping.json'
 import treesSinkTable from './kiez-baumkataster/kiez-baeume-tabelle.datasink.json'
 import treesPipeline from './kiez-baumkataster/kataster-import.pipeline.json'
+import wateringManifest from './jungbaum-bewaesserung/manifest.json'
+import wateringRowStructure from './jungbaum-bewaesserung/jungbaum-zeile.datastructure.json'
+import wateringTreeStructure from './jungbaum-bewaesserung/jungbaum.datastructure.json'
+import wateringReadingStructure from './jungbaum-bewaesserung/bodenfeuchte-messung.datastructure.json'
+import wateringValueStructure from './jungbaum-bewaesserung/bodenfeuchte-wert.datastructure.json'
+import wateringSourceDb from './jungbaum-bewaesserung/jungbaumkataster-db.datasource.json'
+import wateringSourceFeed from './jungbaum-bewaesserung/bodenfeuchte-feed.datasource.json'
+import wateringTreeMapping from './jungbaum-bewaesserung/kataster-zu-jungbaum.mapping.json'
+import wateringValueMapping from './jungbaum-bewaesserung/messung-zu-feuchtewert.mapping.json'
+import wateringTreeSink from './jungbaum-bewaesserung/jungbaeume-tabelle.datasink.json'
+import wateringValueSink from './jungbaum-bewaesserung/bodenfeuchte-tabelle.datasink.json'
+import wateringTreePipeline from './jungbaum-bewaesserung/kataster-import.pipeline.json'
+import wateringValuePipeline from './jungbaum-bewaesserung/bodenfeuchte-import.pipeline.json'
+import wateringRegisterSimulation from './jungbaum-bewaesserung/jungbaumkataster.simulation.json'
+import wateringReadingSimulation from './jungbaum-bewaesserung/bodenfeuchte.simulation.json'
 
 /**
  * Local catalogue fixtures: verbatim copies of the artifact-repo content
@@ -85,6 +100,29 @@ export const mockPackages: MockPackage[] = [
             'kataster-import.mapping.json': treesMapping,
             'kiez-baeume-tabelle.datasink.json': treesSinkTable,
             'kataster-import.pipeline.json': treesPipeline,
+        },
+    },
+    // Both transports in one package: the register arrives over SQL (the
+    // generator owns that table, D14), the sensor readings over MQTT. Two
+    // pipelines rather than one, because a pipeline is a linear chain with one
+    // source — the two halves meet on `baumId` in the map and the dashboard.
+    {
+        manifest: wateringManifest as unknown as PackageManifest,
+        files: {
+            'jungbaum-zeile.datastructure.json': wateringRowStructure,
+            'jungbaum.datastructure.json': wateringTreeStructure,
+            'bodenfeuchte-messung.datastructure.json': wateringReadingStructure,
+            'bodenfeuchte-wert.datastructure.json': wateringValueStructure,
+            'jungbaumkataster-db.datasource.json': wateringSourceDb,
+            'bodenfeuchte-feed.datasource.json': wateringSourceFeed,
+            'kataster-zu-jungbaum.mapping.json': wateringTreeMapping,
+            'messung-zu-feuchtewert.mapping.json': wateringValueMapping,
+            'jungbaeume-tabelle.datasink.json': wateringTreeSink,
+            'bodenfeuchte-tabelle.datasink.json': wateringValueSink,
+            'kataster-import.pipeline.json': wateringTreePipeline,
+            'bodenfeuchte-import.pipeline.json': wateringValuePipeline,
+            'jungbaumkataster.simulation.json': wateringRegisterSimulation,
+            'bodenfeuchte.simulation.json': wateringReadingSimulation,
         },
     },
 ]
