@@ -1,5 +1,6 @@
 'use server'
 
+import { isSqlSimulation } from '@/lib/catalog/types'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry } from '@/lib/catalog/types'
 import { fetchSample, SimulatorError } from '@/lib/simulator/client'
@@ -33,17 +34,23 @@ export async function fetchSamplePreview(entryId: string): Promise<SamplePreview
         return { status: 'none', detail: 'Dieser Eintrag hat keine Beispieldaten.' }
     }
     const simulation = entry.bundle.simulations[0]
-    const stream = simulation?.streams[0]
-    if (!simulation || !stream) {
+    // A SQL scenario has no streams — it is one table — so the preview renders
+    // its single field set under the table's own name.
+    const unit = !simulation
+        ? undefined
+        : isSqlSimulation(simulation)
+          ? { name: simulation.sourceRef, fields: simulation.fields }
+          : simulation.streams[0]
+    if (!simulation || !unit) {
         return { status: 'none', detail: 'Dieses Paket bringt kein Demo-Szenario mit.' }
     }
 
     try {
         const records = await fetchSample(
-            { intervalSeconds: simulation.intervalSeconds, fields: stream.fields },
+            { intervalSeconds: simulation.intervalSeconds, fields: unit.fields },
             5,
         )
-        return { status: 'ok', streamName: stream.name, records }
+        return { status: 'ok', streamName: unit.name, records }
     } catch (error) {
         const detail =
             error instanceof SimulatorError ? error.message : `Vorschau fehlgeschlagen: ${String(error)}`

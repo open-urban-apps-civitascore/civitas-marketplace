@@ -1,0 +1,67 @@
+{
+  "id": "urn:openurbanapps:usecase:jungbaum-bewaesserung",
+  "type": "usecase",
+  "displayName": "Jungbaumbewässerung",
+  "description": "Verbindet das Baumkataster mit Bodenfeuchte-Sensoren an den Jungbäumen: eine Karte zeigt, welcher Baum Wasser braucht, ein Dashboard zeigt den Verlauf und den Rückstand. Junge Straßenbäume sterben in den ersten Sommern, wenn sie nicht gegossen werden — und der Bauhof fährt bisher feste Touren, teils zu Bäumen, die noch nass sind.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": ["bodenfeuchte", "postgis", "mqtt", "sql", "sensorik"],
+  "members": {
+    "dataStructures": [
+      { "file": "jungbaum-zeile.datastructure.json" },
+      { "file": "jungbaum.datastructure.json" },
+      { "file": "bodenfeuchte-messung.datastructure.json" },
+      { "file": "bodenfeuchte-wert.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "jungbaumkataster-db.datasource.json",
+        "parameters": [
+          {
+            "field": "dsn",
+            "label": "Adresse der Fachverfahrens-Datenbank",
+            "description": "JDBC-/Postgres-Adresse der Datenbank, in der das Baumkataster liegt — z. B. postgres://kataster-db:5432/fachverfahren. Gehört der Instanz, nicht dem Paket."
+          },
+          {
+            "field": "user",
+            "label": "Datenbank-Benutzer",
+            "description": "Lesender Benutzer für die Kataster-Tabelle."
+          },
+          {
+            "field": "password",
+            "label": "Passwort",
+            "description": "Wird bei der Installation abgefragt und nie im Paket mitgeliefert."
+          }
+        ]
+      },
+      {
+        "file": "bodenfeuchte-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "Broker-Adresse",
+            "description": "MQTT-Broker der Instanz, auf dem die Sensoren veröffentlichen."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "kataster-zu-jungbaum.mapping.json" },
+      { "file": "messung-zu-feuchtewert.mapping.json" }
+    ],
+    "dataSinks": [
+      { "file": "jungbaeume-tabelle.datasink.json", "parameters": [ { "field": "tableName", "label": "Tabellenname der Kartenebene" } ] },
+      { "file": "bodenfeuchte-tabelle.datasink.json", "parameters": [ { "field": "tableName", "label": "Tabellenname der Messreihe" } ] }
+    ],
+    "pipelines": [
+      { "file": "kataster-import.pipeline.json" },
+      { "file": "bodenfeuchte-import.pipeline.json" }
+    ],
+    "simulations": [
+      { "file": "jungbaumkataster.simulation.json" },
+      { "file": "bodenfeuchte.simulation.json" }
+    ]
+  },
+  "dependencies": []
+}

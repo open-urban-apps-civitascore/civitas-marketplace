@@ -1,0 +1,19 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:environment:katasterzujungbaum:6t8mv733v6",
+  "name": "Kataster → Jungbaum",
+  "description": "Übersetzt die Kataster-Zeile ins Zielformat: snake_case wird camelCase, Zahlen bekommen echte Typen, und lon/lat werden mit geoPoint zur Point-Geometrie zusammengesetzt.",
+  "document": {
+    "title": "Kataster → Jungbaum",
+    "source": "urn:core:standard:openurbanapps:datastructure:environment:jungbaumzeile:5tzfr2fcdq",
+    "target": "urn:core:standard:openurbanapps:datastructure:environment:jungbaum:rkk0n3xr1e",
+    "fields": {
+      "$.baumId": "$.baum_id",
+      "$.gattung": "$.gattung",
+      "$.artDeutsch": "$.art_deutsch",
+      "$.pflanzjahr": { "op": "toInt", "input": "$.pflanzjahr" },
+      "$.standort": "$.standort",
+      "$.sensorId": "$.sensor_id",
+      "$.position": { "op": "geoPoint", "lon": "$.lon", "lat": "$.lat" }
+    }
+  }
+}

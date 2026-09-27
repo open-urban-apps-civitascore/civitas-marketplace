@@ -1,4 +1,6 @@
+import { isSqlSimulation } from '@/lib/catalog/types'
 import type { BundledDataSource, UseCaseEntry } from '@/lib/catalog/types'
+import { slugify } from '@/lib/export/urn'
 import type { SimulationInput, SimulationStatus } from '@/lib/simulator/client'
 
 /**
@@ -49,10 +51,42 @@ export function planSimulations(
     installationId: string,
     brokerUrlOverride?: string,
 ): PlannedSimulation[] {
-    return entry.bundle.simulations.flatMap((simulation) => {
+    return entry.bundle.simulations.flatMap((simulation): PlannedSimulation[] => {
         const source = entry.bundle.dataSources.find(
             (candidate) => candidate.document.title === simulation.sourceRef,
         )
+
+        if (isSqlSimulation(simulation)) {
+            const table = source?.document.table
+            if (typeof table !== 'string' || !table) {
+                throw new Error(
+                    `Simulation '${simulation.sourceRef}': Datenquelle nennt keine Tabelle, die befüllt werden könnte`,
+                )
+            }
+            const readDsn = typeof source?.document.dsn === 'string' ? source.document.dsn : undefined
+            return [
+                {
+                    id: `${simulationIdPrefix(installationId)}${slugify(simulation.sourceRef)}`,
+                    input: {
+                        transport: { kind: 'sql' as const, table, ...(readDsn ? { readDsn } : {}) },
+                        scenario: {
+                            ...(simulation.intervalSeconds !== undefined
+                                ? { intervalSeconds: simulation.intervalSeconds }
+                                : {}),
+                            table: simulation.table,
+                            fields: simulation.fields,
+                            ...(simulation.seedRows !== undefined ? { seedRows: simulation.seedRows } : {}),
+                            ...(simulation.insertsPerTick !== undefined
+                                ? { insertsPerTick: simulation.insertsPerTick }
+                                : {}),
+                            maxRows: simulation.maxRows,
+                        },
+                        enabled: true,
+                    },
+                },
+            ]
+        }
+
         const brokerUrl = brokerUrlOverride?.trim() || firstUrlOf(source)
         if (!brokerUrl) {
             throw new Error(

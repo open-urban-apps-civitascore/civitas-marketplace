@@ -1,3 +1,4 @@
+import { isSqlSimulation } from '@/lib/catalog/types'
 import { describe, expect, it } from 'vitest'
 
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
@@ -29,14 +30,16 @@ function useCaseEntries(): UseCaseEntry[] {
 }
 
 describe('planSimulations', () => {
-    it('plans one registration per bundled stream, for every shipped use case', () => {
+    it('plans one registration per stream, and one per SQL table', () => {
+        // A table is one shape, not many: a SQL scenario is a single
+        // registration however many rows it seeds.
         for (const entry of useCaseEntries()) {
             const planned = planSimulations(entry, INSTALLATION_ID)
-            const streamCount = entry.bundle.simulations.reduce(
-                (sum, simulation) => sum + simulation.streams.length,
+            const expected = entry.bundle.simulations.reduce(
+                (sum, simulation) => sum + (isSqlSimulation(simulation) ? 1 : simulation.streams.length),
                 0,
             )
-            expect(planned, entry.manifest.id).toHaveLength(streamCount)
+            expect(planned, entry.manifest.id).toHaveLength(expected)
         }
     })
 
@@ -47,6 +50,7 @@ describe('planSimulations', () => {
                 .map((source) => (Array.isArray(source.document.topics) ? source.document.topics[0] : undefined))
                 .filter((topic): topic is string => typeof topic === 'string')
             for (const { id, input } of planned) {
+                if (input.transport.kind !== 'mqtt') continue
                 // The prefix is the uninstall's only handle on these registrations.
                 expect(id.startsWith(simulationIdPrefix(INSTALLATION_ID))).toBe(true)
                 expect(input.enabled).toBe(true)
@@ -55,11 +59,11 @@ describe('planSimulations', () => {
                 // one the installed source actually receives.
                 const matches = subscriptions.some((subscription) =>
                     subscription.endsWith('/+') || subscription.endsWith('/#')
-                        ? input.transport.topic.startsWith(subscription.slice(0, -1)) &&
-                          !input.transport.topic.slice(subscription.length - 1).includes('/')
-                        : input.transport.topic === subscription,
+                        ? mqttTransport(input.transport).topic.startsWith(subscription.slice(0, -1)) &&
+                          !mqttTransport(input.transport).topic.slice(subscription.length - 1).includes('/')
+                        : mqttTransport(input.transport).topic === subscription,
                 )
-                expect(matches, `${entry.manifest.id}: ${input.transport.topic}`).toBe(true)
+                expect(matches, `${entry.manifest.id}: ${mqttTransport(input.transport).topic}`).toBe(true)
             }
         }
     })
@@ -72,17 +76,20 @@ describe('planSimulations', () => {
         expect(traffic).toBeDefined()
         const subscription = traffic!.bundle.dataSources[0].document.topics as string[]
         for (const { input } of planSimulations(traffic!, INSTALLATION_ID)) {
-            expect(input.transport.topic).toBe(subscription[0])
+            expect(mqttTransport(input.transport).topic).toBe(subscription[0])
         }
     })
 
     it('takes the broker from the datasource the scenario names', () => {
         for (const entry of useCaseEntries()) {
             for (const { input } of planSimulations(entry, INSTALLATION_ID)) {
+                // A SQL scenario carries no broker: the generator writes to the
+                // database it was configured with.
+                if (input.transport.kind !== 'mqtt') continue
                 const declaredUrls = entry.bundle.dataSources.flatMap((source) =>
                     Array.isArray(source.document.urls) ? (source.document.urls as string[]) : [],
                 )
-                expect(declaredUrls, entry.manifest.id).toContain(input.transport.url)
+                expect(declaredUrls, entry.manifest.id).toContain(mqttTransport(input.transport).url)
             }
         }
     })
@@ -90,7 +97,7 @@ describe('planSimulations', () => {
     it('lets a broker override win over the package value', () => {
         const [entry] = useCaseEntries()
         for (const { input } of planSimulations(entry, INSTALLATION_ID, 'tcp://localhost:1883')) {
-            expect(input.transport.url).toBe('tcp://localhost:1883')
+            expect(mqttTransport(input.transport).url).toBe('tcp://localhost:1883')
         }
     })
 
@@ -236,3 +243,11 @@ describe('applyDeclaredUrlOverride', () => {
         expect(applyDeclaredUrlOverride(sources, '  ')).toBe(sources)
     })
 })
+
+/** The planned transport, narrowed — these cases are all MQTT scenarios. */
+function mqttTransport(
+    transport: { kind: 'mqtt'; url: string; topic: string } | { kind: 'sql'; table: string },
+): { url: string; topic: string } {
+    if (transport.kind !== 'mqtt') throw new Error('expected an mqtt transport')
+    return transport
+}

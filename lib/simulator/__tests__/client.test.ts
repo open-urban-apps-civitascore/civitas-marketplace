@@ -1,3 +1,4 @@
+import { isSqlSimulation } from '@/lib/catalog/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -46,7 +47,7 @@ describe('simulator client', () => {
         vi.stubGlobal('fetch', fetchMock)
 
         const records = await fetchSample(
-            { intervalSeconds: simulation.intervalSeconds, fields: simulation.streams[0].fields },
+            { intervalSeconds: simulation.intervalSeconds, fields: isSqlSimulation(simulation) ? simulation.fields : simulation.streams[0].fields },
             3,
         )
 

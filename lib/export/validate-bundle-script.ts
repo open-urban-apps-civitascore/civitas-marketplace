@@ -33,6 +33,8 @@ GENERATOR_KINDS = {
     "enum": ("values",),
     "randomWalk": ("min", "max", "step"),
     "dailyProfile": ("min", "max", "peakHours"),
+    "sequence": (),
+    "jitter": ("center", "spread"),
 }
 errors = []
 
@@ -135,11 +137,21 @@ for (kind, name), document in documents.items():
         if not isinstance(model, dict) or not isinstance(model.get("nodes"), list):
             fail(f"{where}: pipeline needs model.nodes")
     elif kind == "simulations":
-        for field in ("sourceRef", "messageClass", "topicBase"):
+        required = ("sourceRef", "messageClass")
+        for field in required:
             if not isinstance(document.get(field), str) or not document[field]:
                 fail(f"{where}: simulation needs field '{field}'")
-        if not isinstance(document.get("streams"), list) or not document["streams"]:
-            fail(f"{where}: simulation needs a non-empty streams array")
+        if document.get("transport") == "sql":
+            # A table, not a topic: the generator owns the table's lifetime.
+            if not isinstance(document.get("table"), dict):
+                fail(f"{where}: a SQL scenario needs a 'table' with columns")
+            if not isinstance(document.get("fields"), dict) or not document["fields"]:
+                fail(f"{where}: a SQL scenario needs a non-empty fields object")
+        else:
+            if not isinstance(document.get("topicBase"), str) or not document["topicBase"]:
+                fail(f"{where}: simulation needs field 'topicBase'")
+            if not isinstance(document.get("streams"), list) or not document["streams"]:
+                fail(f"{where}: simulation needs a non-empty streams array")
 
 
 def _deref(node, root, where):
@@ -183,7 +195,28 @@ def validate_simulation(document, where):
     if not message_class:
         return
 
-    for stream in document["streams"]:
+    # A SQL scenario has no streams: a table is one shape, not many. Its fields
+    # are checked against the declared columns as well as against the structure,
+    # because a name that is not a column fills nothing (D14).
+    if document.get("transport") == "sql":
+        table = document.get("table") or {}
+        columns = list((table.get("columns") or {}).keys())
+        if not columns:
+            fail(f"{where}: a SQL scenario must declare its table columns")
+            return
+        key = table.get("primaryKey")
+        if key and key not in columns:
+            fail(f"{where}: primaryKey '{key}' is not among the declared columns")
+        if document.get("maxRows") is None:
+            fail(f"{where}: maxRows is required for SQL - every pipeline run re-reads the whole table")
+        for name in (document.get("fields") or {}):
+            if name not in columns:
+                fail(f"{where}: field '{name}' is not a declared column of the table")
+        units = [{"name": "Tabelle", "fields": document.get("fields") or {}}]
+    else:
+        units = document["streams"]
+
+    for stream in units:
         stream_name = stream.get("name", "?")
         covered = set()
         for path, spec in (stream.get("fields") or {}).items():

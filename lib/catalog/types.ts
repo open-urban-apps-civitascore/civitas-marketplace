@@ -222,7 +222,9 @@ export interface SimulationStream {
  * deliberately NOT part of this document — they are instance-local values
  * (the datasource carries the default, the install may override it).
  */
-export interface BundledSimulation {
+export interface BundledMqttSimulation {
+    /** Absent means mqtt: every scenario published before SQL existed. */
+    transport?: 'mqtt'
     /** Bundle-local handle of the datasource this scenario feeds (its title). */
     sourceRef: string
     /** JSON pointer to the message class inside the source structure. */
@@ -230,6 +232,47 @@ export interface BundledSimulation {
     topicBase: string
     intervalSeconds?: number
     streams: SimulationStream[]
+}
+
+/**
+ * A scenario that fills a SQL table instead of publishing to a broker.
+ *
+ * The asymmetry with MQTT is the point, and it comes from D14: a broker needs
+ * no preparation and keeps no history, while a table has to exist before
+ * anything can read it, and nothing in CIVITAS ever creates it. So this
+ * scenario describes the TABLE as well as the rows, and the generator owns
+ * that table's lifetime — creating it, seeding it, and keeping it inside
+ * `maxRows`.
+ *
+ * There are no streams: a table is one shape, not many. And there is no
+ * address — the DSN the generator writes to is its own configuration, never
+ * package content (a password has no business travelling in a catalogue
+ * entry). Which table inside that database is named here; the datasource says
+ * where the platform READS, and the generator compares the two database names
+ * so a scenario cannot fill a table nobody looks at.
+ */
+export interface BundledSqlSimulation {
+    transport: 'sql'
+    sourceRef: string
+    messageClass: string
+    /** Column types and the UPSERT key; the key must be among the columns. */
+    table: { columns: Record<string, string>; primaryKey?: string }
+    fields: Record<string, GeneratorSpec>
+    /** Written once at start-up, so the first read is never of an empty table. */
+    seedRows?: number
+    insertsPerTick?: number
+    /** Mandatory: every pipeline run re-reads the whole table (D14). */
+    maxRows: number
+    intervalSeconds?: number
+}
+
+export type BundledSimulation = BundledMqttSimulation | BundledSqlSimulation
+
+/** Narrowing helper — the absent `transport` of older scenarios means mqtt. */
+export function isSqlSimulation(
+    simulation: BundledSimulation,
+): simulation is BundledSqlSimulation {
+    return simulation.transport === 'sql'
 }
 
 export interface DataStructureEntry {

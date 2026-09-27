@@ -38,6 +38,10 @@ export class SimulatorError extends Error {
 export interface SampleScenario {
     intervalSeconds?: number
     fields: Record<string, GeneratorSpec>
+    table?: { columns: Record<string, string>; primaryKey?: string }
+    seedRows?: number
+    insertsPerTick?: number
+    maxRows?: number
 }
 
 /**
@@ -58,7 +62,9 @@ export async function fetchSample(scenario: SampleScenario, count = 5): Promise<
 
 /** Wire shape of `PUT /simulations/:id` — the simulator's `simulationInputSchema`. */
 export interface SimulationInput {
-    transport: { kind: 'mqtt'; url: string; topic: string }
+    transport:
+        | { kind: 'mqtt'; url: string; topic: string }
+        | { kind: 'sql'; table: string; readDsn?: string }
     scenario: SampleScenario
     enabled: boolean
 }

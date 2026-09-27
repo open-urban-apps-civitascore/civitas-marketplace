@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtemessung:gpslwk9jh7",
+  "title": "Bodenfeuchte-Messung",
+  "description": "Rohmessung eines Bodenfeuchte-Sensors am Jungbaum, publiziert über MQTT. Feuchte als Pflichtwert, Bodentemperatur und Batteriestand optional — abgestimmt auf günstige LoRaWAN-/WLAN-Sensorik, wie sie Kommunen im Gießbetrieb einsetzen.",
+  "$ref": "#/$defs/BodenfeuchteMessung",
+  "$defs": {
+    "BodenfeuchteMessung": {
+      "type": "object",
+      "title": "BodenfeuchteMessung",
+      "description": "Ein Messzyklus eines Sensors: Pflichtfelder Sensor, Baum, Zeitstempel und Feuchte.",
+      "required": ["sensorId", "baumId", "timestamp", "feuchte"],
+      "properties": {
+        "sensorId": { "type": "string", "description": "Sensor-Kennung, z. B. 'BF-014'." },
+        "baumId": { "type": "string", "description": "Kataster-Nummer des Baums — der Schlüssel, über den Messreihe und Kataster zusammenfinden." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "ISO-8601-UTC-Zeitstempel der Messung." },
+        "feuchte": { "$ref": "#/$defs/Messwert", "description": "Volumetrische Bodenfeuchte in Prozent." },
+        "bodentemperatur": { "$ref": "#/$defs/Messwert", "description": "Bodentemperatur in Grad Celsius." },
+        "batterie": { "$ref": "#/$defs/Messwert", "description": "Batteriestand in Prozent — ein leerer Sensor meldet sonst stumm nichts mehr." }
+      }
+    },
+    "Messwert": {
+      "type": "object",
+      "title": "Messwert",
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number", "description": "Messwert." },
+        "unit": { "type": "string", "description": "Einheit, z. B. '%' oder 'Cel'." }
+      }
+    }
+  }
+}
