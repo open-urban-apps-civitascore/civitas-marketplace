@@ -124,6 +124,13 @@ cannot be the guard, because layouts are cached client-side and do not re-render
 when navigating between pages that share them (see the Next.js authentication
 guide, "Layouts and auth checks").
 
+## License
+
+[EUPL-1.2](./LICENSE) - the licence CIVITAS/CORE uses upstream.
+
+The funder logos in `logo/` are the trademarks of their owners. They are supplied
+for the funding notice and are not licensed under the EUPL.
+
 ## Funding
 
 This project is funded by the **Federal Ministry of Research, Technology and Space (BMFTR)** as part of the **[Prototype Fund](https://prototypefund.de/)**, an initiative by the Open Knowledge Foundation Germany. 
