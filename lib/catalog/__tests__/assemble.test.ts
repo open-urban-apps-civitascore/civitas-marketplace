@@ -1,3 +1,4 @@
+import { isSqlSimulation } from '@/lib/catalog/types'
 import { describe, expect, it } from 'vitest'
 
 import { assembleCatalogEntry, CatalogIntegrityError, parsePackageManifest } from '@/lib/catalog/assemble'
@@ -72,7 +73,9 @@ describe('simulation validation', () => {
         const entry = assembleCatalogEntry(traffic.manifest, readerFor(traffic.files))
         if (isDataStructureEntry(entry)) throw new Error('expected a use case')
         expect(entry.bundle.simulations).toHaveLength(1)
-        expect(entry.bundle.simulations[0].streams.length).toBeGreaterThanOrEqual(3)
+        const first = entry.bundle.simulations[0]
+        if (isSqlSimulation(first)) throw new Error('expected an mqtt scenario')
+        expect(first.streams.length).toBeGreaterThanOrEqual(3)
     })
 
     it('refuses a sourceRef that matches no bundled datasource', () => {

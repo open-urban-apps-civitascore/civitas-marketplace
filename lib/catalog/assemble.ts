@@ -9,6 +9,7 @@ import type {
     PackageMember,
     UseCaseEntry,
 } from '@/lib/catalog/types'
+import { isSqlSimulation } from '@/lib/catalog/types'
 
 /**
  * Turns a package document plus its member files into a CatalogEntry — the ONE
@@ -106,6 +107,10 @@ const GENERATOR_KINDS: Record<string, string[]> = {
     enum: ['values'],
     randomWalk: ['min', 'max', 'step'],
     dailyProfile: ['min', 'max', 'peakHours'],
+    // Added with the SQL transport (D14); the catalogue validators had been
+    // behind the generator, which has produced both since the POC.
+    sequence: [],
+    jitter: ['center', 'spread'],
 }
 
 /**
@@ -175,7 +180,32 @@ function validateSimulation(
         return { covered }
     }
 
-    for (const stream of simulation.streams) {
+    const units = isSqlSimulation(simulation)
+        ? [{ name: 'Tabelle', fields: simulation.fields }]
+        : simulation.streams
+
+    if (isSqlSimulation(simulation)) {
+        const columns = Object.keys(simulation.table?.columns ?? {})
+        if (columns.length === 0) {
+            throw new CatalogIntegrityError(`${where}: a SQL scenario must declare its table columns`)
+        }
+
+        const key = simulation.table?.primaryKey
+        if (key && !columns.includes(key)) {
+            throw new CatalogIntegrityError(
+                `${where}: primaryKey '${key}' is not among the declared columns`,
+            )
+        }
+        for (const name of Object.keys(simulation.fields ?? {})) {
+            if (!columns.includes(name)) {
+                throw new CatalogIntegrityError(
+                    `${where}: field '${name}' is not a declared column of the table`,
+                )
+            }
+        }
+    }
+
+    for (const stream of units) {
         const covered = new Set<string>()
         for (const [path, spec] of Object.entries(stream.fields)) {
             // Generator shape first — a wrong kind would only fail at the simulator.
@@ -321,9 +351,24 @@ export function assembleCatalogEntry(
             const document = read(member)
             requireString(document, 'sourceRef', where)
             requireString(document, 'messageClass', where)
-            requireString(document, 'topicBase', where)
-            if (!Array.isArray(document.streams) || document.streams.length === 0) {
-                throw new CatalogIntegrityError(`${where} needs a non-empty streams array`)
+            if (document.transport === 'sql') {
+                // A SQL scenario describes a table, not a topic and streams.
+                if (!isRecord(document.table)) {
+                    throw new CatalogIntegrityError(`${where} needs a 'table' with columns`)
+                }
+                if (!isRecord(document.fields) || Object.keys(document.fields).length === 0) {
+                    throw new CatalogIntegrityError(`${where} needs a non-empty fields object`)
+                }
+                if (typeof document.maxRows !== 'number') {
+                    throw new CatalogIntegrityError(
+                        `${where} needs maxRows — every pipeline run re-reads the whole table`,
+                    )
+                }
+            } else {
+                requireString(document, 'topicBase', where)
+                if (!Array.isArray(document.streams) || document.streams.length === 0) {
+                    throw new CatalogIntegrityError(`${where} needs a non-empty streams array`)
+                }
             }
             const simulation = document as unknown as BundledSimulation
 
@@ -352,22 +397,35 @@ export function assembleCatalogEntry(
             // day one while the topic was not, and the gap shipped a scenario that
             // published one level below an exact subscription: running streams,
             // zero rows, no error anywhere.
-            const topics = source.document.topics
-            const subscription =
-                Array.isArray(topics) && typeof topics[0] === 'string' ? topics[0] : undefined
-            if (!subscription) {
-                throw new CatalogIntegrityError(
-                    `${where}: datasource '${simulation.sourceRef}' declares no MQTT topics to publish into`,
-                )
-            }
-            if (
-                subscription !== simulation.topicBase &&
-                subscription !== `${simulation.topicBase}/+` &&
-                subscription !== `${simulation.topicBase}/#`
-            ) {
-                throw new CatalogIntegrityError(
-                    `${where}: topicBase '${simulation.topicBase}' does not match the datasource subscription '${subscription}'`,
-                )
+            if (isSqlSimulation(simulation)) {
+                if (source.document.connectionType !== 'sql') {
+                    throw new CatalogIntegrityError(
+                        `${where}: a SQL scenario needs a SQL datasource, but '${simulation.sourceRef}' is '${String(source.document.connectionType)}'`,
+                    )
+                }
+                if (typeof source.document.table !== 'string' || !source.document.table) {
+                    throw new CatalogIntegrityError(
+                        `${where}: datasource '${simulation.sourceRef}' names no table to fill`,
+                    )
+                }
+            } else {
+                const topics = source.document.topics
+                const subscription =
+                    Array.isArray(topics) && typeof topics[0] === 'string' ? topics[0] : undefined
+                if (!subscription) {
+                    throw new CatalogIntegrityError(
+                        `${where}: datasource '${simulation.sourceRef}' declares no MQTT topics to publish into`,
+                    )
+                }
+                if (
+                    subscription !== simulation.topicBase &&
+                    subscription !== `${simulation.topicBase}/+` &&
+                    subscription !== `${simulation.topicBase}/#`
+                ) {
+                    throw new CatalogIntegrityError(
+                        `${where}: topicBase '${simulation.topicBase}' does not match the datasource subscription '${subscription}'`,
+                    )
+                }
             }
             validateSimulation(simulation, structure.model, where)
             return simulation

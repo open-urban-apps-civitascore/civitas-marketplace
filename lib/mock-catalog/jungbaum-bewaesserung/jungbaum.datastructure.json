@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:jungbaum:rkk0n3xr1e",
+  "title": "Jungbaum (Zielformat)",
+  "description": "Normalisierter Baum mit Geometrie: sprechende Feldnamen, baumId als Primärschlüssel (UPSERT-Anker, da die SQL-Quelle je Lauf die ganze Tabelle liest) und position als Point-Geometrie — die Datenbasis des Karten-Layers.",
+  "$ref": "#/$defs/Jungbaum",
+  "$defs": {
+    "Jungbaum": {
+      "type": "object",
+      "title": "Jungbaum",
+      "required": ["baumId", "position"],
+      "properties": {
+        "baumId": { "type": "string", "x-core-primaryKey": true, "description": "Kataster-Nummer — Primärschlüssel und UPSERT-Anker." },
+        "gattung": { "type": "string", "description": "Botanische Gattung." },
+        "artDeutsch": { "type": "string", "description": "Deutscher Artname." },
+        "pflanzjahr": { "type": "integer", "description": "Pflanzjahr." },
+        "standort": { "type": "string", "description": "Straße und Hausnummer." },
+        "sensorId": { "type": "string", "description": "Kennung des Bodenfeuchte-Sensors; verbindet den Baum mit seiner Messreihe." },
+        "position": {
+          "$ref": "https://geojson.org/schema/Point.json",
+          "crs": "EPSG:4326",
+          "description": "Standort als Point-Geometrie (WGS84) — wird zur GEOMETRY-Spalte des Karten-Layers."
+        }
+      }
+    }
+  }
+}

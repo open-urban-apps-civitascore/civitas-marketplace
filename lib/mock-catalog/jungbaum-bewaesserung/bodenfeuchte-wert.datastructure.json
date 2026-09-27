@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtewert:g3b4znbtw9",
+  "title": "Bodenfeuchte-Wert (Zielformat)",
+  "description": "Eine flache Messzeile für die Auswertung: ein Wert je Sensor und Zeitpunkt, verschachtelte Messwerte auf Spalten gezogen. Bewusst OHNE Primärschlüssel — eine Messreihe wächst, sie wird nicht überschrieben.",
+  "$ref": "#/$defs/BodenfeuchteWert",
+  "$defs": {
+    "BodenfeuchteWert": {
+      "type": "object",
+      "title": "BodenfeuchteWert",
+      "required": ["baumId", "gemessenAm", "feuchteProzent"],
+      "properties": {
+        "baumId": { "type": "string", "description": "Kataster-Nummer des Baums — Join-Schlüssel zur Kartenebene." },
+        "sensorId": { "type": "string", "description": "Sensor-Kennung." },
+        "gemessenAm": { "type": "string", "format": "date-time", "description": "Zeitpunkt der Messung." },
+        "feuchteProzent": { "type": "number", "description": "Bodenfeuchte in Prozent." },
+        "bodentemperaturC": { "type": "number", "description": "Bodentemperatur in Grad Celsius." },
+        "batterieProzent": { "type": "number", "description": "Batteriestand in Prozent." }
+      }
+    }
+  }
+}
