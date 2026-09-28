@@ -98,6 +98,92 @@ export function resolveBrokerOverride(
     return ''
 }
 
+/**
+ * Splits a connection string into the three fields a datasource document keeps
+ * apart. Credentials do not stay in the address: `password` is a field the
+ * platform encrypts before the registry sees it, and an address carrying
+ * `user:pass@` would hand them over in clear instead.
+ *
+ * Returns undefined for anything unparseable, so a mistyped setting leaves the
+ * package default standing rather than writing half an address.
+ */
+export function splitConnectionString(
+    connectionString: string,
+): { dsn: string; user?: string; password?: string } | undefined {
+    const raw = connectionString.trim()
+    if (!raw) return undefined
+    let parsed: URL
+    try {
+        parsed = new URL(raw)
+    } catch {
+        return undefined
+    }
+    const user = decodeURIComponent(parsed.username)
+    const password = decodeURIComponent(parsed.password)
+    parsed.username = ''
+    parsed.password = ''
+    return {
+        dsn: parsed.toString(),
+        ...(user ? { user } : {}),
+        ...(password ? { password } : {}),
+    }
+}
+
+/**
+ * The SQL counterpart of {@link applyDeclaredUrlOverride}: applies a connection
+ * string to every bundled datasource that DECLARES the matching field as an
+ * install parameter, and only to those. Same rule as the broker — the manifest
+ * decides which connector fields are instance-local.
+ *
+ * Each of `dsn`, `user` and `password` is written only where the package
+ * offered it, so a package that asks for an address but keeps its own user
+ * still gets its user.
+ */
+export function applyDeclaredDsnOverride<
+    T extends { document: Record<string, unknown>; parameters?: { field: string }[] },
+>(dataSources: T[], connectionString: string): T[] {
+    const parts = splitConnectionString(connectionString)
+    if (!parts) return dataSources
+    return dataSources.map((source) => {
+        const declares = (field: string) =>
+            source.parameters?.some((parameter) => parameter.field === field) ?? false
+        if (!declares('dsn')) return source
+        return {
+            ...source,
+            document: {
+                ...source.document,
+                dsn: parts.dsn,
+                ...(parts.user && declares('user') ? { user: parts.user } : {}),
+                ...(parts.password && declares('password') ? { password: parts.password } : {}),
+            },
+        }
+    })
+}
+
+/**
+ * The connection string an install applies to the datasources that declare
+ * `dsn` as an install parameter. Only 'demo' resolves to anything: it points
+ * the platform at the database the demo generator writes to, so the SQL half
+ * of a demo install needs no typing — exactly as 'demo' already does for the
+ * broker.
+ *
+ * The generator compares DATABASE NAMES before it writes (D14). Its own
+ * DEMO_DB_DSN and this setting must therefore name the same database, which is
+ * why this is the platform's view of the SAME address rather than a second
+ * database.
+ *
+ * 'custom' and 'later' resolve to nothing on purpose: pointing the platform at
+ * an operator's own database is the deferred case in D14, and it needs stored
+ * install parameters and a decision about the generator's write reach. Until
+ * then the package default stands and the address is edited in the portal.
+ */
+export function resolveDsnOverride(
+    mode: 'demo' | 'custom' | 'later',
+    demoDatasourceDbDsn: string | undefined,
+): string {
+    return mode === 'demo' ? (demoDatasourceDbDsn?.trim() ?? '') : ''
+}
+
 export function versionProvenance(displayName: string, version: string): string {
     const line = `Aus Paket ${displayName} ${version}`
     if (line.length <= DESCRIPTION_MAX_LENGTH) {

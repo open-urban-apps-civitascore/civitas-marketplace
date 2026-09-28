@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import type { UseCaseEntry } from '@/lib/catalog/types'
-import { applyDeclaredUrlOverride } from '@/lib/install-payload'
+import {
+    applyDeclaredDsnOverride,
+    applyDeclaredUrlOverride,
+    resolveDsnOverride,
+} from '@/lib/install-payload'
 import { mockPackages } from '@/lib/mock-catalog'
 import {
     planSimulations,
@@ -241,6 +245,89 @@ describe('applyDeclaredUrlOverride', () => {
     it('is a no-op for a blank override', () => {
         const sources = [{ document: { urls: ['tcp://paket:1883'] }, parameters: [{ field: 'urls' }] }]
         expect(applyDeclaredUrlOverride(sources, '  ')).toBe(sources)
+    })
+})
+
+/** The override helpers are generic over any document shape; tests need the wide one. */
+type Source = { document: Record<string, unknown>; parameters?: { field: string }[] }
+
+describe('applyDeclaredDsnOverride', () => {
+    const demoDsn = 'postgres://demo:geheim@demo-db.core.svc.cluster.local:5432/demo_source'
+
+    it('splits credentials out of the address instead of leaving them in it', () => {
+        const declared: Source = {
+            document: { title: 'A', dsn: 'postgres://localhost:5432/fachverfahren', user: 'kataster' },
+            parameters: [{ field: 'dsn' }, { field: 'user' }, { field: 'password' }],
+        }
+        const [overridden] = applyDeclaredDsnOverride([declared], demoDsn)
+        // The password is a field the platform encrypts; an address carrying
+        // user:pass@ would hand it to the registry in clear.
+        expect(overridden.document.dsn).toBe(
+            'postgres://demo-db.core.svc.cluster.local:5432/demo_source',
+        )
+        expect(overridden.document.user).toBe('demo')
+        expect(overridden.document.password).toBe('geheim')
+    })
+
+    it('writes only the fields the package offered', () => {
+        const addressOnly: Source = {
+            document: { title: 'A', dsn: 'postgres://localhost:5432/fachverfahren', user: 'kataster' },
+            parameters: [{ field: 'dsn' }],
+        }
+        const [overridden] = applyDeclaredDsnOverride([addressOnly], demoDsn)
+        expect(overridden.document.dsn).toContain('demo_source')
+        // The package keeps its own user: it never offered that field.
+        expect(overridden.document.user).toBe('kataster')
+        expect(overridden.document.password).toBeUndefined()
+    })
+
+    it('leaves sources alone that do not declare dsn', () => {
+        const undeclared = { document: { title: 'B', dsn: 'postgres://localhost:5432/fach' } }
+        const [untouched] = applyDeclaredDsnOverride([undeclared], demoDsn)
+        expect(untouched.document.dsn).toBe('postgres://localhost:5432/fach')
+    })
+
+    it('leaves the package default standing when the setting is blank or unparseable', () => {
+        const sources = [
+            { document: { dsn: 'postgres://localhost:5432/fach' }, parameters: [{ field: 'dsn' }] },
+        ]
+        expect(applyDeclaredDsnOverride(sources, '   ')).toBe(sources)
+        // Half an address written from a typo is worse than no override.
+        expect(applyDeclaredDsnOverride(sources, 'not a url')).toBe(sources)
+    })
+
+    it('makes the platform read the database the generator writes to', () => {
+        // The whole point: D14's guard compares database NAMES, so after the
+        // override the planner's readDsn and the generator's DEMO_DB_DSN must
+        // name the same database. This is the invariant the SQL demo install
+        // silently lacked.
+        const [overridden] = applyDeclaredDsnOverride(
+            [
+                {
+                    document: { dsn: 'postgres://localhost:5432/fachverfahren' },
+                    parameters: [{ field: 'dsn' }],
+                },
+            ],
+            demoDsn,
+        )
+        const nameOf = (dsn: string) => new URL(dsn).pathname.replace(/^\//, '')
+        expect(nameOf(String(overridden.document.dsn))).toBe(nameOf(demoDsn))
+    })
+})
+
+describe('resolveDsnOverride', () => {
+    const demoDsn = 'postgres://demo:geheim@demo-db:5432/demo_source'
+
+    it('applies the demo database only in demo mode', () => {
+        expect(resolveDsnOverride('demo', demoDsn)).toBe(demoDsn)
+        // Pointing the platform at an operator's own database is D14's
+        // deferred case: the package default stands and is edited in the portal.
+        expect(resolveDsnOverride('custom', demoDsn)).toBe('')
+        expect(resolveDsnOverride('later', demoDsn)).toBe('')
+    })
+
+    it('is inert on deployments that configure no demo database', () => {
+        expect(resolveDsnOverride('demo', undefined)).toBe('')
     })
 })
 
