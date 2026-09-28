@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry } from '@/lib/catalog/types'
+import { applyDeclaredDsnOverride, resolveDsnOverride } from '@/lib/install-payload'
 import {
     isSimulatorConfigured,
     listSimulations,
@@ -123,12 +124,27 @@ export async function reactivateDemoStreams(
         return { status: 'error', detail: 'Dieses Paket bündelt keine Demo-Szenarien' }
     }
 
+    // Only an installation that took the demo data has streams to reactivate,
+    // so the demo database applies here as it did at install. Without it this
+    // button would re-plan from the package's placeholder address and the
+    // generator would refuse the SQL registration all over again.
+    const demoDsn = resolveDsnOverride('demo', process.env.DEMO_DATASOURCE_DB_DSN)
+    const effectiveEntry = demoDsn
+        ? {
+              ...entry,
+              bundle: {
+                  ...entry.bundle,
+                  dataSources: applyDeclaredDsnOverride(entry.bundle.dataSources, demoDsn),
+              },
+          }
+        : entry
+
     let planned
     try {
         // Same broker resolution as the install path: the package's datasource
         // URL, overridden by SIMULATOR_BROKER_URL when the simulator lives
         // outside the docker network.
-        planned = planSimulations(entry, installationId, process.env.SIMULATOR_BROKER_URL)
+        planned = planSimulations(effectiveEntry, installationId, process.env.SIMULATOR_BROKER_URL)
     } catch (error) {
         return { status: 'error', detail: error instanceof Error ? error.message : String(error) }
     }

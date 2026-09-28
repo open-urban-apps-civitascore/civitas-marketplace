@@ -6,9 +6,11 @@ import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
 import {
+    applyDeclaredDsnOverride,
     applyDeclaredUrlOverride,
     clampDescription,
     resolveBrokerOverride,
+    resolveDsnOverride,
     versionProvenance,
 } from '@/lib/install-payload'
 import { getAccessToken } from '@/lib/session'
@@ -117,15 +119,20 @@ export async function installEntry(
         customBrokerUrl,
         process.env.DEMO_DATASOURCE_BROKER_URL,
     )
-    const effectiveEntry: UseCaseEntry = overrideBrokerUrl
-        ? {
-              ...entry,
-              bundle: {
-                  ...entry.bundle,
-                  dataSources: applyDeclaredUrlOverride(entry.bundle.dataSources, overrideBrokerUrl),
-              },
-          }
-        : entry
+    // The same idea for the SQL half: 'demo' points the platform at the
+    // database the generator writes to. Without it the platform kept the
+    // package's placeholder address while the generator wrote to its own
+    // database, and the generator's name check refused the registration —
+    // correctly, since the rows would never have been read.
+    const overrideDsn = resolveDsnOverride(dataSourceMode, process.env.DEMO_DATASOURCE_DB_DSN)
+
+    let dataSources = entry.bundle.dataSources
+    if (overrideBrokerUrl) dataSources = applyDeclaredUrlOverride(dataSources, overrideBrokerUrl)
+    if (overrideDsn) dataSources = applyDeclaredDsnOverride(dataSources, overrideDsn)
+    const effectiveEntry: UseCaseEntry =
+        dataSources === entry.bundle.dataSources
+            ? entry
+            : { ...entry, bundle: { ...entry.bundle, dataSources } }
 
     const res = await postImport('/v1/imports/datasets', buildUseCaseBundleBody(effectiveEntry))
     if (res.ok) {
@@ -145,8 +152,15 @@ export async function installEntry(
         // Demo activation happens AFTER the install committed, and its failure is a
         // warning in the summary, never an install failure: the simulator is an
         // add-on, and a dead add-on must not make a use case uninstallable.
+        // effectiveEntry, not entry: the planner reads the datasource document
+        // to learn where the platform listens and reads, so it has to see the
+        // same overrides the platform just got. On the MQTT side the raw entry
+        // survived only because SIMULATOR_BROKER_URL patches the generator's
+        // view separately; SQL has no such second setting.
         const demoSegment =
-            dataSourceMode === 'demo' ? await activateDemoStreams(entry, body.installationId) : ''
+            dataSourceMode === 'demo'
+                ? await activateDemoStreams(effectiveEntry, body.installationId)
+                : ''
         const installation = body.installationId ? ` · Installation ${body.installationId}` : ''
         // The catalogue badge and the provenance list both read from the install
         // record that just came into existence.
