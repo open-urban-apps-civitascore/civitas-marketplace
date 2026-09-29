@@ -1,3 +1,4 @@
+import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
 import { getAccessToken } from '@/lib/session'
 
 interface InstallationRow {
@@ -19,24 +20,12 @@ interface InstallationRow {
  */
 export async function fetchInstalledCatalogEntryIds(): Promise<Set<string>> {
     try {
-        const accessToken = await getAccessToken()
+        const list = await readAllInstallations<InstallationRow>(await getAccessToken())
+        if (!list.ok) return new Set()
 
-        // Ask for one large page — the default is 20, and a catalogue badge that
-        // silently stops working after the 21st install would be a nasty bug.
-        const res = await fetch(
-            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations?size=200`,
-            {
-                headers: { Authorization: `Bearer ${accessToken}` },
-                cache: 'no-store',
-            },
-        )
-        if (!res.ok) return new Set()
-
-        const page = (await res.json()) as { content?: InstallationRow[] }
         return new Set(
-            (page.content ?? [])
-                .filter((row) => !row.uninstalledAt)
-                .map((row) => row.packageId)
+            partitionInstallations(list.rows)
+                .active.map((row) => row.packageId)
                 .filter((id): id is string => Boolean(id)),
         )
     } catch {
