@@ -16,7 +16,10 @@ interface InstalledArtifactRow {
         | string
     name?: string
     shellId?: string
+    /** The identity this instance minted for its copy. */
     urn?: string
+    /** The identity the member carried inside the package it came from. */
+    origin?: string
     action: 'CREATED' | 'REUSED' | string
 }
 
@@ -25,11 +28,12 @@ interface InstallationRow {
     createdAt: string
     /** Set when the installation was uninstalled; the record stays as history. */
     uninstalledAt?: string | null
-    catalogEntryId?: string
-    catalogEntryVersion?: string
+    /** The id of the installed package: the catalogue id of the entry. */
+    packageId?: string
+    packageVersion?: string
     dataSetId?: string
     dataSetName?: string
-    installedBy?: string
+    createdBy?: string
     artifacts: InstalledArtifactRow[]
 }
 
@@ -80,11 +84,13 @@ function InstallationSimulator({
 }
 
 /**
- * True marketplace installs — the backend's install provenance
- * (GET /v1/installations): which catalogue entry, when, by whom, and what each
- * install created or reused. Both use-case bundles and single data structures
- * record one. Manually created artifacts never show up here; the full instance
- * inventory lives on /instance.
+ * True marketplace installs, as the platform recorded them
+ * (GET /v1/installations): which package, when, by whom, and what each install
+ * created. Every artifact is a copy under an identity this instance minted;
+ * the identity it carried in the package is kept as its origin. Both use-case
+ * bundles and single data structures record an installation. Manually created
+ * artifacts never show up here; the full instance inventory lives on
+ * /instance.
  */
 export default async function InstalledPage() {
     await requireSession()
@@ -154,26 +160,26 @@ export default async function InstalledPage() {
                         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b bg-muted/50 px-4 py-3">
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                                 <span className="font-medium text-foreground">
-                                    {installation.dataSetName ?? installation.catalogEntryId ?? '—'}
+                                    {installation.dataSetName ?? installation.packageId ?? '—'}
                                 </span>
-                                {installation.catalogEntryVersion && (
+                                {installation.packageVersion && (
                                     <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">
-                                        v{installation.catalogEntryVersion}
+                                        v{installation.packageVersion}
                                     </span>
                                 )}
-                                {installation.catalogEntryId && (
+                                {installation.packageId && (
                                     <span className="break-all text-xs text-muted-foreground">
-                                        {installation.catalogEntryId}
+                                        {installation.packageId}
                                     </span>
                                 )}
                             </div>
                             <div className="flex items-center gap-3">
                                 <div className="text-xs text-muted-foreground">
                                     {dateFormat.format(new Date(installation.createdAt))}
-                                    {installation.installedBy && (
-                                        <span title={installation.installedBy}>
+                                    {installation.createdBy && (
+                                        <span title={installation.createdBy}>
                                             {' · von '}
-                                            {installation.installedBy.slice(0, 8)}
+                                            {installation.createdBy.slice(0, 8)}
                                         </span>
                                     )}
                                 </div>
@@ -192,7 +198,7 @@ export default async function InstalledPage() {
                             <InstallationSimulator
                                 simulations={simulations}
                                 installationId={installation.id}
-                                catalogEntryId={installation.catalogEntryId}
+                                catalogEntryId={installation.packageId}
                                 hasDataSource={installation.artifacts.some(
                                     (artifact) => artifact.artifactType === 'DATA_SOURCE',
                                 )}
@@ -226,6 +232,11 @@ export default async function InstalledPage() {
                                         </td>
                                         <td className="break-all px-4 py-2 text-xs text-muted-foreground">
                                             {artifact.urn ?? '—'}
+                                            {artifact.origin && (
+                                                <span className="mt-0.5 block text-muted-foreground/70">
+                                                    aus {artifact.origin}
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-2">
                                             <span

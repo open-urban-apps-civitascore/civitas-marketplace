@@ -196,9 +196,9 @@ describe('sharing metadata', () => {
         const parsed = pinnedRowSchema.parse(entry())
         const row = { ...parsed, deploymentRef: { ...parsed.deploymentRef, releaseTag: parsed.deploymentRef.releaseTag ?? null, path: parsed.deploymentRef.path ?? '.' } }
         const sources = exportSources([{ id: 'local', name: 'Lokale Bäume' }, { id: 'own', name: 'Bäume' }], [
-            { dataSetId: 'local', catalogEntryId: row.id },
-            { dataSetId: 'inaccessible', catalogEntryId: row.id },
-            { dataSetId: 'own', catalogEntryId: row.id, uninstalledAt: '2026-09-20' },
+            { dataSetId: 'local', packageId: row.id },
+            { dataSetId: 'inaccessible', packageId: row.id },
+            { dataSetId: 'own', packageId: row.id, uninstalledAt: '2026-09-20' },
         ], [row])
         expect(sources).toHaveLength(2)
         // Package fields carry over; the previous operator's account of THEIR
@@ -213,7 +213,7 @@ describe('sharing metadata', () => {
         expect(sources[0].catalog).not.toHaveProperty('curation')
         expect(sources[1].catalog).toBeUndefined()
         expect(exportSources([{ id: 'local', name: 'Bäume' }], [
-            { dataSetId: 'local', catalogEntryId: row.id }, { dataSetId: 'local', catalogEntryId: 'another' },
+            { dataSetId: 'local', packageId: row.id }, { dataSetId: 'local', packageId: 'another' },
         ], [row])[0].catalog).toBeUndefined()
     })
 })

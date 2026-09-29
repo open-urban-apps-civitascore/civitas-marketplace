@@ -20,6 +20,7 @@ import { SamplePreview } from '@/components/catalog/sample-preview'
 import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { FIELD_LABELS } from '@/lib/catalog/vocabulary'
+import { fetchDatapools, type DatapoolListing } from '@/lib/datapools'
 import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
 import { requireSession } from '@/lib/session'
 import {
@@ -60,7 +61,13 @@ export default async function UseCaseDetailPage({
     const logicModel = logicModelSteps(summary)
     const collaboration = collaborationInvite(summary)
 
-    const installed = (await fetchInstalledCatalogEntryIds()).has(listing.id)
+    // Both reads start at once. Only an entry that can be installed needs the
+    // datapools: a described one has no dialog to choose a target in.
+    const [installedIds, datapools] = await Promise.all([
+        fetchInstalledCatalogEntryIds(),
+        listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
+    ])
+    const installed = installedIds.has(listing.id)
     const previewAvailable = isSimulatorConfigured()
 
     return (
@@ -134,6 +141,8 @@ export default async function UseCaseDetailPage({
                                         version={listing.version}
                                         installed={installed}
                                         demoAvailable={previewAvailable}
+                                        datapools={datapools.pools}
+                                        datapoolProblem={datapools.problem}
                                     />
                                     {previewAvailable && (
                                         <SamplePreview entryId={listing.id} displayName={listing.displayName} />

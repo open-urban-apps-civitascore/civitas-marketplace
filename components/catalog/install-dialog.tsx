@@ -5,19 +5,33 @@ import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
 import { SubmitButton } from '@/components/catalog/submit-button'
+import type { DatapoolOption } from '@/lib/datapools'
 import { installEntry } from '@/lib/install-actions'
 
 /**
- * The use-case install wizard: data source → release → review. The release
- * step is deliberately inert for now — it shows where the choice will live
- * (D10: install target), but its only enabled option is today's reality,
- * install as draft. Wiring "release immediately" means driving the release
- * saga from here, which is its own increment.
+ * The use-case install wizard: data source → target and release → review.
+ *
+ * The target is the datapool the use case is installed into. A package cannot
+ * carry it, because datapools exist only on the receiving instance, so the
+ * dialog asks. The release half of that step is deliberately inert for now:
+ * it shows where the choice will live, but its only enabled option is today's
+ * reality, install as draft. Wiring "release immediately" means driving the
+ * release saga from here, which is its own increment.
  */
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
 
-const STEPS = ['Datenquelle', 'Freigabe', 'Prüfen'] as const
+const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
+
+/**
+ * Which datapool the dialog opens with. A single pool is no choice, so it is
+ * taken. With several, none is preselected: a default would let a user click
+ * through into a pool they never looked at, and the pool decides who gets
+ * access to what is installed there.
+ */
+function initialDatapoolId(datapools: DatapoolOption[]): string {
+    return datapools.length === 1 ? datapools[0].id : ''
+}
 
 export function InstallDialog({
     entryId,
@@ -25,6 +39,8 @@ export function InstallDialog({
     version,
     installed = false,
     demoAvailable = false,
+    datapools = [],
+    datapoolProblem,
 }: {
     entryId: string
     displayName: string
@@ -33,17 +49,26 @@ export function InstallDialog({
     installed?: boolean
     /** Simulator reachable — gates the demo-data option, not the dialog. */
     demoAvailable?: boolean
+    /** The datapools the signed-in user can read; the install goes into one of them. */
+    datapools?: DatapoolOption[]
+    /** Why the list is empty although the instance may well have datapools. */
+    datapoolProblem?: string
 }) {
     const [open, setOpen] = useState(false)
     const [step, setStep] = useState(0)
     const [mode, setMode] = useState<DataSourceMode>(demoAvailable ? 'demo' : 'later')
     const [brokerUrl, setBrokerUrl] = useState('')
+    const [datapoolId, setDatapoolId] = useState(() => initialDatapoolId(datapools))
     const [result, formAction, pending] = useActionState(installEntry, null)
 
     const done = installed || result?.status === 'created'
+    const datapool = datapools.find((pool) => pool.id === datapoolId)
     // A custom source without an address would install the package default and
-    // silently ignore the user's choice — block the step instead.
-    const stepIncomplete = step === 0 && mode === 'custom' && brokerUrl.trim() === ''
+    // silently ignore the user's choice — block the step instead. The same goes
+    // for the target: without a datapool the platform refuses the whole install.
+    const stepIncomplete =
+        (step === 0 && mode === 'custom' && brokerUrl.trim() === '') ||
+        (step === 1 && !datapool)
 
     function close() {
         setOpen(false)
@@ -119,13 +144,21 @@ export function InstallDialog({
                                     demoAvailable={demoAvailable}
                                 />
                             )}
-                            {step === 1 && <ReleaseStep />}
+                            {step === 1 && (
+                                <TargetStep
+                                    datapools={datapools}
+                                    datapoolProblem={datapoolProblem}
+                                    datapoolId={datapoolId}
+                                    onDatapool={setDatapoolId}
+                                />
+                            )}
                             {step === 2 && (
                                 <ReviewStep
                                     displayName={displayName}
                                     version={version}
                                     mode={mode}
                                     brokerUrl={brokerUrl}
+                                    datapoolName={datapool?.name ?? ''}
                                 />
                             )}
 
@@ -166,6 +199,7 @@ export function InstallDialog({
                                     <input type="hidden" name="entryId" value={entryId} />
                                     <input type="hidden" name="dataSourceMode" value={mode} />
                                     <input type="hidden" name="brokerUrl" value={brokerUrl} />
+                                    <input type="hidden" name="datapoolId" value={datapoolId} />
                                     <SubmitButton
                                         pending={pending}
                                         icon={Download}
@@ -296,26 +330,77 @@ function DataSourceStep({
     )
 }
 
-function ReleaseStep() {
+function TargetStep({
+    datapools,
+    datapoolProblem,
+    datapoolId,
+    onDatapool,
+}: {
+    datapools: DatapoolOption[]
+    datapoolProblem?: string
+    datapoolId: string
+    onDatapool: (id: string) => void
+}) {
+    const selected = datapools.find((pool) => pool.id === datapoolId)
+
     return (
-        <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-                Wie soll der Anwendungsfall nach der Installation stehen?
-            </p>
-            <OptionCard
-                selected
-                onSelect={() => undefined}
-                title="Als Entwurf installieren"
-                description="Der Datensatz wird angelegt, aber noch nicht freigegeben. Die Freigabe erfolgt anschließend im Portal (Datensatz → Freigeben)."
-            />
-            <OptionCard
-                selected={false}
-                disabled
-                onSelect={() => undefined}
-                title="Sofort freigeben"
-                badge="Bald verfügbar"
-                description="Installiert und gibt in einem Schritt frei, sodass die Pipeline direkt läuft."
-            />
+        <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                    In welchem Datenpool soll der Anwendungsfall angelegt werden? Datenquellen und
+                    Datensatz gehören danach zu diesem Pool. Über ihn werden auch die
+                    Zugriffsrechte vergeben.
+                </p>
+                {datapools.length === 0 ? (
+                    <p className="rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm leading-relaxed text-warn dark:bg-warn/15">
+                        {datapoolProblem ??
+                            'Auf dieser Instanz gibt es noch keinen Datenpool, den Sie lesen dürfen. Legen Sie im Portal einen an (Datenpools → Neu) und öffnen Sie diese Seite erneut.'}
+                    </p>
+                ) : (
+                    <label className="flex flex-col gap-1 text-xs font-medium">
+                        Datenpool
+                        <select
+                            value={datapoolId}
+                            onChange={(event) => onDatapool(event.target.value)}
+                            className="rounded-md border bg-background px-2 py-1.5 text-sm font-normal"
+                        >
+                            <option value="" disabled>
+                                Bitte wählen …
+                            </option>
+                            {datapools.map((pool) => (
+                                <option key={pool.id} value={pool.id}>
+                                    {pool.name}
+                                </option>
+                            ))}
+                        </select>
+                        {selected?.description && (
+                            <span className="font-normal text-muted-foreground">
+                                {selected.description}
+                            </span>
+                        )}
+                    </label>
+                )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                    Wie soll der Anwendungsfall nach der Installation stehen?
+                </p>
+                <OptionCard
+                    selected
+                    onSelect={() => undefined}
+                    title="Als Entwurf installieren"
+                    description="Datenstrukturen und Datenquellen werden freigegeben, der Datensatz bleibt ein Entwurf. Seine Freigabe erfolgt anschließend im Portal (Datensatz → Freigeben)."
+                />
+                <OptionCard
+                    selected={false}
+                    disabled
+                    onSelect={() => undefined}
+                    title="Sofort freigeben"
+                    badge="Bald verfügbar"
+                    description="Installiert und gibt in einem Schritt frei, sodass die Pipeline direkt läuft."
+                />
+            </div>
         </div>
     )
 }
@@ -331,18 +416,21 @@ function ReviewStep({
     version,
     mode,
     brokerUrl,
+    datapoolName,
 }: {
     displayName: string
     version: string
     mode: DataSourceMode
     brokerUrl: string
+    datapoolName: string
 }) {
     return (
         <dl className="flex flex-col gap-3 text-sm">
             <ReviewRow label="Paket" value={`${displayName} · v${version}`} />
             <ReviewRow label="Datenquelle" value={MODE_LABELS[mode]} />
             {mode === 'custom' && <ReviewRow label="MQTT-Broker" value={brokerUrl} mono />}
-            <ReviewRow label="Freigabe" value="Als Entwurf — Freigabe danach im Portal" />
+            <ReviewRow label="Datenpool" value={datapoolName} />
+            <ReviewRow label="Freigabe" value="Als Entwurf, Freigabe danach im Portal" />
         </dl>
     )
 }

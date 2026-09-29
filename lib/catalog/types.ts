@@ -80,9 +80,9 @@ export interface PackageMembers {
  * ahead of time, the dependency slot for future add-on requirements.
  *
  * This is deliberately the complete "what is this package" statement in ONE
- * document — the shape we propose the platform adopt for a first-class
- * package concept (today the platform persists only catalogEntryId/-Version
- * in its install provenance).
+ * document. The platform records the id and version of an installed package
+ * on the installation, and for every artifact the identity it carried in the
+ * package.
  */
 export interface PackageManifest extends CatalogManifest {
     members: PackageMembers
@@ -112,16 +112,10 @@ export interface BundledDataStructure {
  * (datasource.schema.json): `$schema`, `id`, `title`, `connectionType`,
  * `element` plus the connector fields. `title` doubles as the bundle-local
  * handle a pipeline's `sourceRef` resolves against; `element` names the
- * payload structure by CORE URN. The declared `id` is the catalogue-owned
- * logical identity (scope `standard`, derived disambiguator) — today's wire
- * API cannot adopt it for connector shells (the receiving instance mints
- * one), so the install maps the document onto the existing
- * name/connectorType/configuration fields and the id stays catalogue-side
- * until the platform grows an identity-keeping door for sources and sinks.
- *
- * The connector configuration matters beyond ingestion: only a configured
- * source gets a minted configuration URN, and only that URN lets a bundle
- * pipeline reference the source in its graph.
+ * payload structure by CORE URN. The declared `id` is the identity of the
+ * source INSIDE the package (scope `standard`, derived disambiguator). The
+ * receiving instance installs a copy under an identity of its own and keeps
+ * this one as the origin of the copy; the document travels as authored.
  */
 export interface BundledDataSource {
     document: Record<string, unknown>
@@ -132,9 +126,9 @@ export interface BundledDataSource {
 /**
  * A bundled mapping. Unlike a structure, whose identity travels inside the
  * artifact as `$id`, a mapping carries its URN in the envelope: Model Forge
- * stamps `id` on every write, so an authored one would be overwritten. Without
- * `mappingUrn` the platform mints a random identity and every re-install would
- * duplicate the mapping instead of resolving to the same one.
+ * stamps `id` on every write, so an authored one would be overwritten.
+ * `mappingUrn` is what a pipeline of the same package references, and what
+ * the platform records as the origin of the copy it installs.
  */
 export interface BundledMapping {
     mappingUrn: string
@@ -148,10 +142,9 @@ export interface BundledMapping {
  * (datasink.schema.json): `$schema`, `id`, `title`, `connectionType`
  * (`postgis` | `frost`) plus the variant's fields. `title` is the
  * bundle-local handle pipelines reference via `sinkRef`; `element` names the
- * target structure by its logical CORE URN and the platform resolves and
- * rewrites it to the installed version. As with sources, the declared `id`
- * is the catalogue-owned identity the wire API cannot adopt yet — the
- * install maps the document onto name/dataSinkType/configuration.
+ * target structure by its logical CORE URN and the platform rewrites it to
+ * the copy it installed. As with sources, the declared `id` is the identity
+ * inside the package and becomes the origin of the installed copy.
  */
 export interface BundledDataSink {
     document: Record<string, unknown>
@@ -160,11 +153,11 @@ export interface BundledDataSink {
 }
 
 /**
- * A bundled pipeline. The graph references its bundle siblings by NAME
- * (sourceRef/sinkRef/mappingRef): minted URNs differ per instance, so names
- * are the only identities a bundle can author. Values starting with `urn:`
- * pass through verbatim for the advanced case of referencing something
- * already installed.
+ * A bundled pipeline. The graph references its bundle siblings
+ * (sourceRef/sinkRef/mappingRef) by TITLE or by their package URN. The
+ * platform resolves references by URN only, so the install translates a title
+ * into the package URN of the sibling it names before it sends the package.
+ * Values starting with `urn:` pass through verbatim.
  */
 export interface BundledPipeline {
     name: string

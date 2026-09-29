@@ -4,8 +4,9 @@ import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata
 
 export interface ExportInstallation {
     dataSetId?: string
-    catalogEntryId?: string
-    catalogEntryVersion?: string
+    /** The id of the installed package: the catalogue id of the entry it came from. */
+    packageId?: string
+    packageVersion?: string
     uninstalledAt?: string | null
 }
 export interface ExportSource extends DatasetListing {
@@ -30,8 +31,8 @@ export interface ExportSource extends DatasetListing {
  */
 export function exportSources(datasets: DatasetListing[], installations: ExportInstallation[], catalog: CatalogSummary[]): ExportSource[] {
     return datasets.map((dataset) => {
-        const matches = installations.filter((row) => row.dataSetId === dataset.id && !row.uninstalledAt && row.catalogEntryId)
-        const ids = new Set(matches.map((row) => row.catalogEntryId))
+        const matches = installations.filter((row) => row.dataSetId === dataset.id && !row.uninstalledAt && row.packageId)
+        const ids = new Set(matches.map((row) => row.packageId))
         if (ids.size > 1) return { ...dataset, notice: 'Mehrere Katalogzuordnungen: bitte die Angaben selbst ergänzen.' }
         const entry = catalog.find((row) => ids.has(row.id) && !row.revoked)
         if (!entry) return { ...dataset, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }

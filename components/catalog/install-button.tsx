@@ -23,7 +23,10 @@ export function feedbackText(result: InstallResult): string {
         case 'invalid':
             return `Abgelehnt (400): ${result.detail}`
         default:
-            return `Fehler (${result.httpStatus}): ${result.detail}`
+            // Status 0: the request never reached the platform, so there is no code to show.
+            return result.httpStatus
+                ? `Fehler (${result.httpStatus}): ${result.detail}`
+                : `Fehler: ${result.detail}`
     }
 }
 
