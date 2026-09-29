@@ -118,8 +118,17 @@ export function splitConnectionString(
     } catch {
         return undefined
     }
-    const user = decodeURIComponent(parsed.username)
-    const password = decodeURIComponent(parsed.password)
+    let user: string
+    let password: string
+    try {
+        user = decodeURIComponent(parsed.username)
+        password = decodeURIComponent(parsed.password)
+    } catch {
+        // A bare '%' in the credentials (a password like '50%off' written without
+        // encoding) parses as a URL but does not decode. Treated like any other
+        // unparseable setting: no override, rather than a failed install.
+        return undefined
+    }
     parsed.username = ''
     parsed.password = ''
     return {

@@ -296,6 +296,17 @@ describe('applyDeclaredDsnOverride', () => {
         expect(applyDeclaredDsnOverride(sources, 'not a url')).toBe(sources)
     })
 
+    it('leaves the package default standing when the credentials do not decode', () => {
+        const sources = [
+            { document: { dsn: 'postgres://localhost:5432/fach' }, parameters: [{ field: 'dsn' }] },
+        ]
+        // A bare '%' parses as a URL and then fails to decode. That must not
+        // abort the install: it is one more unparseable setting.
+        expect(
+            applyDeclaredDsnOverride(sources, 'postgres://demo:50%rabatt@demo-db:5432/demo_source'),
+        ).toBe(sources)
+    })
+
     it('makes the platform read the database the generator writes to', () => {
         // The whole point: D14's guard compares database NAMES, so after the
         // override the planner's readDsn and the generator's DEMO_DB_DSN must

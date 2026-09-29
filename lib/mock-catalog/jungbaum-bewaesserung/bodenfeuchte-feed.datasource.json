@@ -7,6 +7,5 @@
   "element": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtemessung:gpslwk9jh7",
   "urls": ["tcp://civitas-mosquitto:1883"],
   "topics": ["openurbanapps/bodenfeuchte/+"],
-  "client_id": "openurbanapps-bodenfeuchte",
   "qos": 1
 }
