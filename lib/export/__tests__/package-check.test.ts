@@ -62,15 +62,6 @@ describe('checkPackage', () => {
         expect(checkPackage(validPackage())).toEqual([])
     })
 
-    it('accepts a package with dashboards member', () => {
-        const files = validPackage()
-        const manifest = JSON.parse(files['core-ir/manifest.json'])
-        manifest.members.dashboards = [{ file: 'dashboard.json', tool: 'superset' }]
-        files['core-ir/manifest.json'] = JSON.stringify(manifest)
-        files['core-ir/dashboard.json'] = JSON.stringify({ tool: 'superset', name: 'Test Dashboard' })
-        expect(checkPackage(files)).toEqual([])
-    })
-
     it('reports a listed member file that does not exist', () => {
         const files = validPackage()
         delete files['core-ir/t.datasink.json']

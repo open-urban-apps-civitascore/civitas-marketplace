@@ -10,7 +10,6 @@ import trafficSinkTable from './traffic-counting/verkehrsmessung-tabelle.datasin
 import trafficMapping from './traffic-counting/zaehlung-zu-messung.mapping.json'
 import trafficPipeline from './traffic-counting/zaehlung-zu-messung.pipeline.json'
 import trafficSimulation from './traffic-counting/zaehlstellen.simulation.json'
-import trafficDashboard from './traffic-counting/verkehrsmessung.dashboard.json'
 import airStaManifest from './luftqualitaet-sta/manifest.json'
 import airStaStructure from './luftqualitaet-sta/luftmessung.datastructure.json'
 import airStaTargetStructure from './luftqualitaet-sta/luftstation.datastructure.json'
@@ -60,7 +59,6 @@ export const mockPackages: MockPackage[] = [
             'verkehrsmessung-tabelle.datasink.json': trafficSinkTable,
             'zaehlung-zu-messung.pipeline.json': trafficPipeline,
             'zaehlstellen.simulation.json': trafficSimulation,
-            'verkehrsmessung.dashboard.json': trafficDashboard,
         },
     },
     {
