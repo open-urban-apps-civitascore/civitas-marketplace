@@ -1,0 +1,12 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasource/v1",
+  "id": "urn:core:standard:openurbanapps:datasource:mobility:zaehlstellenfeed:9xyohvvc21",
+  "title": "Zählstellen-Feed",
+  "description": "Empfängt die Zählungen der Sensoren über den Plattform-Broker (MQTT).",
+  "connectionType": "mqtt",
+  "element": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrszaehlung:faqnlc1804",
+  "urls": ["tcp://civitas-mosquitto:1883"],
+  "topics": ["openurbanapps/verkehrszaehlung"],
+  "client_id": "openurbanapps-verkehrszaehlung",
+  "qos": 1
+}

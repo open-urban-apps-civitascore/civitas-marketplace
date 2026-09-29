@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:kiezbaum:f1i2sjhgvq",
+  "title": "Kiez-Baum (Zielformat)",
+  "description": "Normalisierter Baum mit Geometrie: sprechende Feldnamen, baumId als Primärschlüssel (UPSERT-Anker, da die SQL-Quelle je Lauf die ganze Tabelle liest) und position als Point-Geometrie — die Datenbasis des Karten-Layers.",
+  "$defs": {
+    "KiezBaum": {
+      "type": "object",
+      "properties": {
+        "baumId": {
+          "type": "string",
+          "x-core-primaryKey": true,
+          "description": "Kataster-Nummer — Primärschlüssel und UPSERT-Anker"
+        },
+        "gattung": { "type": "string", "description": "Botanische Gattung" },
+        "artDeutsch": { "type": "string", "description": "Deutscher Artname" },
+        "pflanzjahr": { "type": "integer", "description": "Pflanzjahr" },
+        "kronendurchmesserM": { "type": "number", "description": "Kronendurchmesser in Metern" },
+        "stammumfangCm": { "type": "number", "description": "Stammumfang in Zentimetern" },
+        "standort": { "type": "string", "description": "Straße / Lagebeschreibung" },
+        "position": {
+          "$ref": "https://geojson.org/schema/Point.json",
+          "crs": "EPSG:4326",
+          "description": "Standort als Point-Geometrie (WGS84) — wird zur GEOMETRY-Spalte des Karten-Layers"
+        }
+      },
+      "required": ["baumId", "position"]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:mobility:zaehlungzumessung:t6iap1st7k",
+  "name": "Zählung → Verkehrsmessung",
+  "description": "Übersetzt das Geräteformat der Zählstellen in das normalisierte Zielformat: Feldnamen werden sprechend, Zahlen bekommen echte Typen, der ISO-Zeitstempel wird unverändert durchgereicht.",
+  "document": {
+    "title": "Zählung → Verkehrsmessung",
+    "source": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrszaehlung:faqnlc1804",
+    "target": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo",
+    "fields": {
+      "$.stationId": "$.counterId",
+      "$.observedAt": "$.timestamp",
+      "$.vehicleCount": { "op": "toInt", "input": "$.vehicleCount" },
+      "$.avgSpeedKmh": { "op": "toFloat", "input": "$.avgSpeedKmh" },
+      "$.direction": "$.direction"
+    }
+  }
+}

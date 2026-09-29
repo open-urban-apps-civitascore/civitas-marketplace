@@ -1,0 +1,12 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasource/v1",
+  "id": "urn:core:standard:openurbanapps:datasource:environment:luftmessungsfeed:i9071kflgc",
+  "title": "Luftmessungs-Feed",
+  "description": "Empfängt die Luftqualitätsmessungen der Stationen über den Plattform-Broker (MQTT).",
+  "connectionType": "mqtt",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:luftmessung:8vuby3re7d",
+  "urls": ["tcp://civitas-mosquitto:1883"],
+  "topics": ["openurbanapps/luftqualitaet/+"],
+  "client_id": "openurbanapps-luftqualitaet",
+  "qos": 1
+}

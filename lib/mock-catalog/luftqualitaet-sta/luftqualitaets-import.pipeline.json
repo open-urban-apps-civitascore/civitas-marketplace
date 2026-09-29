@@ -1,0 +1,47 @@
+{
+  "name": "Luftqualitäts-Import",
+  "description": "Liest den Luftmessungs-Feed, übersetzt die PM2,5-Messung mit dem Mapping in den SensorThings-Baum (Station → Messreihe → Beobachtung) und schreibt ihn in den FROST-Speicher.",
+  "model": {
+    "nodes": [
+      {
+        "id": "n-start",
+        "kind": "start",
+        "label": "Start",
+        "x-ui-position": { "x": -260, "y": 120 }
+      },
+      {
+        "id": "n-source",
+        "kind": "source",
+        "label": "Luftmessungs-Feed",
+        "sourceRef": "Luftmessungs-Feed",
+        "x-ui-position": { "x": 0, "y": 120 }
+      },
+      {
+        "id": "n-mapping",
+        "kind": "mapping",
+        "label": "Luftmessung → Luftstation",
+        "mappingRef": "Luftmessung → Luftstation",
+        "x-ui-position": { "x": 260, "y": 120 }
+      },
+      {
+        "id": "n-sink",
+        "kind": "sink",
+        "label": "Sensordaten-Speicher",
+        "sinkRef": "Sensordaten-Speicher",
+        "x-ui-position": { "x": 520, "y": 120 }
+      },
+      {
+        "id": "n-end",
+        "kind": "end",
+        "label": "Ende",
+        "x-ui-position": { "x": 780, "y": 120 }
+      }
+    ],
+    "edges": [
+      { "id": "e-start-source", "source": "n-start", "target": "n-source" },
+      { "id": "e-source-mapping", "source": "n-source", "target": "n-mapping" },
+      { "id": "e-mapping-sink", "source": "n-mapping", "target": "n-sink" },
+      { "id": "e-sink-end", "source": "n-sink", "target": "n-end" }
+    ]
+  }
+}

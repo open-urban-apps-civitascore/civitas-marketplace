@@ -1,5 +1,8 @@
 replicaCount: 1
 
+# CPU/memory requests and limits; empty means none (fine for local dev).
+resources: {}
+
 image:
   repository: civitas-marketplace
   tag: latest
@@ -10,7 +13,55 @@ service:
   port: 80
   targetPort: 3000
 
-ingress:
-  enabled: true
-  className: nginx
-  host: marketplace.civitas.test
+# No ingress: the platform serves the app through an APISIX route (the
+# addon's apisix-routes.yaml fragment), which also provides the host and the
+# TLS SAN. The chart deploys only Deployment + Service.
+
+# The public URL the browser reaches this app at (NEXTAUTH_URL, post-logout).
+publicUrl: "https://marketplace.civitas.test"
+
+keycloak:
+  clientId: marketplace
+  realm: core
+  # Browser-facing issuer (redirects, id_token validation).
+  issuer: "https://idm.civitas.test/realms/core"
+  # Container-internal issuer (token/userinfo/jwks) — the dual-issuer trick.
+  # Falls back to `issuer` in auth.ts when left empty.
+  internalIssuer: ""
+  # Signature algorithm of the realm's id_tokens. Keycloak's default is RS256;
+  # the CIVITAS cluster realm is hardened to ES256 (TR-03187).
+  idTokenAlg: "RS256"
+  # Secret holding the client secret, created by the deployment pipeline.
+  clientSecret:
+    secretName: keycloak-client-marketplace
+    key: client-secret
+
+# Where the app reaches the platform API — the APISIX gateway, never the
+# portal-backend directly.
+api:
+  baseUrl: "http://apisix-gateway.apisix.svc.cluster.local"
+  port: "80"
+
+# Catalogue source: raw URL of the git-hosted repo-list index. Empty = the
+# app serves its bundled demo fixtures (offline mode).
+catalog:
+  repoListUrl: "https://gitlab.com/civitascore-openurbanapps/civitas-marketplace-catalog/-/raw/main/index.json"
+  # Seconds a fetched index is served before re-fetching; empty = default (900).
+  ttlSeconds: ""
+
+# Demo-data simulator API (in-cluster). Empty = simulator-backed UI is hidden.
+simulator:
+  apiUrl: ""
+  # Broker the simulator publishes to, overriding the package's datasource URL.
+  # Empty = the package value is used as-is (correct when simulator and broker
+  # share the cluster network).
+  brokerUrl: ""
+
+# NextAuth session-cookie encryption secret.
+nextauthSecret:
+  secretName: marketplace-nextauth-secret
+  key: secret
+
+# Self-signed cluster CA: Node rejects the certificate chain otherwise.
+# (The portal frontend sets the same flag, with a TODO to mount the CA properly.)
+nodeTlsRejectUnauthorized: "0"
