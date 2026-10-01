@@ -7,7 +7,14 @@ import {
     getRepoListSummaries,
     repoListUrl,
 } from '@/lib/catalog/repo-list'
-import type { AddonEntry, CatalogEntry, CatalogMeta, CatalogSummary } from '@/lib/catalog/types'
+import type {
+    AddonEntry,
+    CatalogEntry,
+    CatalogMeta,
+    CatalogSummary,
+    DeploymentRef,
+    PackageManifest,
+} from '@/lib/catalog/types'
 import { mockPackages } from '@/lib/mock-catalog'
 import { resolveEntryPath } from '@/lib/use-case-catalog/path'
 
@@ -27,10 +34,27 @@ function isMockCatalog(): boolean {
     return repoListUrl() === undefined
 }
 
+/**
+ * The pin of every fixture. A fixture has no repo to pin, but it is
+ * installable: resolveCatalogEntry assembles it from the bundled files. The
+ * use-case pages offer an install only for an entry with a pin, so without
+ * this one the fixtures would show no install button at all.
+ */
+export const FIXTURE_PIN: DeploymentRef = {
+    url: 'fixtures:lib/mock-catalog',
+    ref: 'fixture',
+    releaseTag: null,
+    path: '.',
+}
+
+function mockSummary(manifest: PackageManifest): CatalogSummary {
+    return { ...manifest, deploymentRef: FIXTURE_PIN }
+}
+
 function mockSummaries(type: 'usecase' | 'datastructure'): CatalogSummary[] {
     return mockPackages
         .filter((pkg) => pkg.manifest.type === type)
-        .map((pkg) => ({ ...pkg.manifest }))
+        .map((pkg) => mockSummary(pkg.manifest))
 }
 
 /** Catalogue rows of one type, for the listing pages. */
@@ -43,7 +67,8 @@ export async function getCatalogSummaries(
 
 export async function getCatalogSummary(id: string): Promise<CatalogSummary | undefined> {
     if (isMockCatalog()) {
-        return mockPackages.find((pkg) => pkg.manifest.id === id)?.manifest
+        const pkg = mockPackages.find((candidate) => candidate.manifest.id === id)
+        return pkg && mockSummary(pkg.manifest)
     }
     return findRepoListSummary(id)
 }
