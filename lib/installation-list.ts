@@ -60,3 +60,14 @@ export function partitionInstallations<Row extends { uninstalledAt?: string | nu
         history: rows.filter((row) => Boolean(row.uninstalledAt)),
     }
 }
+
+/**
+ * The active installation of one package, or null. There is at most one: a
+ * package installs once per instance, and an uninstalled installation is
+ * history. The package id is the catalogue id of the entry.
+ */
+export function activeInstallationOf<
+    Row extends { packageId?: string; uninstalledAt?: string | null },
+>(rows: Row[], packageId: string): Row | null {
+    return rows.find((row) => row.packageId === packageId && !row.uninstalledAt) ?? null
+}

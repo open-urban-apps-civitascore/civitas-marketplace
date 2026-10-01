@@ -21,8 +21,10 @@ import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { FIELD_LABELS } from '@/lib/catalog/vocabulary'
 import { fetchDatapools, type DatapoolListing } from '@/lib/datapools'
-import { fetchInstalledCatalogEntryIds } from '@/lib/installations'
-import { requireSession } from '@/lib/session'
+import { fetchDatapoolOfDataset } from '@/lib/datapool-of-dataset'
+import { fetchActiveInstallation } from '@/lib/installations'
+import { datapoolHref } from '@/lib/portal-links'
+import { getAccessToken, requireSession } from '@/lib/session'
 import {
     buildUseCaseListing,
     collaborationInvite,
@@ -63,11 +65,18 @@ export default async function UseCaseDetailPage({
 
     // Both reads start at once. Only an entry that can be installed needs the
     // datapools: a described one has no dialog to choose a target in.
-    const [installedIds, datapools] = await Promise.all([
-        fetchInstalledCatalogEntryIds(),
+    const [installation, datapools] = await Promise.all([
+        fetchActiveInstallation(listing.id),
         listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
     ])
-    const installed = installedIds.has(listing.id)
+    const installed = installation !== null
+    // The pool the installed dataset lives in, for the link into the portal.
+    // Read from the dataset, not from the install record: a dataset can be
+    // moved to another pool later. It depends on the installation, so it is
+    // the one read that waits.
+    const installedInto = installation?.dataSetId
+        ? await fetchDatapoolOfDataset(installation.dataSetId, await getAccessToken())
+        : null
     const previewAvailable = isSimulatorConfigured()
 
     return (
@@ -144,6 +153,17 @@ export default async function UseCaseDetailPage({
                                         datapools={datapools.pools}
                                         datapoolProblem={datapools.problem}
                                     />
+                                    {installedInto && (
+                                        <a
+                                            href={datapoolHref(installedInto.id)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                                        >
+                                            Datenpool „{installedInto.name}“ im Portal öffnen
+                                            <ArrowUpRight className="size-4" />
+                                        </a>
+                                    )}
                                     {previewAvailable && (
                                         <SamplePreview entryId={listing.id} displayName={listing.displayName} />
                                     )}

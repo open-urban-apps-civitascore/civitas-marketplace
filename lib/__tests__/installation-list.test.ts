@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
+import {
+    activeInstallationOf,
+    partitionInstallations,
+    readAllInstallations,
+} from '@/lib/installation-list'
 
 interface Row {
     id: string
+    packageId?: string
     uninstalledAt?: string | null
 }
 
@@ -103,5 +108,26 @@ describe('partitionInstallations', () => {
 
         expect(active.map((row) => row.id)).toEqual(['active-1', 'active-2'])
         expect(history.map((row) => row.id)).toEqual(['newest', 'older'])
+    })
+})
+
+describe('activeInstallationOf', () => {
+    it('finds the active installation of a package and skips its history', () => {
+        const installations: Row[] = [
+            { id: 'old', packageId: 'pkg', uninstalledAt: '2026-09-29T16:57:00' },
+            { id: 'other', packageId: 'other-pkg' },
+            { id: 'current', packageId: 'pkg' },
+        ]
+
+        expect(activeInstallationOf(installations, 'pkg')?.id).toBe('current')
+    })
+
+    it('is null for a package that is not installed, or only was', () => {
+        const installations: Row[] = [
+            { id: 'old', packageId: 'pkg', uninstalledAt: '2026-09-29T16:57:00' },
+        ]
+
+        expect(activeInstallationOf(installations, 'pkg')).toBeNull()
+        expect(activeInstallationOf(installations, 'unknown')).toBeNull()
     })
 })
