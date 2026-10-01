@@ -172,7 +172,7 @@ describe('buildInstallationRequest', () => {
         expect(request.datapoolId).toBe(POOL)
         expect(request.package).toMatchObject({
             id: TRAFFIC,
-            version: '1.5.0',
+            version: '1.5.1',
             title: 'Verkehrszählung',
         })
     })
@@ -304,10 +304,10 @@ describe('buildInstallationRequest', () => {
         // The platform refuses these three kinds without a description, and one missing sentence
         // is no reason to fail a whole install.
         expect(membersOf(request, 'datastructure')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.5.0',
+            'Aus Paket Verkehrszählung 1.5.1',
         )
         expect(membersOf(request, 'datasource')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.5.0',
+            'Aus Paket Verkehrszählung 1.5.1',
         )
     })
 
