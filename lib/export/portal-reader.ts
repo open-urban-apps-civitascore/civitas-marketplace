@@ -313,7 +313,7 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
     for (const urn of mappingUrns) {
         const document = await getJson<Record<string, unknown>>(
             accessToken,
-            `/v1/mappings?urn=${encodeURIComponent(urn)}`,
+            `/v1/datasets/${datasetId}/mappings?urn=${encodeURIComponent(urn)}`,
         )
         if (!document) {
             warnings.push(`Mapping ${urn} ist referenziert, aber nicht lesbar — ausgelassen`)
