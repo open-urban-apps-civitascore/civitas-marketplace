@@ -1,0 +1,51 @@
+{
+  "$schema": "https://civitasconnect.digital/core/dashboard/v1",
+  "tool": "superset",
+  "name": "Verkehrszählung Live-Monitoring",
+  "description": "Echtzeit-Verkehrsdaten: Durchschnittsgeschwindigkeit und Fahrzeugaufkommen aus Zählstellen",
+  "bindings": {
+    "database": "payload_data",
+    "schema": "ds_${datasetId}",
+    "table": "verkehrsmessung"
+  },
+  "assets": {
+    "dashboards": [
+      {
+        "dashboard_title": "Verkehrszählung Live-Monitoring",
+        "description": "Echtzeit-Verkehrsdaten: Durchschnittsgeschwindigkeit und Fahrzeugaufkommen",
+        "slug": "verkehrszaehlung-live",
+        "metadata": {
+          "refresh_frequency": 10,
+          "color_scheme": "supersetColors"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "slice_name": "Geschwindigkeit im Zeitverlauf",
+        "viz_type": "echarts_timeseries_line",
+        "params": {
+          "metrics": ["AVG(avgSpeedKmh)"],
+          "groupby": ["counterId"],
+          "time_grain_sqla": null,
+          "granularity_sqla": "observedAt"
+        }
+      }
+    ],
+    "datasets": [
+      {
+        "table_name": "verkehrsmessung",
+        "schema": "ds_${datasetId}",
+        "columns": [
+          { "column_name": "counterId", "type": "VARCHAR" },
+          { "column_name": "observedAt", "type": "TIMESTAMP", "is_dttm": true },
+          { "column_name": "avgSpeedKmh", "type": "DOUBLE PRECISION" },
+          { "column_name": "vehicleCount", "type": "INTEGER" }
+        ],
+        "metrics": [
+          { "metric_name": "avg_speed", "expression": "AVG(avgSpeedKmh)" }
+        ]
+      }
+    ]
+  }
+}
