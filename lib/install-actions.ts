@@ -26,6 +26,9 @@ import {
     registerSimulation,
 } from '@/lib/simulator/client'
 import { planSimulations, registerPlanned, simulationIdPrefix } from '@/lib/simulator/registration'
+import { isSupersetConfigured, importDashboard } from '@/lib/superset/client'
+import { createZip } from '@/lib/superset/zip'
+import { stringify as stringifyYaml } from 'yaml'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
@@ -130,6 +133,11 @@ export async function installEntry(
         dataSourceMode === 'demo' && !isDataStructureEntry(effectiveEntry)
             ? await activateDemoStreams(effectiveEntry, receipt.id)
             : ''
+    // Same rule as the demo data: the install has committed, so a dashboard
+    // that fails to import is a remark in the summary, never an install failure.
+    const dashboardSegment = isDataStructureEntry(effectiveEntry)
+        ? ''
+        : await activateDashboards(effectiveEntry, receipt.dataSetId)
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -141,7 +149,7 @@ export async function installEntry(
     revalidatePath('/instance')
     return {
         status: 'created',
-        detail: `${summary}${demoSegment}${installation}`,
+        detail: `${summary}${demoSegment}${dashboardSegment}${installation}`,
         httpStatus: 201,
     }
 }
@@ -223,6 +231,79 @@ async function activateDemoStreams(
         return ` · Demo-Daten NICHT aktiviert: ${error instanceof Error ? error.message : String(error)}`
     }
 }
+
+/**
+ * Imports bundled dashboards into Superset if configured. Runs after the dataset
+ * import succeeded, binding the dashboard's schema references dynamically to the
+ * newly minted dataset UUID (`ds_<datasetId>`).
+ */
+async function activateDashboards(entry: UseCaseEntry, dataSetId: string | undefined): Promise<string> {
+    const dashboards = entry.bundle.dashboards ?? []
+    if (dashboards.length === 0 || !isSupersetConfigured()) return ''
+
+    const results: string[] = []
+    for (const dashboard of dashboards) {
+        if (dashboard.tool === 'superset') {
+            try {
+                let zipBuf: Buffer | undefined
+                if (typeof dashboard.content.zipBase64 === 'string') {
+                    zipBuf = Buffer.from(dashboard.content.zipBase64, 'base64')
+                } else if (typeof dashboard.content.assets === 'object' && dashboard.content.assets !== null) {
+                    const files: Record<string, string> = {
+                        'metadata.yaml': stringifyYaml({
+                            version: '1.0.0',
+                            type: 'Dashboard',
+                            timestamp: new Date().toISOString(),
+                        }),
+                    }
+                    const assets = dashboard.content.assets as Record<string, unknown[]>
+                    if (Array.isArray(assets.dashboards)) {
+                        for (const d of assets.dashboards) {
+                            if (typeof d === 'object' && d !== null && typeof (d as { slug?: string }).slug === 'string') {
+                                files[`dashboards/${(d as { slug: string }).slug}.yaml`] = stringifyYaml(d)
+                            }
+                        }
+                    }
+                    if (Array.isArray(assets.charts)) {
+                        for (const [idx, c] of assets.charts.entries()) {
+                            if (typeof c === 'object' && c !== null) {
+                                const sliceName = (c as { slice_name?: string }).slice_name
+                                const slug = typeof sliceName === 'string'
+                                    ? sliceName.toLowerCase().replace(/[^a-z0-9]+/g, '_')
+                                    : `chart_${idx}`
+                                files[`charts/${slug}.yaml`] = stringifyYaml(c)
+                            }
+                        }
+                    }
+                    if (Array.isArray(assets.datasets)) {
+                        for (const ds of assets.datasets) {
+                            if (typeof ds === 'object' && ds !== null && typeof (ds as { table_name?: string }).table_name === 'string') {
+                                files[`datasets/payload_data/${(ds as { table_name: string }).table_name}.yaml`] = stringifyYaml(ds)
+                            }
+                        }
+                    }
+                    zipBuf = createZip(files)
+                }
+
+                if (zipBuf) {
+                    const res = await importDashboard(zipBuf, {
+                        datasetId: dataSetId,
+                        schema: dashboard.bindings?.schema,
+                        table: dashboard.bindings?.table,
+                        database: dashboard.bindings?.database,
+                    })
+                    if (res.ok) {
+                        results.push(res.dashboardTitle ?? dashboard.file)
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to import dashboard into Superset:', err)
+            }
+        }
+    }
+    return results.length ? ` · Dashboard in Superset: ${results.join(', ')}` : ''
+}
+
 
 /**
  * Sweeps the simulator for this installation's publishers by id prefix. Runs

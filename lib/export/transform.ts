@@ -363,6 +363,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             dataSinks: sinkMembers,
             pipelines: pipelineMembers,
             simulations: [],
+            dashboards: [],
         },
         dependencies: [],
     }

@@ -64,6 +64,23 @@ export interface PackageMember {
     parameters?: InstallParameter[]
 }
 
+export interface DashboardBindings {
+    /** Target database connection name in Superset, e.g. payload_data */
+    database?: string
+    /** Target schema name pattern, e.g. ds_${datasetId} */
+    schema?: string
+    /** Target table name inside the schema */
+    table?: string
+}
+
+export interface PackageDashboardMember {
+    /** File name inside the package's `core-ir/` directory (e.g. *.dashboard.json or *.zip). */
+    file: string
+    tool?: 'superset' | 'grafana'
+    targetVersion?: string
+    bindings?: DashboardBindings
+}
+
 export interface PackageMembers {
     dataStructures: PackageMember[]
     dataSources?: PackageMember[]
@@ -71,7 +88,9 @@ export interface PackageMembers {
     dataSinks?: PackageMember[]
     pipelines?: PackageMember[]
     simulations?: PackageMember[]
+    dashboards?: PackageDashboardMember[]
 }
+
 
 /**
  * The package document (`core-ir/manifest.json` in an artifact repo): the
@@ -273,6 +292,15 @@ export interface DataStructureEntry {
     artifact: Record<string, unknown>
 }
 
+export interface BundledDashboard {
+    file: string
+    tool: 'superset' | 'grafana'
+    targetVersion?: string
+    bindings?: DashboardBindings
+    /** Content either as parsed JSON object or raw/base64 string */
+    content: Record<string, unknown>
+}
+
 export interface UseCaseEntry {
     manifest: CatalogManifest & { type: 'usecase' }
     bundle: {
@@ -282,8 +310,10 @@ export interface UseCaseEntry {
         dataSinks: BundledDataSink[]
         pipelines: BundledPipeline[]
         simulations: BundledSimulation[]
+        dashboards?: BundledDashboard[]
     }
 }
+
 
 export type CatalogEntry = DataStructureEntry | UseCaseEntry
 

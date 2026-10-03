@@ -97,6 +97,7 @@ export function parsePackageManifest(value: unknown, where: string): PackageMani
     parseMembers(members.dataSinks, `${where}: members.dataSinks`)
     parseMembers(members.pipelines, `${where}: members.pipelines`)
     parseMembers(members.simulations, `${where}: members.simulations`)
+    parseMembers(members.dashboards, `${where}: members.dashboards`)
     return value as unknown as PackageManifest
 }
 
@@ -342,6 +343,13 @@ export function assembleCatalogEntry(
             return pipeline as unknown as BundledPipeline
         }),
         simulations: [],
+        dashboards: (manifest.members.dashboards ?? []).map((member) => ({
+            file: member.file,
+            tool: member.tool ?? 'superset',
+            targetVersion: member.targetVersion,
+            bindings: member.bindings,
+            content: read(member),
+        })),
     }
 
     // Simulations resolve against the datasources and structures above, so they
