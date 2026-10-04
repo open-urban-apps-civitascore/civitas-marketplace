@@ -17,11 +17,13 @@ import { Code } from '@/components/catalog/code'
 import { CurationTierBadge, curationHint } from '@/components/catalog/curation-tier'
 import { InstallDialog } from '@/components/catalog/install-dialog'
 import { SamplePreview } from '@/components/catalog/sample-preview'
+import { UninstallButton } from '@/components/installed/uninstall-button'
 import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { FIELD_LABELS } from '@/lib/catalog/vocabulary'
 import { fetchDatapools, type DatapoolListing } from '@/lib/datapools'
-import { fetchDatapoolOfDataset } from '@/lib/datapool-of-dataset'
+import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
+import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import { fetchActiveInstallation } from '@/lib/installations'
 import { datapoolHref } from '@/lib/portal-links'
 import { getAccessToken, requireSession } from '@/lib/session'
@@ -70,13 +72,22 @@ export default async function UseCaseDetailPage({
         listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
     ])
     const installed = installation !== null
-    // The pool the installed dataset lives in, for the link into the portal.
-    // Read from the dataset, not from the install record: a dataset can be
-    // moved to another pool later. It depends on the installation, so it is
-    // the one read that waits.
-    const installedInto = installation?.dataSetId
-        ? await fetchDatapoolOfDataset(installation.dataSetId, await getAccessToken())
-        : null
+    // What depends on the installation waits for it, and the two reads start
+    // together. The dataset gives the pool for the link into the portal (read
+    // from the dataset, not from the install record: a dataset can be moved to
+    // another pool later) and the release status for the dashboard hint.
+    const [dataset, dashboards]: [DatasetOverview | null, InstalledDashboardLink[]] = installation
+        ? await Promise.all([
+              installation.dataSetId
+                  ? fetchDatasetOverview(installation.dataSetId, await getAccessToken())
+                  : Promise.resolve(null),
+              fetchInstalledDashboards(listing.id, installation.id),
+          ])
+        : [null, []]
+    const installedInto = dataset?.datapool ?? null
+    // Only a released dataset has its sinks rolled out, so before that the
+    // table a dashboard reads does not exist yet. An unknown status says nothing.
+    const awaitingRelease = dataset?.status !== undefined && dataset.status !== 'AVAILABLE'
     const previewAvailable = isSimulatorConfigured()
 
     return (
@@ -167,6 +178,36 @@ export default async function UseCaseDetailPage({
                                     {previewAvailable && (
                                         <SamplePreview entryId={listing.id} displayName={listing.displayName} />
                                     )}
+                                    {installation && (
+                                        <UninstallButton installationId={installation.id} size="md" />
+                                    )}
+                                </div>
+                            )}
+
+                            {dashboards.length > 0 && (
+                                <div className="mt-5 rounded-lg border bg-muted/30 px-4 py-3">
+                                    <h2 className="text-sm font-semibold text-foreground">Dashboards</h2>
+                                    {awaitingRelease && (
+                                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                            Zeigen Daten, sobald der Datensatz im Portal freigegeben ist. Bis
+                                            dahin meldet Superset, dass die Tabelle fehlt.
+                                        </p>
+                                    )}
+                                    <ul className="mt-2 flex flex-col gap-1.5">
+                                        {dashboards.map((dashboard) => (
+                                            <li key={dashboard.url}>
+                                                <a
+                                                    href={dashboard.url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-2 hover:underline"
+                                                >
+                                                    {dashboard.title}
+                                                    <ArrowUpRight className="size-4" />
+                                                </a>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
 

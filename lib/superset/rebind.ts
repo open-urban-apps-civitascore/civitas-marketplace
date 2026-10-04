@@ -28,12 +28,17 @@ export interface InstallationBinding {
     databaseUuid: string
 }
 
-export interface BoundDashboard {
-    files: Record<string, Record<string, unknown>>
+/** Where a packaged dashboard lives in one installation. */
+export interface InstalledDashboardIdentity {
     /** The dashboard's UUID in this installation, to find it again on uninstall. */
     uuid: string
     title?: string
-    slug?: string
+    /** Unique per installation, like the UUID: the slug is a dashboard's second unique key. */
+    slug: string
+}
+
+export interface BoundDashboard extends InstalledDashboardIdentity {
+    files: Record<string, Record<string, unknown>>
 }
 
 export class DashboardBindingError extends Error {
@@ -68,6 +73,9 @@ export function datasetSchema(datasetId: string): string {
     return `ds_${datasetId.replace(/-/g, '_')}`
 }
 
+/** The accents NFKD splits off a letter (U+0300 to U+036F), built without escape sequences in the source. */
+const COMBINING_MARKS = new RegExp(`[${String.fromCharCode(0x300)}-${String.fromCharCode(0x36f)}]`, 'g')
+
 /** A URL slug from a title: German umlauts spelled out, everything else reduced to a-z, 0-9 and dashes. */
 function slugFromTitle(title: string): string {
     return title
@@ -77,9 +85,39 @@ function slugFromTitle(title: string): string {
         .replace(/ü/g, 'ue')
         .replace(/ß/g, 'ss')
         .normalize('NFKD')
-        .replace(/[̀-ͯ]/g, '')
+        .replace(COMBINING_MARKS, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
+}
+
+function slugSuffix(installationId: string): string {
+    return installationId.replace(/[^a-z0-9]/gi, '').slice(0, 8).toLowerCase()
+}
+
+/**
+ * Where a packaged dashboard lives in one installation: its UUID, title and
+ * slug there. The import writes exactly these, so a page can link to an
+ * installed dashboard without asking Superset and without keeping a record.
+ */
+export function installedDashboardIdentity(
+    document: SupersetDashboardDocument,
+    installationId: string,
+): InstalledDashboardIdentity {
+    const entry = Object.entries(document.files).find(([path]) => path.startsWith('dashboards/'))
+    if (!entry) throw new DashboardBindingError('the document holds no dashboard')
+    const [path, dashboard] = entry
+    if (typeof dashboard.uuid !== 'string' || !dashboard.uuid) {
+        throw new DashboardBindingError(`'${path}' has no uuid`)
+    }
+    const title = typeof dashboard.dashboard_title === 'string' ? dashboard.dashboard_title : undefined
+    // An export without a slug gets one from its title, so a link can always
+    // name the dashboard itself.
+    const base = (typeof dashboard.slug === 'string' && dashboard.slug) || slugFromTitle(title ?? '') || 'dashboard'
+    return {
+        uuid: deriveInstallUuid(installationId, dashboard.uuid),
+        title,
+        slug: `${base}-${slugSuffix(installationId)}`,
+    }
 }
 
 /** Folders of the objects that belong to the package and get new UUIDs per installation. */
@@ -125,10 +163,8 @@ export function bindToInstallation(
     }
 
     const schema = datasetSchema(binding.datasetId)
-    // The slug is the second unique key of a dashboard, so it needs the installation too.
-    const slugSuffix = binding.installationId.replace(/[^a-z0-9]/gi, '').slice(0, 8).toLowerCase()
+    const identity = installedDashboardIdentity(document, binding.installationId)
     const files: Record<string, Record<string, unknown>> = {}
-    let bound: Omit<BoundDashboard, 'files'> | undefined
 
     for (const [path, file] of Object.entries(document.files)) {
         const copy = replaceUuids(file, replacements) as Record<string, unknown>
@@ -144,17 +180,9 @@ export function bindToInstallation(
             // may be named differently on the receiving instance.
             copy.catalog = null
         }
-        if (path.startsWith('dashboards/')) {
-            const title = typeof copy.dashboard_title === 'string' ? copy.dashboard_title : undefined
-            // An export without a slug gets one from its title, so the install
-            // result can always link to the dashboard itself.
-            const base = (typeof copy.slug === 'string' && copy.slug) || slugFromTitle(title ?? '') || 'dashboard'
-            copy.slug = `${base}-${slugSuffix}`
-            bound = { uuid: copy.uuid as string, title, slug: copy.slug as string }
-        }
+        if (path.startsWith('dashboards/')) copy.slug = identity.slug
         files[path] = copy
     }
 
-    if (!bound) throw new DashboardBindingError('the document holds no dashboard')
-    return { files, ...bound }
+    return { files, ...identity }
 }

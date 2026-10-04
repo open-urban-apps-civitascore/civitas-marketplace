@@ -52,6 +52,16 @@ export function supersetConfig(): SupersetConfig | undefined {
     }
 }
 
+/** Where a browser reaches Superset. Enough for links, which need no account. */
+export function supersetPublicUrl(): string | undefined {
+    return (setting('SUPERSET_PUBLIC_URL') ?? setting('SUPERSET_API_URL'))?.replace(/\/+$/, '')
+}
+
+/** The address of a dashboard, by the slug the import gave it. */
+export function dashboardUrl(publicUrl: string, slug: string): string {
+    return `${publicUrl}/superset/dashboard/${encodeURIComponent(slug)}/`
+}
+
 /** The headers every request of one operation carries. */
 export interface SupersetSession {
     headers: Record<string, string>
@@ -205,11 +215,5 @@ export async function installDashboard(
     const databaseUuid = await findDatabaseUuid(config, session, config.databaseName)
     const bound = bindToInstallation(document, { ...ids, databaseUuid })
     await uploadDashboard(config, session, importZip(bound.files))
-    return {
-        uuid: bound.uuid,
-        title: bound.title,
-        url: bound.slug
-            ? `${config.publicUrl}/superset/dashboard/${encodeURIComponent(bound.slug)}/`
-            : `${config.publicUrl}/dashboard/list/`,
-    }
+    return { uuid: bound.uuid, title: bound.title, url: dashboardUrl(config.publicUrl, bound.slug) }
 }

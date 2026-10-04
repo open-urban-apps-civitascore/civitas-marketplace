@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchDatapoolOfDataset } from '@/lib/datapool-of-dataset'
+import { fetchDatapoolOfDataset, fetchDatasetOverview } from '@/lib/datapool-of-dataset'
 
 function datasetResponse(body: unknown): Response {
     return new Response(JSON.stringify(body), { status: 200 })
@@ -47,5 +47,28 @@ describe('fetchDatapoolOfDataset', () => {
         stubFetch(datasetResponse({ id: 'ds', datapool: { id: 'pool-1' } }))
 
         expect(await fetchDatapoolOfDataset('ds', 'token')).toEqual({ id: 'pool-1', name: 'pool-1' })
+    })
+})
+
+describe('fetchDatasetOverview', () => {
+    it('reads pool and release status in one request', async () => {
+        stubFetch(datasetResponse({ id: 'ds', datapool: { id: 'pool-1', name: 'Umwelt' }, dataSetStatus: 'DRAFT' }))
+
+        expect(await fetchDatasetOverview('ds', 'token')).toEqual({
+            datapool: { id: 'pool-1', name: 'Umwelt' },
+            status: 'DRAFT',
+        })
+    })
+
+    it('keeps the status of a dataset that is in no pool', async () => {
+        stubFetch(datasetResponse({ id: 'ds', datapool: null, dataSetStatus: 'AVAILABLE' }))
+
+        expect(await fetchDatasetOverview('ds', 'token')).toEqual({ datapool: null, status: 'AVAILABLE' })
+    })
+
+    it('is null when the dataset cannot be read', async () => {
+        stubFetch(new Response('permission_denied', { status: 403 }))
+
+        expect(await fetchDatasetOverview('ds', 'token')).toBeNull()
     })
 })
