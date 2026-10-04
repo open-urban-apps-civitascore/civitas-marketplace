@@ -18,6 +18,7 @@ import {
     type InstallationReceipt,
     type InstallationRequest,
 } from '@/lib/install-payload'
+import { datasetHref } from '@/lib/portal-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import {
     deleteSimulation,
@@ -135,7 +136,7 @@ export async function installEntry(
     // that fails to import is a remark in the summary, never an install failure.
     const dashboardSegment = isDataStructureEntry(effectiveEntry)
         ? ''
-        : await activateDashboards(effectiveEntry, receipt.id, receipt.dataSetId)
+        : await activateDashboards(effectiveEntry, receipt)
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -237,29 +238,30 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
  * back as a summary segment: a dashboard that is missing must say why, and
  * one that arrived must say where.
  */
-async function activateDashboards(
-    entry: UseCaseEntry,
-    installationId: string | undefined,
-    dataSetId: string | undefined,
-): Promise<string> {
+async function activateDashboards(entry: UseCaseEntry, receipt: InstallationReceipt): Promise<string> {
     const dashboards = entry.bundle.dashboards ?? []
     if (dashboards.length === 0) return ''
     const config = supersetConfig()
     if (!config) {
         return ` · Dashboard NICHT eingespielt: ${missingSupersetSettings().join(', ')} nicht konfiguriert`
     }
+    const { id: installationId, dataSetId } = receipt
     if (!installationId || !dataSetId) {
         return ' · Dashboard NICHT eingespielt: Antwort trägt keine Installations- oder Datensatz-ID'
     }
+    const notice = releaseNotice(receipt.dataSetName ?? entry.manifest.displayName, dataSetId)
     const segments: string[] = []
     for (const dashboard of dashboards) {
         try {
             const installed = await installDashboard(
                 dashboard.content,
-                { installationId, datasetId: dataSetId },
+                { installationId, datasetId: dataSetId, notice },
                 config,
             )
-            segments.push(` · Dashboard „${installed.title ?? dashboard.file}“: ${installed.url}`)
+            // The install leaves the dataset a draft, so the hint always applies here.
+            segments.push(
+                ` · Dashboard „${installed.title ?? dashboard.file}“: ${installed.url} (zeigt Daten nach der Freigabe im Portal)`,
+            )
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error)
             segments.push(` · Dashboard ${dashboard.file} NICHT eingespielt: ${reason}`)
@@ -268,6 +270,19 @@ async function activateDashboards(
     return segments.join('')
 }
 
+/**
+ * The text tile the import puts on top of every dashboard of the use case.
+ * Until the dataset is released its table does not exist, and Superset only
+ * says that a relation is missing; the tile says what to do instead. It stays
+ * after the release, so it is written to be true in both states.
+ */
+function releaseNotice(dataSetName: string, dataSetId: string): string {
+    return [
+        '**Keine Daten zu sehen?**',
+        `Dieses Dashboard zeigt den Datensatz „${dataSetName}“. Daten erscheinen, sobald er im Portal freigegeben ist und seine Pipeline geliefert hat.`,
+        `[Datensatz im Portal öffnen](${datasetHref(dataSetId)})`,
+    ].join('\n\n')
+}
 
 /**
  * Sweeps the simulator for this installation's publishers by id prefix. Runs

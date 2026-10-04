@@ -133,6 +133,38 @@ describe('bindToInstallation', () => {
         expect(bindToInstallation(document, binding).slug).toBe('cafe-uebersicht-7f3c2a10')
     })
 
+    describe('notice tile', () => {
+        type Layout = Record<string, { children?: string[]; meta?: { code?: string } }>
+        const withGrid = () => {
+            const document = sampleDocument()
+            document.files[DASHBOARD].position = {
+                ...(document.files[DASHBOARD].position as Record<string, unknown>),
+                GRID_ID: { type: 'GRID', id: 'GRID_ID', children: ['ROW-1'], parents: ['ROOT_ID'] },
+            }
+            return document
+        }
+        const layoutOf = (result: ReturnType<typeof bindToInstallation>) => result.files[DASHBOARD].position as Layout
+
+        it('puts the notice on top of the dashboard', () => {
+            const layout = layoutOf(bindToInstallation(withGrid(), { ...binding, notice: '**Keine Daten?**' }))
+            expect(layout.GRID_ID.children).toEqual(['ROW-marketplace-notice', 'ROW-1'])
+            expect(layout['ROW-marketplace-notice'].children).toEqual(['MARKDOWN-marketplace-notice'])
+            expect(layout['MARKDOWN-marketplace-notice'].meta?.code).toBe('**Keine Daten?**')
+        })
+
+        it('replaces a tile the layout already carries instead of adding a second', () => {
+            const document = withGrid()
+            document.files[DASHBOARD].position = layoutOf(bindToInstallation(withGrid(), { ...binding, notice: 'alt' }))
+            const layout = layoutOf(bindToInstallation(document, { ...binding, notice: 'neu' }))
+            expect(layout.GRID_ID.children).toEqual(['ROW-marketplace-notice', 'ROW-1'])
+            expect(layout['MARKDOWN-marketplace-notice'].meta?.code).toBe('neu')
+        })
+
+        it('leaves the layout as it is without a notice', () => {
+            expect(layoutOf(bindToInstallation(withGrid(), binding))['ROW-marketplace-notice']).toBeUndefined()
+        })
+    })
+
     it('refuses a dashboard that reads more than one database', () => {
         const document = sampleDocument()
         document.files['databases/Other.yaml'] = { database_name: 'Other', uuid: '55555555-5555-4555-8555-555555555555' }

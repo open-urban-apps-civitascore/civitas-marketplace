@@ -45,7 +45,7 @@ function answer(body: unknown, options: { status?: number; headers?: [string, st
 }
 
 /** A stand-in Superset: answers the endpoints an import uses and records every request. */
-function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number } = {}) {
+function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number; importCrashes?: boolean } = {}) {
     const requests: { url: string; init?: RequestInit }[] = []
     vi.stubGlobal(
         'fetch',
@@ -69,6 +69,13 @@ function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number } =
             }
             if (url.endsWith('/api/v1/database/1')) return answer({ result: { id: 1, uuid: INSTANCE_DATABASE } })
             if (url.endsWith('/api/v1/dashboard/import/')) {
+                // A crash inside Superset answers with its HTML error page, which names no reason.
+                if (options.importCrashes) {
+                    return {
+                        ...answer(null, { status: 500 }),
+                        text: async () => '<!doctype html><html lang="en"><head><meta charset="UTF-8"/></head></html>',
+                    }
+                }
                 return options.importStatus
                     ? answer({ errors: [{ message: 'Error importing dashboard' }] }, { status: options.importStatus })
                     : answer({ message: 'OK' })
@@ -185,6 +192,13 @@ describe('installDashboard', () => {
         fakeSuperset({ importStatus: 422 })
         await expect(installDashboard(sampleDocument(), ids, config)).rejects.toThrow(
             'Superset import: 422 Error importing dashboard',
+        )
+    })
+
+    it('says where the reason is when Superset answers with an error page', async () => {
+        fakeSuperset({ importCrashes: true })
+        await expect(installDashboard(sampleDocument(), ids, config)).rejects.toThrow(
+            'Superset import: 500 (ohne Begründung, der Traceback steht im Superset-Log)',
         )
     })
 
