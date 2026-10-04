@@ -1,5 +1,5 @@
 import { importZip, readDashboardDocument } from '@/lib/superset/bundle'
-import { bindToInstallation, type InstallationBinding } from '@/lib/superset/rebind'
+import { bindToInstallation, datasetSchema, type InstallationBinding } from '@/lib/superset/rebind'
 
 /**
  * Client for the Superset REST API: the session every write needs, the lookup
@@ -131,21 +131,26 @@ interface DatabaseRow {
  * has a handful of connections, so one page of the list is enough and the
  * name is compared here, independent of the list filter syntax.
  */
+async function getJson(config: SupersetConfig, session: SupersetSession, path: string): Promise<{ result?: unknown }> {
+    const response = await fetch(`${config.apiUrl}${path}`, {
+        headers: session.headers,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) throw new Error(`Superset ${path}: ${response.status} ${response.statusText}`)
+    return response.json() as Promise<{ result?: unknown }>
+}
+
+/** A list endpoint's query in rison, the notation Superset's API reads. */
+const risonQuery = (rison: string) => `?q=${encodeURIComponent(rison)}`
+
 export async function findDatabaseUuid(
     config: SupersetConfig,
     session: SupersetSession,
     name: string,
 ): Promise<string> {
-    const get = async (path: string) => {
-        const response = await fetch(`${config.apiUrl}${path}`, {
-            headers: session.headers,
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        })
-        if (!response.ok) throw new Error(`Superset ${path}: ${response.status} ${response.statusText}`)
-        return response.json() as Promise<{ result?: unknown }>
-    }
+    const get = (path: string) => getJson(config, session, path)
 
-    const list = await get(`/api/v1/database/?q=${encodeURIComponent('(page_size:100)')}`)
+    const list = await get(`/api/v1/database/${risonQuery('(page_size:100)')}`)
     const rows = Array.isArray(list.result) ? (list.result as DatabaseRow[]) : []
     const match = rows.find((row) => row.database_name === name)
     if (!match) throw new Error(`Superset has no database connection named „${name}“`)
@@ -200,6 +205,97 @@ export async function uploadDashboard(
         const reason = errorText(body) ?? '(ohne Begründung, der Traceback steht im Superset-Log)'
         throw new Error(`Superset import: ${response.status} ${reason}`)
     }
+}
+
+function idsOf(result: unknown): number[] {
+    if (!Array.isArray(result)) return []
+    return result
+        .map((row) => (row as { id?: unknown }).id)
+        .filter((id): id is number => typeof id === 'number')
+}
+
+async function deleteByIds(
+    config: SupersetConfig,
+    session: SupersetSession,
+    resource: 'dashboard' | 'chart' | 'dataset',
+    ids: number[],
+): Promise<void> {
+    if (ids.length === 0) return
+    const response = await fetch(`${config.apiUrl}/api/v1/${resource}/${risonQuery(`!(${ids.join(',')})`)}`, {
+        method: 'DELETE',
+        headers: session.headers,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        throw new Error(`Superset delete ${resource}: ${response.status} ${errorText(body) ?? response.statusText}`)
+    }
+}
+
+/** The id of the dashboard with this slug, or undefined when there is none. */
+async function findDashboardId(
+    config: SupersetConfig,
+    session: SupersetSession,
+    slug: string,
+): Promise<number | undefined> {
+    const response = await fetch(`${config.apiUrl}/api/v1/dashboard/${encodeURIComponent(slug)}`, {
+        headers: session.headers,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (response.status === 404) return undefined
+    if (!response.ok) throw new Error(`Superset dashboard ${slug}: ${response.status} ${response.statusText}`)
+    const { result } = (await response.json()) as { result?: { id?: unknown } }
+    return typeof result?.id === 'number' ? result.id : undefined
+}
+
+export interface RemovedSupersetObjects {
+    dashboards: number
+    charts: number
+    datasets: number
+}
+
+/**
+ * Removes what an installation brought into Superset: its dashboards, found by
+ * the slug the import gave them, the charts on the datasets of its schema, and
+ * those datasets. The schema `ds_<dataset id>` belongs to the installation
+ * alone, so everything on it goes, and nothing outside it is touched.
+ */
+export async function removeInstallationDashboards(
+    config: SupersetConfig,
+    target: { dataSetId: string; slugs: string[] },
+): Promise<RemovedSupersetObjects> {
+    const session = await openSession(config)
+    const schema = datasetSchema(target.dataSetId)
+
+    const datasetIds = idsOf(
+        (
+            await getJson(
+                config,
+                session,
+                `/api/v1/dataset/${risonQuery(`(filters:!((col:schema,opr:eq,value:'${schema}')),page_size:100)`)}`,
+            )
+        ).result,
+    )
+    const chartIds: number[] = []
+    for (const datasetId of datasetIds) {
+        const charts = await getJson(
+            config,
+            session,
+            `/api/v1/chart/${risonQuery(`(filters:!((col:datasource_id,opr:eq,value:${datasetId})),page_size:100)`)}`,
+        )
+        chartIds.push(...idsOf(charts.result))
+    }
+    const dashboardIds: number[] = []
+    for (const slug of target.slugs) {
+        const id = await findDashboardId(config, session, slug)
+        if (id !== undefined) dashboardIds.push(id)
+    }
+
+    // The dashboards first, then the charts they showed, then the datasets those read.
+    await deleteByIds(config, session, 'dashboard', dashboardIds)
+    await deleteByIds(config, session, 'chart', chartIds)
+    await deleteByIds(config, session, 'dataset', datasetIds)
+    return { dashboards: dashboardIds.length, charts: chartIds.length, datasets: datasetIds.length }
 }
 
 export interface InstalledDashboard {

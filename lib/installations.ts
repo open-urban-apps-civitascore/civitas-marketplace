@@ -12,6 +12,7 @@ interface InstallationRow {
     uninstalledAt?: string | null
     /** The dataset the install produced, if any. */
     dataSetId?: string
+    dataSetName?: string
 }
 
 /** What a page needs to know about the active installation of an entry. */
@@ -43,6 +44,43 @@ export async function fetchInstalledCatalogEntryIds(): Promise<Set<string>> {
         )
     } catch {
         return new Set()
+    }
+}
+
+/** What a server action needs to know about one installation. */
+export interface InstallationFacts {
+    id: string
+    packageId?: string
+    dataSetId?: string
+    dataSetName?: string
+    /** False once uninstalled: the record stays as history. */
+    active: boolean
+}
+
+/**
+ * One installation by its id, from the platform's record, read with the
+ * caller's token. Actions take the package and the dataset from here and never
+ * from the form: a form field can name any dataset, the record names the
+ * installation's own. Null when the record cannot be read or has no such row.
+ */
+export async function fetchInstallationFacts(
+    installationId: string,
+    accessToken: string,
+): Promise<InstallationFacts | null> {
+    try {
+        const list = await readAllInstallations<InstallationRow>(accessToken)
+        if (!list.ok) return null
+        const row = list.rows.find((candidate) => candidate.id === installationId)
+        if (!row) return null
+        return {
+            id: row.id,
+            ...(row.packageId ? { packageId: row.packageId } : {}),
+            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
+            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            active: !row.uninstalledAt,
+        }
+    } catch {
+        return null
     }
 }
 

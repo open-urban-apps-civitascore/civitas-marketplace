@@ -14,8 +14,11 @@ const FEEDBACK_STYLES: Record<UninstallResult['status'], string> = {
 
 function feedbackText(result: UninstallResult): string {
     switch (result.status) {
-        case 'uninstalled':
-            return 'Deinstalliert — alle angelegten Artefakte wurden entfernt.'
+        case 'uninstalled': {
+            // The action's detail is "Deinstalliert", then a remark per cleanup step (demo streams, Superset).
+            const remarks = result.detail.replace(/^Deinstalliert/, '')
+            return `Deinstalliert, alle angelegten Artefakte wurden entfernt.${remarks}`
+        }
         case 'conflict':
             return `Noch in Verwendung (409): ${result.detail}`
         case 'invalid':

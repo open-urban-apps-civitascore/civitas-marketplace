@@ -6,6 +6,7 @@ import {
     installDashboard,
     missingSupersetSettings,
     openSession,
+    removeInstallationDashboards,
     supersetConfig,
     type SupersetConfig,
 } from '@/lib/superset/client'
@@ -51,6 +52,7 @@ function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number; im
         'fetch',
         vi.fn(async (url: string, init?: RequestInit) => {
             requests.push({ url, init })
+            if (init?.method === 'DELETE') return answer({ message: 'Deleted' })
             if (url.endsWith('/api/v1/security/login')) return answer({ access_token: 'jwt' })
             if (url.endsWith('/api/v1/security/csrf_token/')) {
                 return answer({ result: 'csrf' }, { headers: [['set-cookie', 'session=abc; HttpOnly; Path=/']] })
@@ -80,6 +82,10 @@ function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number; im
                     ? answer({ errors: [{ message: 'Error importing dashboard' }] }, { status: options.importStatus })
                     : answer({ message: 'OK' })
             }
+            if (url.includes('/api/v1/dataset/?q=')) return answer({ result: [{ id: 11 }] })
+            if (url.includes('/api/v1/chart/?q=')) return answer({ result: [{ id: 21 }, { id: 22 }] })
+            if (url.endsWith('/api/v1/dashboard/verkehrszaehlung-live-7f3c2a10')) return answer({ result: { id: 31 } })
+            if (url.includes('/api/v1/dashboard/')) return answer({ message: 'Not found' }, { status: 404 })
             throw new Error(`unexpected request ${url}`)
         }),
     )
@@ -158,6 +164,28 @@ describe('findDatabaseUuid', () => {
         fakeSuperset()
         const session = await openSession(config)
         await expect(findDatabaseUuid(config, session, 'payload_data')).rejects.toThrow(/payload_data/)
+    })
+})
+
+describe('removeInstallationDashboards', () => {
+    it("removes the installation's dashboard, the charts on its schema and the datasets, in that order", async () => {
+        const requests = fakeSuperset()
+        const removed = await removeInstallationDashboards(config, {
+            dataSetId: '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d',
+            slugs: ['verkehrszaehlung-live-7f3c2a10', 'deleted-by-hand-7f3c2a10'],
+        })
+
+        expect(removed).toEqual({ dashboards: 1, charts: 2, datasets: 1 })
+        const datasetQuery = requests.find((request) => request.url.includes('/api/v1/dataset/?q=') && !request.init?.method)!
+        expect(decodeURIComponent(datasetQuery.url)).toContain("value:'ds_0a1b2c3d_4e5f_4a6b_8c7d_8e9f0a1b2c3d'")
+        const deletes = requests
+            .filter((request) => request.init?.method === 'DELETE')
+            .map((request) => decodeURIComponent(request.url.replace(config.apiUrl, '')))
+        expect(deletes).toEqual(['/api/v1/dashboard/?q=!(31)', '/api/v1/chart/?q=!(21,22)', '/api/v1/dataset/?q=!(11)'])
+        expect(requests.find((request) => request.init?.method === 'DELETE')?.init?.headers).toMatchObject({
+            'X-CSRFToken': 'csrf',
+            Cookie: 'session=abc',
+        })
     })
 })
 

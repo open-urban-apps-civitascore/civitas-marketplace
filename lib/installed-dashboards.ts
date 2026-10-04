@@ -7,6 +7,8 @@ import { installedDashboardIdentity } from '@/lib/superset/rebind'
 export interface InstalledDashboardLink {
     title: string
     url: string
+    /** The slug the import gave the dashboard; the uninstall finds it by this. */
+    slug: string
 }
 
 /**
@@ -58,7 +60,9 @@ export async function fetchInstalledDashboards(
         return (await dashboardDocuments(entryId)).flatMap(({ file, document }) => {
             try {
                 const identity = installedDashboardIdentity(document, installationId)
-                return [{ title: identity.title ?? file, url: dashboardUrl(publicUrl, identity.slug) }]
+                return [
+                    { title: identity.title ?? file, url: dashboardUrl(publicUrl, identity.slug), slug: identity.slug },
+                ]
             } catch {
                 return []
             }
