@@ -345,9 +345,6 @@ export function assembleCatalogEntry(
         simulations: [],
         dashboards: (manifest.members.dashboards ?? []).map((member) => ({
             file: member.file,
-            tool: member.tool ?? 'superset',
-            targetVersion: member.targetVersion,
-            bindings: member.bindings,
             content: read(member),
         })),
     }

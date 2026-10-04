@@ -1,51 +1,570 @@
 {
-  "$schema": "https://civitasconnect.digital/core/dashboard/v1",
   "tool": "superset",
-  "name": "Verkehrszählung Live-Monitoring",
-  "description": "Echtzeit-Verkehrsdaten: Durchschnittsgeschwindigkeit und Fahrzeugaufkommen aus Zählstellen",
-  "bindings": {
-    "database": "payload_data",
-    "schema": "ds_${datasetId}",
-    "table": "verkehrsmessung"
-  },
-  "assets": {
-    "dashboards": [
-      {
-        "dashboard_title": "Verkehrszählung Live-Monitoring",
-        "description": "Echtzeit-Verkehrsdaten: Durchschnittsgeschwindigkeit und Fahrzeugaufkommen",
-        "slug": "verkehrszaehlung-live",
-        "metadata": {
-          "refresh_frequency": 10,
-          "color_scheme": "supersetColors"
+  "supersetVersion": "6.1.0",
+  "files": {
+    "metadata.yaml": {
+      "version": "1.0.0",
+      "type": "Dashboard",
+      "timestamp": "2026-10-04T00:07:23.815486+00:00"
+    },
+    "dashboards/Verkehrszahlung_1.yaml": {
+      "dashboard_title": "Verkehrszählung",
+      "description": null,
+      "css": "",
+      "slug": null,
+      "certified_by": "",
+      "certification_details": "",
+      "published": false,
+      "uuid": "e4b2cf56-f4d1-4a86-bc87-6c46c5e2064c",
+      "position": {
+        "CHART--ZBpbNkcjCY4qKW5xRDDW": {
+          "children": [],
+          "id": "CHART--ZBpbNkcjCY4qKW5xRDDW",
+          "meta": {
+            "chartId": 1,
+            "height": 50,
+            "sliceName": "Average Speed per Minute",
+            "uuid": "e9602108-e0f3-4907-a045-122a714b5294",
+            "width": 4
+          },
+          "parents": [
+            "ROOT_ID",
+            "GRID_ID",
+            "ROW-RB069tim7tyPW0bf5IXf7"
+          ],
+          "type": "CHART"
+        },
+        "DASHBOARD_VERSION_KEY": "v2",
+        "GRID_ID": {
+          "children": [
+            "ROW-RB069tim7tyPW0bf5IXf7",
+            "ROW-N-KHW3GCX3"
+          ],
+          "id": "GRID_ID",
+          "parents": [
+            "ROOT_ID"
+          ],
+          "type": "GRID"
+        },
+        "HEADER_ID": {
+          "id": "HEADER_ID",
+          "meta": {
+            "text": "Verkehrszählung"
+          },
+          "type": "HEADER"
+        },
+        "ROOT_ID": {
+          "children": [
+            "GRID_ID"
+          ],
+          "id": "ROOT_ID",
+          "type": "ROOT"
+        },
+        "ROW-RB069tim7tyPW0bf5IXf7": {
+          "children": [
+            "CHART--ZBpbNkcjCY4qKW5xRDDW"
+          ],
+          "id": "ROW-RB069tim7tyPW0bf5IXf7",
+          "meta": {
+            "background": "BACKGROUND_TRANSPARENT"
+          },
+          "parents": [
+            "ROOT_ID",
+            "GRID_ID"
+          ],
+          "type": "ROW"
+        },
+        "ROW-N-KHW3GCX3": {
+          "children": [
+            "CHART-V0EF6IDU"
+          ],
+          "id": "ROW-N-KHW3GCX3",
+          "meta": {
+            "0": "ROOT_ID",
+            "background": "BACKGROUND_TRANSPARENT"
+          },
+          "type": "ROW",
+          "parents": [
+            "ROOT_ID",
+            "GRID_ID"
+          ]
+        },
+        "CHART-V0EF6IDU": {
+          "children": [],
+          "id": "CHART-V0EF6IDU",
+          "meta": {
+            "chartId": 2,
+            "height": 50,
+            "sliceName": "avg-speed-26-10-04-0200",
+            "uuid": "588c1133-e971-4c59-a026-f479709c2e2d",
+            "width": 4
+          },
+          "type": "CHART",
+          "parents": [
+            "ROOT_ID",
+            "GRID_ID",
+            "ROW-N-KHW3GCX3"
+          ]
         }
-      }
-    ],
-    "charts": [
-      {
-        "slice_name": "Geschwindigkeit im Zeitverlauf",
+      },
+      "metadata": {
+        "chart_configuration": {
+          "1": {
+            "id": 1,
+            "crossFilters": {
+              "scope": "global",
+              "chartsInScope": []
+            }
+          }
+        },
+        "global_chart_configuration": {
+          "scope": {
+            "rootPath": [
+              "ROOT_ID"
+            ],
+            "excluded": []
+          },
+          "chartsInScope": [
+            1
+          ]
+        },
+        "native_filter_configuration": [],
+        "chart_customization_config": [],
+        "refresh_frequency": 0,
+        "show_chart_timestamps": false,
+        "color_scheme": "",
+        "color_scheme_domain": [],
+        "expanded_slices": {},
+        "label_colors": {},
+        "shared_label_colors": [],
+        "map_label_colors": {
+          "AVG(avgSpeedKmh)": "#1FA8C9"
+        },
+        "timed_refresh_immune_slices": [],
+        "cross_filters_enabled": true,
+        "default_filters": "{}"
+      },
+      "theme_uuid": null,
+      "version": "1.0.0"
+    },
+    "charts/Average_Speed_per_Minute_1.yaml": {
+      "slice_name": "Average Speed per Minute",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "echarts_timeseries_line",
+      "params": {
+        "datasource": "1__table",
         "viz_type": "echarts_timeseries_line",
-        "params": {
-          "metrics": ["AVG(avgSpeedKmh)"],
-          "groupby": ["counterId"],
-          "time_grain_sqla": null,
-          "granularity_sqla": "observedAt"
-        }
-      }
-    ],
-    "datasets": [
-      {
-        "table_name": "verkehrsmessung",
-        "schema": "ds_${datasetId}",
-        "columns": [
-          { "column_name": "counterId", "type": "VARCHAR" },
-          { "column_name": "observedAt", "type": "TIMESTAMP", "is_dttm": true },
-          { "column_name": "avgSpeedKmh", "type": "DOUBLE PRECISION" },
-          { "column_name": "vehicleCount", "type": "INTEGER" }
-        ],
+        "slice_id": 1,
+        "matrixify_enable": false,
+        "matrixify_mode_columns": "disabled",
+        "matrixify_dimension_selection_mode_columns": "members",
+        "matrixify_dimension_columns": {
+          "dimension": "",
+          "values": []
+        },
+        "matrixify_topn_value_columns": 10,
+        "matrixify_all_sort_by_columns": "a_to_z",
+        "matrixify_topn_order_columns": true,
+        "matrixify_show_column_headers": true,
+        "matrixify_fit_columns_dynamically": true,
+        "matrixify_mode_rows": "disabled",
+        "matrixify_dimension_selection_mode_rows": "members",
+        "matrixify_dimension_rows": {
+          "dimension": "",
+          "values": []
+        },
+        "matrixify_topn_value_rows": 10,
+        "matrixify_all_sort_by_rows": "a_to_z",
+        "matrixify_topn_order_rows": true,
+        "matrixify_show_row_labels": true,
+        "matrixify_row_height": 300,
+        "matrixify_charts_per_row": 4,
+        "matrixify_cell_title_template": "",
+        "x_axis": "observedAt",
+        "time_grain_sqla": "PT1M",
+        "xAxisForceCategorical": false,
+        "x_axis_sort_asc": true,
         "metrics": [
-          { "metric_name": "avg_speed", "expression": "AVG(avgSpeedKmh)" }
+          {
+            "aggregate": "AVG",
+            "column": {
+              "advanced_data_type": null,
+              "certification_details": null,
+              "certified_by": null,
+              "column_name": "avgSpeedKmh",
+              "description": null,
+              "expression": null,
+              "filterable": true,
+              "groupby": true,
+              "id": 4,
+              "is_certified": false,
+              "is_dttm": false,
+              "python_date_format": null,
+              "type": "DOUBLE PRECISION",
+              "type_generic": 0,
+              "uuid": "2800b936-ed0a-4d07-91bb-ca241183ad2d",
+              "verbose_name": null,
+              "warning_markdown": null
+            },
+            "datasourceWarning": false,
+            "expressionType": "SIMPLE",
+            "hasCustomLabel": false,
+            "label": "AVG(avgSpeedKmh)",
+            "optionName": "metric_ar7p7d9dtls_3a4gjx7tu9d",
+            "sqlExpression": null
+          }
+        ],
+        "groupby": [],
+        "adhoc_filters": [
+          {
+            "clause": "WHERE",
+            "comparator": "No filter",
+            "expressionType": "SIMPLE",
+            "operator": "TEMPORAL_RANGE",
+            "subject": "observedAt"
+          }
+        ],
+        "group_others_when_limit_reached": false,
+        "order_desc": true,
+        "row_limit": 50000,
+        "truncate_metric": true,
+        "show_empty_columns": true,
+        "comparison_type": "values",
+        "annotation_layers": [],
+        "forecastEnabled": false,
+        "forecastPeriods": 10,
+        "forecastInterval": 0.8,
+        "x_axis_title": "",
+        "x_axis_title_margin": 0,
+        "y_axis_title": "",
+        "y_axis_title_margin": 0,
+        "y_axis_title_position": "Left",
+        "sort_series_type": "sum",
+        "sort_series_ascending": false,
+        "color_scheme": "supersetColors",
+        "time_shift_color": true,
+        "show_value": false,
+        "only_total": true,
+        "percentage_threshold": 0,
+        "area": false,
+        "opacity": 0.2,
+        "markerEnabled": false,
+        "markerSize": 6,
+        "zoomable": false,
+        "minorTicks": false,
+        "show_legend": true,
+        "legendType": "scroll",
+        "legendOrientation": "top",
+        "x_axis_time_format": "smart_date",
+        "x_axis_number_format": "~g",
+        "xAxisLabelRotation": 0,
+        "xAxisLabelInterval": "auto",
+        "force_max_interval": false,
+        "rich_tooltip": true,
+        "showTooltipTotal": true,
+        "showTooltipPercentage": false,
+        "tooltipSortByMetric": false,
+        "tooltipTimeFormat": "smart_date",
+        "y_axis_format": "SMART_NUMBER",
+        "logAxis": false,
+        "minorSplitLine": false,
+        "truncateXAxis": true,
+        "truncateYAxis": false,
+        "y_axis_bounds": [
+          null,
+          null
+        ],
+        "echart_options": "{}",
+        "extra_form_data": {},
+        "dashboards": [
+          1
         ]
-      }
-    ]
+      },
+      "query_context": "{\"datasource\":{\"id\":1,\"type\":\"table\"},\"force\":false,\"queries\":[{\"filters\":[{\"col\":\"observedAt\",\"op\":\"TEMPORAL_RANGE\",\"val\":\"No filter\"}],\"extras\":{\"time_grain_sqla\":\"PT1M\",\"having\":\"\",\"where\":\"\"},\"applied_time_extras\":{},\"columns\":[{\"timeGrain\":\"PT1M\",\"columnType\":\"BASE_AXIS\",\"sqlExpression\":\"observedAt\",\"label\":\"observedAt\",\"expressionType\":\"SQL\",\"isColumnReference\":true}],\"metrics\":[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"certification_details\":null,\"certified_by\":null,\"column_name\":\"avgSpeedKmh\",\"description\":null,\"expression\":null,\"filterable\":true,\"groupby\":true,\"id\":4,\"is_certified\":false,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null,\"warning_markdown\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_ar7p7d9dtls_3a4gjx7tu9d\",\"sqlExpression\":null}],\"orderby\":[[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"certification_details\":null,\"certified_by\":null,\"column_name\":\"avgSpeedKmh\",\"description\":null,\"expression\":null,\"filterable\":true,\"groupby\":true,\"id\":4,\"is_certified\":false,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null,\"warning_markdown\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_ar7p7d9dtls_3a4gjx7tu9d\",\"sqlExpression\":null},false]],\"annotation_layers\":[],\"row_limit\":50000,\"series_columns\":[],\"series_limit\":0,\"group_others_when_limit_reached\":false,\"order_desc\":true,\"url_params\":{},\"custom_params\":{},\"custom_form_data\":{},\"time_offsets\":[],\"post_processing\":[{\"operation\":\"pivot\",\"options\":{\"index\":[\"observedAt\"],\"columns\":[],\"aggregates\":{\"AVG(avgSpeedKmh)\":{\"operator\":\"mean\"}},\"drop_missing_columns\":false}},{\"operation\":\"flatten\"}]}],\"form_data\":{\"datasource\":\"1__table\",\"viz_type\":\"echarts_timeseries_line\",\"slice_id\":1,\"matrixify_enable\":false,\"matrixify_mode_columns\":\"disabled\",\"matrixify_dimension_selection_mode_columns\":\"members\",\"matrixify_dimension_columns\":{\"dimension\":\"\",\"values\":[]},\"matrixify_topn_value_columns\":10,\"matrixify_all_sort_by_columns\":\"a_to_z\",\"matrixify_topn_order_columns\":true,\"matrixify_show_column_headers\":true,\"matrixify_fit_columns_dynamically\":true,\"matrixify_mode_rows\":\"disabled\",\"matrixify_dimension_selection_mode_rows\":\"members\",\"matrixify_dimension_rows\":{\"dimension\":\"\",\"values\":[]},\"matrixify_topn_value_rows\":10,\"matrixify_all_sort_by_rows\":\"a_to_z\",\"matrixify_topn_order_rows\":true,\"matrixify_show_row_labels\":true,\"matrixify_row_height\":300,\"matrixify_charts_per_row\":4,\"matrixify_cell_title_template\":\"\",\"x_axis\":\"observedAt\",\"time_grain_sqla\":\"PT1M\",\"xAxisForceCategorical\":false,\"x_axis_sort_asc\":true,\"metrics\":[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"certification_details\":null,\"certified_by\":null,\"column_name\":\"avgSpeedKmh\",\"description\":null,\"expression\":null,\"filterable\":true,\"groupby\":true,\"id\":4,\"is_certified\":false,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null,\"warning_markdown\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_ar7p7d9dtls_3a4gjx7tu9d\",\"sqlExpression\":null}],\"groupby\":[],\"adhoc_filters\":[{\"clause\":\"WHERE\",\"comparator\":\"No filter\",\"expressionType\":\"SIMPLE\",\"operator\":\"TEMPORAL_RANGE\",\"subject\":\"observedAt\"}],\"group_others_when_limit_reached\":false,\"order_desc\":true,\"row_limit\":50000,\"truncate_metric\":true,\"show_empty_columns\":true,\"comparison_type\":\"values\",\"annotation_layers\":[],\"forecastEnabled\":false,\"forecastPeriods\":10,\"forecastInterval\":0.8,\"x_axis_title\":\"\",\"x_axis_title_margin\":0,\"y_axis_title\":\"\",\"y_axis_title_margin\":0,\"y_axis_title_position\":\"Left\",\"sort_series_type\":\"sum\",\"sort_series_ascending\":false,\"color_scheme\":\"supersetColors\",\"time_shift_color\":true,\"show_value\":false,\"only_total\":true,\"percentage_threshold\":0,\"area\":false,\"opacity\":0.2,\"markerEnabled\":false,\"markerSize\":6,\"zoomable\":false,\"minorTicks\":false,\"show_legend\":true,\"legendType\":\"scroll\",\"legendOrientation\":\"top\",\"x_axis_time_format\":\"smart_date\",\"x_axis_number_format\":\"~g\",\"xAxisLabelRotation\":0,\"xAxisLabelInterval\":\"auto\",\"force_max_interval\":false,\"rich_tooltip\":true,\"showTooltipTotal\":true,\"showTooltipPercentage\":false,\"tooltipSortByMetric\":false,\"tooltipTimeFormat\":\"smart_date\",\"y_axis_format\":\"SMART_NUMBER\",\"logAxis\":false,\"minorSplitLine\":false,\"truncateXAxis\":true,\"truncateYAxis\":false,\"y_axis_bounds\":[null,null],\"echart_options\":\"{}\",\"extra_form_data\":{},\"dashboards\":[1],\"force\":false,\"result_format\":\"json\",\"result_type\":\"full\"},\"result_format\":\"json\",\"result_type\":\"full\"}",
+      "cache_timeout": null,
+      "uuid": "e9602108-e0f3-4907-a045-122a714b5294",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "datasets/PostgreSQL_geoserver/verkehrsmessung_1.yaml": {
+      "table_name": "verkehrsmessung",
+      "main_dttm_col": "observedAt",
+      "currency_code_column": null,
+      "description": null,
+      "default_endpoint": null,
+      "offset": 0,
+      "cache_timeout": null,
+      "catalog": "geoserver",
+      "schema": "ds_3529ec95_f50a_49fe_99e6_e6a634ca8020",
+      "sql": "",
+      "params": null,
+      "template_params": null,
+      "filter_select_enabled": true,
+      "fetch_values_predicate": null,
+      "extra": null,
+      "normalize_columns": false,
+      "always_filter_main_dttm": false,
+      "folders": null,
+      "uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661",
+      "metrics": [
+        {
+          "metric_name": "count",
+          "verbose_name": "COUNT(*)",
+          "metric_type": "count",
+          "expression": "COUNT(*)",
+          "description": null,
+          "d3format": null,
+          "currency": null,
+          "extra": {
+            "warning_markdown": ""
+          },
+          "warning_text": null
+        }
+      ],
+      "columns": [
+        {
+          "column_name": "observedAt",
+          "verbose_name": null,
+          "is_dttm": true,
+          "is_active": true,
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": null,
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": {
+            "warning_markdown": null
+          }
+        },
+        {
+          "column_name": "avgSpeedKmh",
+          "verbose_name": null,
+          "is_dttm": false,
+          "is_active": true,
+          "type": "DOUBLE PRECISION",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": null,
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": {
+            "warning_markdown": null
+          }
+        },
+        {
+          "column_name": "vehicleCount",
+          "verbose_name": null,
+          "is_dttm": false,
+          "is_active": true,
+          "type": "INTEGER",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": null,
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": {
+            "warning_markdown": null
+          }
+        },
+        {
+          "column_name": "stationId",
+          "verbose_name": null,
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": null,
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": {
+            "warning_markdown": null
+          }
+        },
+        {
+          "column_name": "direction",
+          "verbose_name": null,
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": null,
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": {
+            "warning_markdown": null
+          }
+        }
+      ],
+      "version": "1.0.0",
+      "database_uuid": "6205a38e-f83c-4b7f-aed2-2ebcad0cb8b2"
+    },
+    "databases/PostgreSQL_geoserver.yaml": {
+      "database_name": "PostgreSQL geoserver",
+      "sqlalchemy_uri": "postgresql+psycopg2://geoserver:XXXXXXXXXX@civitas-geoserver-db:5432/geoserver",
+      "cache_timeout": null,
+      "expose_in_sqllab": true,
+      "allow_run_async": false,
+      "allow_ctas": false,
+      "allow_cvas": false,
+      "allow_dml": false,
+      "allow_file_upload": false,
+      "extra": {
+        "allows_virtual_table_explore": true
+      },
+      "impersonate_user": false,
+      "configuration_method": "dynamic_form",
+      "uuid": "6205a38e-f83c-4b7f-aed2-2ebcad0cb8b2",
+      "version": "1.0.0"
+    },
+    "charts/avg-speed-26-10-04-0200_2.yaml": {
+      "slice_name": "avg-speed-26-10-04-0200",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "echarts_timeseries_bar",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "echarts_timeseries_bar",
+        "slice_id": 2,
+        "matrixify_enable": false,
+        "matrixify_mode_columns": "disabled",
+        "matrixify_dimension_selection_mode_columns": "members",
+        "matrixify_dimension_columns": {
+          "dimension": "",
+          "values": []
+        },
+        "matrixify_topn_value_columns": 10,
+        "matrixify_all_sort_by_columns": "a_to_z",
+        "matrixify_topn_order_columns": true,
+        "matrixify_show_column_headers": true,
+        "matrixify_fit_columns_dynamically": true,
+        "matrixify_mode_rows": "disabled",
+        "matrixify_dimension_selection_mode_rows": "members",
+        "matrixify_dimension_rows": {
+          "dimension": "",
+          "values": []
+        },
+        "matrixify_topn_value_rows": 10,
+        "matrixify_all_sort_by_rows": "a_to_z",
+        "matrixify_topn_order_rows": true,
+        "matrixify_show_row_labels": true,
+        "matrixify_row_height": 300,
+        "matrixify_charts_per_row": 3,
+        "matrixify_cell_title_template": "",
+        "x_axis": "observedAt",
+        "time_grain_sqla": "PT1M",
+        "metrics": [
+          {
+            "aggregate": "AVG",
+            "column": {
+              "advanced_data_type": null,
+              "changed_on": "2026-10-03T23:59:13.219723",
+              "column_name": "avgSpeedKmh",
+              "created_on": "2026-10-03T23:59:13.162236",
+              "description": null,
+              "expression": "",
+              "extra": "{\"warning_markdown\":null}",
+              "filterable": true,
+              "groupby": true,
+              "id": 4,
+              "is_active": true,
+              "is_dttm": false,
+              "python_date_format": null,
+              "type": "DOUBLE PRECISION",
+              "type_generic": 0,
+              "uuid": "2800b936-ed0a-4d07-91bb-ca241183ad2d",
+              "verbose_name": null
+            },
+            "datasourceWarning": false,
+            "expressionType": "SIMPLE",
+            "hasCustomLabel": false,
+            "label": "AVG(avgSpeedKmh)",
+            "optionName": "metric_rc2q92jwyoc_7y6czrdatzu",
+            "sqlExpression": null
+          }
+        ],
+        "groupby": [],
+        "adhoc_filters": [
+          {
+            "clause": "WHERE",
+            "comparator": "No filter",
+            "expressionType": "SIMPLE",
+            "operator": "TEMPORAL_RANGE",
+            "subject": "observedAt"
+          }
+        ],
+        "row_limit": 10000,
+        "truncate_metric": true,
+        "show_empty_columns": true,
+        "comparison_type": "values",
+        "annotation_layers": [],
+        "forecastEnabled": false,
+        "forecastPeriods": 10,
+        "forecastInterval": 0.8,
+        "orientation": "vertical",
+        "x_axis_title": "",
+        "x_axis_title_margin": 0,
+        "y_axis_title": "",
+        "y_axis_title_margin": 15,
+        "y_axis_title_position": "Left",
+        "sort_series_type": "sum",
+        "sort_series_ascending": false,
+        "color_scheme": "supersetColors",
+        "time_shift_color": true,
+        "show_value": false,
+        "only_total": true,
+        "percentage_threshold": 0,
+        "color_by_primary_axis": false,
+        "minorTicks": false,
+        "zoomable": false,
+        "show_legend": true,
+        "legendType": "scroll",
+        "legendOrientation": "top",
+        "x_axis_time_format": "smart_date",
+        "x_axis_number_format": "~g",
+        "xAxisLabelRotation": 0,
+        "xAxisLabelInterval": "auto",
+        "y_axis_format": "SMART_NUMBER",
+        "logAxis": false,
+        "minorSplitLine": false,
+        "truncateYAxis": false,
+        "y_axis_bounds": [
+          null,
+          null
+        ],
+        "truncateXAxis": true,
+        "force_max_interval": false,
+        "rich_tooltip": true,
+        "showTooltipTotal": true,
+        "showTooltipPercentage": false,
+        "tooltipSortByMetric": false,
+        "tooltipTimeFormat": "smart_date",
+        "echart_options": "{}",
+        "extra_form_data": {},
+        "dashboards": [
+          1
+        ]
+      },
+      "query_context": "{\"datasource\":{\"id\":1,\"type\":\"table\"},\"force\":false,\"queries\":[{\"filters\":[{\"col\":\"observedAt\",\"op\":\"TEMPORAL_RANGE\",\"val\":\"No filter\"}],\"extras\":{\"time_grain_sqla\":\"PT1M\",\"having\":\"\",\"where\":\"\"},\"applied_time_extras\":{},\"columns\":[{\"timeGrain\":\"PT1M\",\"columnType\":\"BASE_AXIS\",\"sqlExpression\":\"observedAt\",\"label\":\"observedAt\",\"expressionType\":\"SQL\",\"isColumnReference\":true}],\"metrics\":[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"changed_on\":\"2026-10-03T23:59:13.219723\",\"column_name\":\"avgSpeedKmh\",\"created_on\":\"2026-10-03T23:59:13.162236\",\"description\":null,\"expression\":\"\",\"extra\":\"{\\\"warning_markdown\\\":null}\",\"filterable\":true,\"groupby\":true,\"id\":4,\"is_active\":true,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_rc2q92jwyoc_7y6czrdatzu\",\"sqlExpression\":null}],\"orderby\":[[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"changed_on\":\"2026-10-03T23:59:13.219723\",\"column_name\":\"avgSpeedKmh\",\"created_on\":\"2026-10-03T23:59:13.162236\",\"description\":null,\"expression\":\"\",\"extra\":\"{\\\"warning_markdown\\\":null}\",\"filterable\":true,\"groupby\":true,\"id\":4,\"is_active\":true,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_rc2q92jwyoc_7y6czrdatzu\",\"sqlExpression\":null},false]],\"annotation_layers\":[],\"row_limit\":10000,\"series_columns\":[],\"series_limit\":0,\"group_others_when_limit_reached\":false,\"order_desc\":true,\"url_params\":{},\"custom_params\":{},\"custom_form_data\":{},\"time_offsets\":[],\"post_processing\":[{\"operation\":\"pivot\",\"options\":{\"index\":[\"observedAt\"],\"columns\":[],\"aggregates\":{\"AVG(avgSpeedKmh)\":{\"operator\":\"mean\"}},\"drop_missing_columns\":false}},{\"operation\":\"flatten\"}]}],\"form_data\":{\"datasource\":\"1__table\",\"viz_type\":\"echarts_timeseries_bar\",\"slice_id\":2,\"matrixify_enable\":false,\"matrixify_mode_columns\":\"disabled\",\"matrixify_dimension_selection_mode_columns\":\"members\",\"matrixify_dimension_columns\":{\"dimension\":\"\",\"values\":[]},\"matrixify_topn_value_columns\":10,\"matrixify_all_sort_by_columns\":\"a_to_z\",\"matrixify_topn_order_columns\":true,\"matrixify_show_column_headers\":true,\"matrixify_fit_columns_dynamically\":true,\"matrixify_mode_rows\":\"disabled\",\"matrixify_dimension_selection_mode_rows\":\"members\",\"matrixify_dimension_rows\":{\"dimension\":\"\",\"values\":[]},\"matrixify_topn_value_rows\":10,\"matrixify_all_sort_by_rows\":\"a_to_z\",\"matrixify_topn_order_rows\":true,\"matrixify_show_row_labels\":true,\"matrixify_row_height\":300,\"matrixify_charts_per_row\":3,\"matrixify_cell_title_template\":\"\",\"x_axis\":\"observedAt\",\"time_grain_sqla\":\"PT1M\",\"metrics\":[{\"aggregate\":\"AVG\",\"column\":{\"advanced_data_type\":null,\"changed_on\":\"2026-10-03T23:59:13.219723\",\"column_name\":\"avgSpeedKmh\",\"created_on\":\"2026-10-03T23:59:13.162236\",\"description\":null,\"expression\":\"\",\"extra\":\"{\\\"warning_markdown\\\":null}\",\"filterable\":true,\"groupby\":true,\"id\":4,\"is_active\":true,\"is_dttm\":false,\"python_date_format\":null,\"type\":\"DOUBLE PRECISION\",\"type_generic\":0,\"uuid\":\"2800b936-ed0a-4d07-91bb-ca241183ad2d\",\"verbose_name\":null},\"datasourceWarning\":false,\"expressionType\":\"SIMPLE\",\"hasCustomLabel\":false,\"label\":\"AVG(avgSpeedKmh)\",\"optionName\":\"metric_rc2q92jwyoc_7y6czrdatzu\",\"sqlExpression\":null}],\"groupby\":[],\"adhoc_filters\":[{\"clause\":\"WHERE\",\"comparator\":\"No filter\",\"expressionType\":\"SIMPLE\",\"operator\":\"TEMPORAL_RANGE\",\"subject\":\"observedAt\"}],\"row_limit\":10000,\"truncate_metric\":true,\"show_empty_columns\":true,\"comparison_type\":\"values\",\"annotation_layers\":[],\"forecastEnabled\":false,\"forecastPeriods\":10,\"forecastInterval\":0.8,\"orientation\":\"vertical\",\"x_axis_title\":\"\",\"x_axis_title_margin\":0,\"y_axis_title\":\"\",\"y_axis_title_margin\":15,\"y_axis_title_position\":\"Left\",\"sort_series_type\":\"sum\",\"sort_series_ascending\":false,\"color_scheme\":\"supersetColors\",\"time_shift_color\":true,\"show_value\":false,\"only_total\":true,\"percentage_threshold\":0,\"color_by_primary_axis\":false,\"minorTicks\":false,\"zoomable\":false,\"show_legend\":true,\"legendType\":\"scroll\",\"legendOrientation\":\"top\",\"x_axis_time_format\":\"smart_date\",\"x_axis_number_format\":\"~g\",\"xAxisLabelRotation\":0,\"xAxisLabelInterval\":\"auto\",\"y_axis_format\":\"SMART_NUMBER\",\"logAxis\":false,\"minorSplitLine\":false,\"truncateYAxis\":false,\"y_axis_bounds\":[null,null],\"truncateXAxis\":true,\"force_max_interval\":false,\"rich_tooltip\":true,\"showTooltipTotal\":true,\"showTooltipPercentage\":false,\"tooltipSortByMetric\":false,\"tooltipTimeFormat\":\"smart_date\",\"echart_options\":\"{}\",\"extra_form_data\":{},\"dashboards\":[1],\"force\":false,\"result_format\":\"json\",\"result_type\":\"full\"},\"result_format\":\"json\",\"result_type\":\"full\"}",
+      "cache_timeout": null,
+      "uuid": "588c1133-e971-4c59-a026-f479709c2e2d",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    }
   }
 }

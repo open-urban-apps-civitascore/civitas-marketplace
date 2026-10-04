@@ -1,201 +1,196 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parse as parseYaml } from 'yaml'
+
 import {
-    deleteDashboard,
-    importDashboard,
-    isSupersetConfigured,
-    rebindSupersetZip,
+    findDatabaseUuid,
+    installDashboard,
+    missingSupersetSettings,
+    openSession,
     supersetConfig,
-} from '../client'
-import { createZip, readZip } from '../zip'
+    type SupersetConfig,
+} from '@/lib/superset/client'
+import { readZip } from '@/lib/superset/zip'
 
-describe('Superset client', () => {
-    const originalEnv = process.env
+import { sampleDocument } from './fixtures'
 
-    beforeEach(() => {
-        process.env = { ...originalEnv }
-        delete process.env.SUPERSET_API_URL
-        delete process.env.SUPERSET_PUBLIC_URL
-    })
+const INSTANCE_DATABASE = '99999999-9999-4999-8999-999999999999'
 
-    afterEach(() => {
-        process.env = originalEnv
-        vi.restoreAllMocks()
-    })
+const config: SupersetConfig = {
+    apiUrl: 'http://superset:8088',
+    publicUrl: 'https://superset.example.org',
+    databaseName: 'PostgreSQL geoserver',
+    username: 'marketplace',
+    password: 'secret',
+}
 
-    describe('configuration', () => {
-        it('reports not configured when SUPERSET_API_URL is unset', () => {
-            expect(isSupersetConfigured()).toBe(false)
-            expect(supersetConfig()).toBeUndefined()
-        })
+const SETTINGS = [
+    'SUPERSET_API_URL',
+    'SUPERSET_PUBLIC_URL',
+    'SUPERSET_DATABASE_NAME',
+    'SUPERSET_USERNAME',
+    'SUPERSET_PASSWORD',
+    'SUPERSET_TOKEN',
+]
 
-        it('reads configuration when SUPERSET_API_URL is set', () => {
-            process.env.SUPERSET_API_URL = 'http://localhost:8098'
-            expect(isSupersetConfigured()).toBe(true)
-            const config = supersetConfig()
-            expect(config?.apiUrl).toBe('http://localhost:8098')
-            expect(config?.publicUrl).toBe('http://localhost:8098')
-            expect(config?.username).toBe('admin')
-        })
+function answer(body: unknown, options: { status?: number; headers?: [string, string][] } = {}) {
+    const status = options.status ?? 200
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: status === 200 ? 'OK' : 'Error',
+        headers: new Headers(options.headers ?? []),
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+    }
+}
 
-        it('supports a distinct SUPERSET_PUBLIC_URL', () => {
-            process.env.SUPERSET_API_URL = 'http://superset.internal:8088'
-            process.env.SUPERSET_PUBLIC_URL = 'https://dashboard.example.com'
-            const config = supersetConfig()
-            expect(config?.apiUrl).toBe('http://superset.internal:8088')
-            expect(config?.publicUrl).toBe('https://dashboard.example.com')
-        })
-    })
-
-    describe('rebindSupersetZip', () => {
-        it('rebinds dataset schema to the instance dataset UUID pattern', () => {
-            const initialFiles: Record<string, string> = {
-                'metadata.yaml': 'version: 1.0.0\ntype: Dashboard\n',
-                'dashboards/verkehr.yaml': 'dashboard_title: Verkehrsfluss\nslug: verkehrsfluss-live\n',
-                'datasets/payload_data/verkehrsmessung.yaml':
-                    'table_name: verkehrsmessung\nschema: ds_template\ncolumns:\n  - column_name: speed\n',
+/** A stand-in Superset: answers the endpoints an import uses and records every request. */
+function fakeSuperset(options: { uuidInList?: boolean; importStatus?: number } = {}) {
+    const requests: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+            requests.push({ url, init })
+            if (url.endsWith('/api/v1/security/login')) return answer({ access_token: 'jwt' })
+            if (url.endsWith('/api/v1/security/csrf_token/')) {
+                return answer({ result: 'csrf' }, { headers: [['set-cookie', 'session=abc; HttpOnly; Path=/']] })
             }
-            const initialZip = createZip(initialFiles)
+            if (url.includes('/api/v1/database/?q=')) {
+                return answer({
+                    result: [
+                        { id: 3, database_name: 'PostgreSQL geoserver (alt)', uuid: 'not-this-one' },
+                        {
+                            id: 1,
+                            database_name: 'PostgreSQL geoserver',
+                            ...(options.uuidInList === false ? {} : { uuid: INSTANCE_DATABASE }),
+                        },
+                    ],
+                })
+            }
+            if (url.endsWith('/api/v1/database/1')) return answer({ result: { id: 1, uuid: INSTANCE_DATABASE } })
+            if (url.endsWith('/api/v1/dashboard/import/')) {
+                return options.importStatus
+                    ? answer({ errors: [{ message: 'Error importing dashboard' }] }, { status: options.importStatus })
+                    : answer({ message: 'OK' })
+            }
+            throw new Error(`unexpected request ${url}`)
+        }),
+    )
+    return requests
+}
 
-            const { zipBuffer, dashboardSlug, dashboardTitle } = rebindSupersetZip(initialZip, {
-                datasetId: '1584f547-d122-4a19-98e1-21905f6447fd',
-            })
+afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+})
 
-            expect(dashboardSlug).toBe('verkehrsfluss-live')
-            expect(dashboardTitle).toBe('Verkehrsfluss')
+describe('configuration', () => {
+    const clearSettings = () => SETTINGS.forEach((name) => vi.stubEnv(name, ''))
 
-            const reboundFiles = readZip(zipBuffer)
-            const datasetYaml = parseYaml(
-                reboundFiles['datasets/payload_data/verkehrsmessung.yaml'].toString('utf-8'),
-            ) as Record<string, unknown>
-
-            expect(datasetYaml.schema).toBe('ds_1584f547_d122_4a19_98e1_21905f6447fd')
-            expect(datasetYaml.table_name).toBe('verkehrsmessung')
-        })
-
-        it('supports explicit schema and table bindings', () => {
-            const initialZip = createZip({
-                'dashboards/custom.yaml': 'dashboard_title: Custom\nslug: custom-view\n',
-                'datasets/payload_data/table.yaml': 'table_name: old_table\nschema: old_schema\n',
-            })
-
-            const { zipBuffer } = rebindSupersetZip(initialZip, {
-                schema: 'ds_${datasetId}',
-                table: 'new_table',
-                datasetId: 'abc-123',
-            })
-
-            const reboundFiles = readZip(zipBuffer)
-            const datasetYaml = parseYaml(
-                reboundFiles['datasets/payload_data/table.yaml'].toString('utf-8'),
-            ) as Record<string, unknown>
-
-            expect(datasetYaml.schema).toBe('ds_abc_123')
-            expect(datasetYaml.table_name).toBe('new_table')
-        })
+    it('names every missing setting', () => {
+        clearSettings()
+        expect(missingSupersetSettings()).toEqual([
+            'SUPERSET_API_URL',
+            'SUPERSET_DATABASE_NAME',
+            'SUPERSET_USERNAME/SUPERSET_PASSWORD',
+        ])
+        expect(supersetConfig()).toBeUndefined()
     })
 
-    describe('importDashboard', () => {
-        it('authenticates, submits multipart upload, and returns dashboard URL', async () => {
-            process.env.SUPERSET_API_URL = 'http://localhost:8098'
-            const initialZip = createZip({
-                'dashboards/verkehr.yaml': 'dashboard_title: Verkehrsfluss\nslug: verkehrsfluss-live\n',
-            })
+    it('has no built-in account: user and password, or a token, must be set', () => {
+        clearSettings()
+        vi.stubEnv('SUPERSET_API_URL', 'http://superset:8088/')
+        vi.stubEnv('SUPERSET_DATABASE_NAME', 'PostgreSQL geoserver')
+        expect(supersetConfig()).toBeUndefined()
 
-            const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-                if (url.endsWith('/api/v1/security/login')) {
-                    return Promise.resolve({
-                        ok: true,
-                        json: () => Promise.resolve({ access_token: 'test-jwt-token' }),
-                    })
-                }
-                if (url.endsWith('/api/v1/security/csrf_token/')) {
-                    return Promise.resolve({
-                        ok: true,
-                        json: () => Promise.resolve({ result: 'test-csrf-token' }),
-                    })
-                }
-                if (url.endsWith('/api/v1/dashboard/import/')) {
-                    expect(init?.method).toBe('POST')
-                    expect((init?.headers as Record<string, string>)?.Authorization).toBe(
-                        'Bearer test-jwt-token',
-                    )
-                    expect((init?.headers as Record<string, string>)?.['X-CSRFToken']).toBe(
-                        'test-csrf-token',
-                    )
-                    expect(init?.body).toBeInstanceOf(FormData)
-                    return Promise.resolve({
-                        ok: true,
-                        json: () => Promise.resolve({ message: 'OK' }),
-                    })
-                }
-                return Promise.reject(new Error(`Unexpected URL: ${url}`))
-            })
-
-            global.fetch = fetchMock
-
-            const res = await importDashboard(initialZip, {
-                datasetId: '1584f547-d122-4a19-98e1-21905f6447fd',
-            })
-
-            expect(res.ok).toBe(true)
-            expect(res.dashboardTitle).toBe('Verkehrsfluss')
-            expect(res.dashboardUrl).toBe('http://localhost:8098/superset/dashboard/verkehrsfluss-live/')
-        })
-
-        it('handles import errors gracefully', async () => {
-            process.env.SUPERSET_API_URL = 'http://localhost:8098'
-            const initialZip = createZip({
-                'dashboards/test.yaml': 'dashboard_title: Test\nslug: test\n',
-            })
-
-            global.fetch = vi.fn().mockImplementation((url: string) => {
-                if (url.endsWith('/api/v1/security/login')) {
-                    return Promise.resolve({
-                        ok: true,
-                        json: () => Promise.resolve({ access_token: 'test-jwt-token' }),
-                    })
-                }
-                if (url.endsWith('/api/v1/security/csrf_token/')) {
-                    return Promise.resolve({ ok: false })
-                }
-                if (url.endsWith('/api/v1/dashboard/import/')) {
-                    return Promise.resolve({
-                        ok: false,
-                        status: 400,
-                        statusText: 'Bad Request',
-                        text: () => Promise.resolve('Database already exists with different UUID'),
-                    })
-                }
-                return Promise.reject(new Error(`Unexpected URL: ${url}`))
-            })
-
-            const res = await importDashboard(initialZip)
-            expect(res.ok).toBe(false)
-            expect(res.error).toContain('Database already exists')
+        vi.stubEnv('SUPERSET_TOKEN', 'jwt')
+        expect(supersetConfig()).toMatchObject({
+            apiUrl: 'http://superset:8088',
+            publicUrl: 'http://superset:8088',
+            databaseName: 'PostgreSQL geoserver',
+            token: 'jwt',
         })
     })
+})
 
-    describe('deleteDashboard', () => {
-        it('calls DELETE /api/v1/dashboard/:id', async () => {
-            process.env.SUPERSET_API_URL = 'http://localhost:8098'
+describe('openSession', () => {
+    it('logs in and carries token, CSRF token and session cookie together', async () => {
+        const requests = fakeSuperset()
+        const session = await openSession(config)
 
-            global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-                if (url.endsWith('/api/v1/security/login')) {
-                    return Promise.resolve({
-                        ok: true,
-                        json: () => Promise.resolve({ access_token: 'token' }),
-                    })
-                }
-                if (url.endsWith('/api/v1/dashboard/42')) {
-                    expect(init?.method).toBe('DELETE')
-                    return Promise.resolve({ ok: true, status: 200 })
-                }
-                return Promise.reject(new Error(`Unexpected URL: ${url}`))
-            })
-
-            const res = await deleteDashboard(42)
-            expect(res.ok).toBe(true)
+        expect(session.headers).toMatchObject({
+            Authorization: 'Bearer jwt',
+            'X-CSRFToken': 'csrf',
+            Cookie: 'session=abc',
+            Referer: 'http://superset:8088/',
         })
+        expect(JSON.parse(String(requests[0].init?.body))).toMatchObject({ provider: 'db', username: 'marketplace' })
+    })
+
+    it('skips the login when a token is configured', async () => {
+        const requests = fakeSuperset()
+        await openSession({ ...config, token: 'preset' })
+        expect(requests.map((request) => request.url)).toEqual(['http://superset:8088/api/v1/security/csrf_token/'])
+    })
+})
+
+describe('findDatabaseUuid', () => {
+    it('picks the connection with exactly this name', async () => {
+        fakeSuperset()
+        const session = await openSession(config)
+        expect(await findDatabaseUuid(config, session, 'PostgreSQL geoserver')).toBe(INSTANCE_DATABASE)
+    })
+
+    it('reads the UUID from the detail answer when the list leaves it out', async () => {
+        fakeSuperset({ uuidInList: false })
+        const session = await openSession(config)
+        expect(await findDatabaseUuid(config, session, 'PostgreSQL geoserver')).toBe(INSTANCE_DATABASE)
+    })
+
+    it('says so when no connection has the name', async () => {
+        fakeSuperset()
+        const session = await openSession(config)
+        await expect(findDatabaseUuid(config, session, 'payload_data')).rejects.toThrow(/payload_data/)
+    })
+})
+
+describe('installDashboard', () => {
+    const ids = {
+        installationId: '7f3c2a10-5b6d-4e8f-9a1b-2c3d4e5f6a7b',
+        datasetId: '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d',
+    }
+
+    it('uploads the bound bundle with the session and links to the new dashboard', async () => {
+        const requests = fakeSuperset()
+        const result = await installDashboard(sampleDocument(), ids, config)
+
+        const upload = requests.find((request) => request.url.endsWith('/api/v1/dashboard/import/'))!
+        expect(upload.init?.method).toBe('POST')
+        expect(upload.init?.headers).toMatchObject({ 'X-CSRFToken': 'csrf', Cookie: 'session=abc' })
+
+        const form = upload.init?.body as FormData
+        expect(form.get('overwrite')).toBe('true')
+        const zip = readZip(Buffer.from(await (form.get('formData') as Blob).arrayBuffer()))
+        const dataset = parseYaml(
+            zip['dashboard_export/datasets/PostgreSQL_geoserver/verkehrsmessung.yaml'].toString('utf-8'),
+        ) as Record<string, unknown>
+        expect(dataset.schema).toBe('ds_0a1b2c3d_4e5f_4a6b_8c7d_8e9f0a1b2c3d')
+        expect(dataset.database_uuid).toBe(INSTANCE_DATABASE)
+
+        expect(result.title).toBe('Verkehrszählung Live-Monitoring')
+        expect(result.url).toBe('https://superset.example.org/superset/dashboard/verkehrszaehlung-live-7f3c2a10/')
+    })
+
+    it("passes Superset's own error message on", async () => {
+        fakeSuperset({ importStatus: 422 })
+        await expect(installDashboard(sampleDocument(), ids, config)).rejects.toThrow(
+            'Superset import: 422 Error importing dashboard',
+        )
+    })
+
+    it('refuses a malformed document before it talks to Superset', async () => {
+        const requests = fakeSuperset()
+        await expect(installDashboard({ tool: 'superset', assets: {} }, ids, config)).rejects.toThrow(/files/)
+        expect(requests).toHaveLength(0)
     })
 })

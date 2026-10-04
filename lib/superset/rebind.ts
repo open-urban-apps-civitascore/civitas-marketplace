@@ -1,0 +1,160 @@
+import { createHash } from 'node:crypto'
+
+import type { SupersetDashboardDocument } from '@/lib/superset/bundle'
+
+/**
+ * Makes a packaged dashboard belong to ONE installation before it is imported.
+ *
+ * Superset identifies every object of an import by its UUID, and an import
+ * with overwrite replaces whatever already carries that UUID. A package
+ * imported as exported would therefore point the dashboard of the first
+ * installation at the data of the second. So the dashboard, its charts and
+ * its datasets get UUIDs of their own per installation, and every reference
+ * between them follows (`dataset_uuid`, the chart entries of the layout, the
+ * targets of native filters).
+ *
+ * The database connection is the opposite case. It belongs to the instance,
+ * not to the package: the bundle's database file takes the UUID of the
+ * instance's existing connection, and Superset then reuses that connection
+ * instead of creating one from the package. The package never brings an
+ * address or a password.
+ */
+
+export interface InstallationBinding {
+    installationId: string
+    /** The platform dataset whose data storage the dashboard reads (schema `ds_<id>`). */
+    datasetId: string
+    /** UUID of the instance's Superset connection to the platform's data storage. */
+    databaseUuid: string
+}
+
+export interface BoundDashboard {
+    files: Record<string, Record<string, unknown>>
+    /** The dashboard's UUID in this installation, to find it again on uninstall. */
+    uuid: string
+    title?: string
+    slug?: string
+}
+
+export class DashboardBindingError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'DashboardBindingError'
+    }
+}
+
+/**
+ * The UUID an object of the package gets in one installation.
+ *
+ * Derived, not random: the same installation always gets the same UUID for
+ * the same object, so a retried import replaces what the first attempt
+ * created instead of adding a second dashboard. Different installations, and
+ * different objects of one installation, get different UUIDs.
+ *
+ * Built like a version 5 UUID (RFC 9562): SHA-1 over both inputs, the first
+ * 16 bytes, with the version and variant bits set so that the result is a
+ * standard UUID and not only something shaped like one.
+ */
+export function deriveInstallUuid(installationId: string, originalUuid: string): string {
+    const bytes = createHash('sha1').update(`${installationId}:${originalUuid}`).digest().subarray(0, 16)
+    bytes[6] = (bytes[6] & 0x0f) | 0x50 // version 5: derived from a name by SHA-1
+    bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant: the RFC 9562 layout
+    const hex = bytes.toString('hex')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/** The PostGIS schema the platform's sink writes a dataset into. */
+export function datasetSchema(datasetId: string): string {
+    return `ds_${datasetId.replace(/-/g, '_')}`
+}
+
+/** A URL slug from a title: German umlauts spelled out, everything else reduced to a-z, 0-9 and dashes. */
+function slugFromTitle(title: string): string {
+    return title
+        .toLowerCase()
+        .replace(/ä/g, 'ae')
+        .replace(/ö/g, 'oe')
+        .replace(/ü/g, 'ue')
+        .replace(/ß/g, 'ss')
+        .normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+}
+
+/** Folders of the objects that belong to the package and get new UUIDs per installation. */
+const OWNED_FOLDERS = ['dashboards/', 'charts/', 'datasets/']
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Replaces every string, and every object key, that equals a mapped UUID. Returns a copy. */
+function replaceUuids(value: unknown, replacements: Map<string, string>): unknown {
+    if (typeof value === 'string') return replacements.get(value) ?? value
+    if (Array.isArray(value)) return value.map((item) => replaceUuids(item, replacements))
+    if (isRecord(value)) {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [replacements.get(key) ?? key, replaceUuids(item, replacements)]),
+        )
+    }
+    return value
+}
+
+export function bindToInstallation(
+    document: SupersetDashboardDocument,
+    binding: InstallationBinding,
+): BoundDashboard {
+    const replacements = new Map<string, string>()
+    const databaseFiles = Object.keys(document.files).filter((path) => path.startsWith('databases/'))
+    if (databaseFiles.length > 1) {
+        throw new DashboardBindingError(
+            `the dashboard reads ${databaseFiles.length} databases; a use case dashboard reads only the platform's data storage`,
+        )
+    }
+    for (const [path, file] of Object.entries(document.files)) {
+        const owned = OWNED_FOLDERS.some((folder) => path.startsWith(folder))
+        if (!owned && !path.startsWith('databases/')) continue
+        if (typeof file.uuid !== 'string' || !file.uuid) {
+            throw new DashboardBindingError(`'${path}' has no uuid`)
+        }
+        replacements.set(
+            file.uuid,
+            owned ? deriveInstallUuid(binding.installationId, file.uuid) : binding.databaseUuid,
+        )
+    }
+
+    const schema = datasetSchema(binding.datasetId)
+    // The slug is the second unique key of a dashboard, so it needs the installation too.
+    const slugSuffix = binding.installationId.replace(/[^a-z0-9]/gi, '').slice(0, 8).toLowerCase()
+    const files: Record<string, Record<string, unknown>> = {}
+    let bound: Omit<BoundDashboard, 'files'> | undefined
+
+    for (const [path, file] of Object.entries(document.files)) {
+        const copy = replaceUuids(file, replacements) as Record<string, unknown>
+        if (path.startsWith('datasets/')) {
+            if (typeof copy.sql === 'string' && copy.sql.trim()) {
+                throw new DashboardBindingError(
+                    `'${path}' is a SQL dataset; only a table dataset can follow the installation's schema`,
+                )
+            }
+            copy.schema = schema
+            // Superset 6 records the exporting instance's database name as the
+            // catalog. Left empty, it takes the database of the connection, which
+            // may be named differently on the receiving instance.
+            copy.catalog = null
+        }
+        if (path.startsWith('dashboards/')) {
+            const title = typeof copy.dashboard_title === 'string' ? copy.dashboard_title : undefined
+            // An export without a slug gets one from its title, so the install
+            // result can always link to the dashboard itself.
+            const base = (typeof copy.slug === 'string' && copy.slug) || slugFromTitle(title ?? '') || 'dashboard'
+            copy.slug = `${base}-${slugSuffix}`
+            bound = { uuid: copy.uuid as string, title, slug: copy.slug as string }
+        }
+        files[path] = copy
+    }
+
+    if (!bound) throw new DashboardBindingError('the document holds no dashboard')
+    return { files, ...bound }
+}
