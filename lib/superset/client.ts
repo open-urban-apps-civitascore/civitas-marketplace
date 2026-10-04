@@ -1,5 +1,5 @@
 import { importZip, readDashboardDocument } from '@/lib/superset/bundle'
-import { bindToInstallation } from '@/lib/superset/rebind'
+import { bindToInstallation, type InstallationBinding } from '@/lib/superset/rebind'
 
 /**
  * Client for the Superset REST API: the session every write needs, the lookup
@@ -158,8 +158,12 @@ export async function findDatabaseUuid(
     return uuid
 }
 
-/** Superset answers errors as `{ message }` or `{ errors: [{ message }] }`; anything else is cut short. */
-function errorText(body: string): string {
+/**
+ * Superset's reason for a failed request. It answers errors as `{ message }`
+ * or `{ errors: [{ message }] }`. A crash comes as its HTML error page, which
+ * names no reason: that gives undefined here rather than a line of markup.
+ */
+function errorText(body: string): string | undefined {
     try {
         const parsed = JSON.parse(body) as { message?: unknown; errors?: { message?: unknown }[] }
         const messages = [
@@ -170,7 +174,9 @@ function errorText(body: string): string {
     } catch {
         // Not JSON: fall through to the raw text.
     }
-    return body.slice(0, 300)
+    const text = body.trim()
+    if (!text || text.startsWith('<')) return undefined
+    return text.slice(0, 300)
 }
 
 export async function uploadDashboard(
@@ -190,7 +196,9 @@ export async function uploadDashboard(
     })
     if (!response.ok) {
         const body = await response.text().catch(() => '')
-        throw new Error(`Superset import: ${response.status} ${errorText(body) || response.statusText}`)
+        // Shown in the install summary, so the fallback says where the reason is.
+        const reason = errorText(body) ?? '(ohne Begründung, der Traceback steht im Superset-Log)'
+        throw new Error(`Superset import: ${response.status} ${reason}`)
     }
 }
 
@@ -207,13 +215,13 @@ export interface InstalledDashboard {
  */
 export async function installDashboard(
     content: unknown,
-    ids: { installationId: string; datasetId: string },
+    binding: Omit<InstallationBinding, 'databaseUuid'>,
     config: SupersetConfig,
 ): Promise<InstalledDashboard> {
     const document = readDashboardDocument(content)
     const session = await openSession(config)
     const databaseUuid = await findDatabaseUuid(config, session, config.databaseName)
-    const bound = bindToInstallation(document, { ...ids, databaseUuid })
+    const bound = bindToInstallation(document, { ...binding, databaseUuid })
     await uploadDashboard(config, session, importZip(bound.files))
     return { uuid: bound.uuid, title: bound.title, url: dashboardUrl(config.publicUrl, bound.slug) }
 }

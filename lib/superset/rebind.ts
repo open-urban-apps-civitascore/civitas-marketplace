@@ -26,6 +26,8 @@ export interface InstallationBinding {
     datasetId: string
     /** UUID of the instance's Superset connection to the platform's data storage. */
     databaseUuid: string
+    /** Markdown for a text tile across the top of the dashboard, if any. */
+    notice?: string
 }
 
 /** Where a packaged dashboard lives in one installation. */
@@ -120,6 +122,40 @@ export function installedDashboardIdentity(
     }
 }
 
+/** Ids of the notice tile. Fixed, so a retried import replaces the tile instead of adding a second. */
+const NOTICE_ROW = 'ROW-marketplace-notice'
+const NOTICE_MARKDOWN = 'MARKDOWN-marketplace-notice'
+
+/**
+ * The dashboard layout with a text tile across its full width on top.
+ * Superset keeps a layout as a tree under GRID_ID; the tile is a MARKDOWN
+ * element in a ROW of its own, placed first (12 columns wide, height in
+ * 8 px grid units). A layout without a grid is left as it is.
+ */
+function withNotice(position: unknown, notice: string): unknown {
+    if (!isRecord(position) || !isRecord(position.GRID_ID)) return position
+    const grid = position.GRID_ID
+    const rows = Array.isArray(grid.children) ? grid.children.filter((id) => id !== NOTICE_ROW) : []
+    return {
+        ...position,
+        GRID_ID: { ...grid, children: [NOTICE_ROW, ...rows] },
+        [NOTICE_ROW]: {
+            type: 'ROW',
+            id: NOTICE_ROW,
+            children: [NOTICE_MARKDOWN],
+            parents: ['ROOT_ID', 'GRID_ID'],
+            meta: { background: 'BACKGROUND_TRANSPARENT' },
+        },
+        [NOTICE_MARKDOWN]: {
+            type: 'MARKDOWN',
+            id: NOTICE_MARKDOWN,
+            children: [],
+            parents: ['ROOT_ID', 'GRID_ID', NOTICE_ROW],
+            meta: { width: 12, height: 16, code: notice },
+        },
+    }
+}
+
 /** Folders of the objects that belong to the package and get new UUIDs per installation. */
 const OWNED_FOLDERS = ['dashboards/', 'charts/', 'datasets/']
 
@@ -180,7 +216,10 @@ export function bindToInstallation(
             // may be named differently on the receiving instance.
             copy.catalog = null
         }
-        if (path.startsWith('dashboards/')) copy.slug = identity.slug
+        if (path.startsWith('dashboards/')) {
+            copy.slug = identity.slug
+            if (binding.notice) copy.position = withNotice(copy.position, binding.notice)
+        }
         files[path] = copy
     }
 

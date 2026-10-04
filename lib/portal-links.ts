@@ -15,3 +15,8 @@ export function portalUrl(): string {
 export function datapoolHref(datapoolId: string): string {
     return `${portalUrl()}/datapools/${encodeURIComponent(datapoolId)}`
 }
+
+/** The portal page of one dataset, where it is released. */
+export function datasetHref(dataSetId: string): string {
+    return `${portalUrl()}/datasets/${encodeURIComponent(dataSetId)}`
+}
