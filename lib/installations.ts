@@ -1,3 +1,4 @@
+import type { InstallationReceipt } from '@/lib/install-payload'
 import {
     activeInstallationOf,
     partitionInstallations,
@@ -64,6 +65,29 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
         const row = activeInstallationOf(list.rows, entryId)
         if (!row) return null
         return { id: row.id, ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}) }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * One installation as the platform recorded it (`GET /v1/installations/{id}`):
+ * its dataset and one line per artifact, which is what names a demo stream
+ * after the portal's artifacts. Null when it cannot be read: the streams then
+ * take their names from the package, which is worse but never a reason to
+ * leave demo data switched off.
+ */
+export async function fetchInstallation(installationId: string): Promise<InstallationReceipt | null> {
+    // Outside the try block, for the reason fetchActiveInstallation gives.
+    const accessToken = await getAccessToken()
+
+    try {
+        const res = await fetch(
+            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${encodeURIComponent(installationId)}`,
+            { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' },
+        )
+        if (!res.ok) return null
+        return (await res.json()) as InstallationReceipt
     } catch {
         return null
     }

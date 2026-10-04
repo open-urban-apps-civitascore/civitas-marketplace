@@ -128,7 +128,7 @@ export async function installEntry(
     // view separately; SQL has no such second setting.
     const demoSegment =
         dataSourceMode === 'demo' && !isDataStructureEntry(effectiveEntry)
-            ? await activateDemoStreams(effectiveEntry, receipt.id)
+            ? await activateDemoStreams(effectiveEntry, receipt)
             : ''
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
@@ -189,14 +189,15 @@ function withInstanceAddresses(
  * outcome — good or bad — comes back as a summary segment: a demo activation
  * that fails must say so in the install feedback, and one that silently
  * skipped streams would be finding-3 all over again.
+ *
+ * The receipt is the platform's record of what it just created; the streams
+ * take their names and origin from it.
  */
-async function activateDemoStreams(
-    entry: UseCaseEntry,
-    installationId: string | undefined,
-): Promise<string> {
+async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationReceipt): Promise<string> {
     if (!isSimulatorConfigured()) {
         return ' · Demo-Daten NICHT aktiviert: SIMULATOR_API_URL ist nicht konfiguriert'
     }
+    const installationId = receipt.id
     if (!installationId) {
         return ' · Demo-Daten NICHT aktiviert: Antwort trägt keine Installations-ID'
     }
@@ -204,7 +205,7 @@ async function activateDemoStreams(
         // SIMULATOR_BROKER_URL overrides the package's broker for the simulator
         // only — needed when the simulator runs outside the docker network and
         // the container-name URL does not resolve for it.
-        const planned = planSimulations(entry, installationId, process.env.SIMULATOR_BROKER_URL)
+        const planned = planSimulations(entry, installationId, process.env.SIMULATOR_BROKER_URL, receipt)
         if (planned.length === 0) {
             return ' · Demo-Daten: Paket bündelt keine Szenarien'
         }

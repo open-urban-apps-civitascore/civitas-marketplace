@@ -9,8 +9,10 @@ import {
     resolveDsnOverride,
 } from '@/lib/install-payload'
 import { mockPackages } from '@/lib/mock-catalog'
+import type { InstallationReceipt } from '@/lib/install-payload'
 import {
     planSimulations,
+    readableStreamName,
     registerPlanned,
     simulationIdPrefix,
     streamsOfInstallation,
@@ -121,6 +123,122 @@ describe('planSimulations', () => {
     })
 })
 
+describe('stream names and origin', () => {
+    const entries = useCaseEntries()
+    const traffic = () => entries.find((entry) => entry.manifest.id.includes('verkehr'))!
+    const jungbaum = () => entries.find((entry) => entry.manifest.id.includes('jungbaum'))!
+
+    /** The platform's record of an install: every member copied under a name of its own. */
+    function receiptFor(entry: UseCaseEntry, dataSetName: string): InstallationReceipt {
+        return {
+            id: INSTALLATION_ID,
+            packageVersion: entry.manifest.version,
+            dataSetId: 'ds-0001',
+            dataSetName,
+            artifacts: [
+                { artifactType: 'DATA_SET', name: dataSetName, urn: 'urn:core:standard:musterhausen:dataset:x:set:ds0001' },
+                ...entry.bundle.dataSources.map((source, index) => ({
+                    artifactType: 'DATA_SOURCE',
+                    name: `${String(source.document.title)} (Instanz)`,
+                    urn: `urn:core:standard:musterhausen:datasource:x:quelle${index}:inst`,
+                    shellId: `src-${index}`,
+                    origin: String(source.document.id),
+                })),
+                ...entry.bundle.dataStructures.map((structure, index) => ({
+                    artifactType: 'DATA_STRUCTURE',
+                    name: structure.name,
+                    urn: `urn:core:standard:musterhausen:datastructure:x:struktur${index}:inst`,
+                    shellId: `struct-${index}`,
+                    origin: String(structure.model.$id),
+                })),
+            ],
+        }
+    }
+
+    it('names a stream after its dataset, then its readable stream name', () => {
+        const entry = traffic()
+        const [first] = planSimulations(entry, INSTALLATION_ID, undefined, receiptFor(entry, 'Verkehrszählung Musterhausen'))
+        expect(first.input.name).toBe('Verkehrszählung Musterhausen · Zaehlstelle Promenade')
+    })
+
+    it('ties every stream to the installed copies it feeds, found by the URN they carried in the package', () => {
+        const entry = traffic()
+        const planned = planSimulations(entry, INSTALLATION_ID, undefined, receiptFor(entry, 'Verkehrszählung Musterhausen'))
+        for (const { input } of planned) {
+            const origin = input.origin!
+            expect(origin.installationId).toBe(INSTALLATION_ID)
+            expect(origin.useCase).toEqual({
+                id: entry.manifest.id,
+                name: entry.manifest.displayName,
+                version: entry.manifest.version,
+            })
+            expect(origin.dataSet).toEqual({
+                name: 'Verkehrszählung Musterhausen',
+                urn: 'urn:core:standard:musterhausen:dataset:x:set:ds0001',
+                id: 'ds-0001',
+            })
+            // The installed copy's name and ids, not the package's: that is what the portal shows.
+            expect(origin.dataSource).toMatchObject({ name: 'Zählstellen-Feed (Instanz)', id: expect.stringMatching(/^src-/) })
+            expect(origin.dataStructure?.urn).toMatch(/:inst$/)
+            // A simulator UI from before the origin finds the structure by its name in the prose.
+            expect(input.description).toContain(origin.dataStructure!.name)
+        }
+        expect(planned.map((p) => p.input.origin?.stream)).toEqual(
+            planned.map((p) => p.id.slice(simulationIdPrefix(INSTALLATION_ID).length)),
+        )
+    })
+
+    it('prefers the label the package author wrote, for streams and for a table', () => {
+        const entry = jungbaum()
+        const names = planSimulations(
+            entry,
+            INSTALLATION_ID,
+            undefined,
+            receiptFor(entry, 'Jungbaumbewässerung Musterbach'),
+        ).map((p) => p.input.name)
+        expect(names).toContain('Jungbaumbewässerung Musterbach · Jungbaum KB-001 (trocken)')
+        expect(names).toContain('Jungbaumbewässerung Musterbach · Baumkataster')
+    })
+
+    it('names from the package alone when the platform record could not be read', () => {
+        const entry = traffic()
+        const [first] = planSimulations(entry, INSTALLATION_ID)
+        expect(first.input.name).toBe(`${entry.manifest.displayName} · Zaehlstelle Promenade`)
+        expect(first.input.origin?.dataSet).toBeUndefined()
+        // The bundle's title and no ids: the copy's ids are unknown without the record.
+        expect(first.input.origin?.dataSource).toEqual({ name: 'Zählstellen-Feed' })
+    })
+
+    it("stays inside the simulator's limits, which would otherwise refuse the whole registration", () => {
+        const entry = traffic()
+        const receipt = receiptFor(entry, 'D'.repeat(250))
+        receipt.artifacts = receipt.artifacts!.map((line) =>
+            line.artifactType === 'DATA_SOURCE' ? { ...line, urn: `urn:${'x'.repeat(600)}` } : line,
+        )
+        for (const { input } of planSimulations(entry, INSTALLATION_ID, undefined, receipt)) {
+            expect(input.name!.length).toBeLessThanOrEqual(200)
+            expect(input.origin?.dataSet?.name.length).toBeLessThanOrEqual(200)
+            // Left out rather than cut: half a URN would match nothing, or the wrong thing.
+            expect(input.origin?.dataSource?.urn).toBeUndefined()
+            expect(input.origin?.dataSource?.id).toBeDefined()
+        }
+    })
+
+    it('keeps the id a key: the record changes names, never ids', () => {
+        const entry = traffic()
+        expect(
+            planSimulations(entry, INSTALLATION_ID, undefined, receiptFor(entry, 'Anders benannt')).map((p) => p.id),
+        ).toEqual(planSimulations(entry, INSTALLATION_ID).map((p) => p.id))
+    })
+})
+
+describe('readableStreamName', () => {
+    it('turns a slug into words, without guessing umlauts', () => {
+        expect(readableStreamName('zaehlstelle-promenade')).toBe('Zaehlstelle Promenade')
+        expect(readableStreamName('bf_001')).toBe('Bf 001')
+    })
+})
+
 describe('streamsOfInstallation', () => {
     const status = (id: string): SimulationStatus => ({
         id,
@@ -205,6 +323,21 @@ describe('assembly topic validation', () => {
                 return content
             }),
         ).toThrow(/topicBase/)
+    })
+
+    it('rejects a stream label too long to fit the simulator name', () => {
+        const pkg = mockPackages.find((candidate) => candidate.manifest.id.includes('jungbaum'))!
+        expect(() =>
+            assembleCatalogEntry(pkg.manifest, (file) => {
+                const content = pkg.files[file]
+                if (!content) throw new Error(`fixture misses '${file}'`)
+                if (file === 'bodenfeuchte.simulation.json') {
+                    const streams = content.streams as Record<string, unknown>[]
+                    return { ...content, streams: [{ ...streams[0], label: 'x'.repeat(81) }, ...streams.slice(1)] }
+                }
+                return content
+            }),
+        ).toThrow(/label/)
     })
 })
 

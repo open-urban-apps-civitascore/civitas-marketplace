@@ -30,7 +30,9 @@ describe('a package that bundles both a SQL and an MQTT scenario', () => {
         const sql = simulations.filter(isSqlSimulation)
         expect(sql).toHaveLength(1)
         expect(sql[0].table.primaryKey).toBe('baum_id')
-        expect(sql[0].maxRows).toBeGreaterThan(sql[0].seedRows ?? 0)
+        // A cadastre exists whole: filled to the limit at once, not row by row.
+        expect(sql[0].cadence).toBe('fillToLimit')
+        expect(sql[0].maxRows).toBe(25)
     })
 
     it('registers the table once and every MQTT stream separately', () => {
@@ -46,7 +48,9 @@ describe('a package that bundles both a SQL and an MQTT scenario', () => {
         // Where the platform READS, so the generator can refuse to fill a table
         // in a different database than the one anybody queries (D14).
         expect(transport.readDsn).toContain('fachverfahren')
-        expect(sql[0].input.scenario.maxRows).toBe(40)
+        expect(sql[0].input.scenario.maxRows).toBe(25)
+        // Forwarded, or the generator falls back to a row every ten seconds.
+        expect(sql[0].input.scenario.cadence).toBe('fillToLimit')
     })
 
     it('refuses a field that is not a declared column', () => {

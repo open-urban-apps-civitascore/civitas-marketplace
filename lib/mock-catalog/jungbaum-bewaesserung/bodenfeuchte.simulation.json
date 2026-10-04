@@ -6,6 +6,7 @@
   "streams": [
     {
       "name": "bf-001",
+      "label": "Jungbaum KB-001 (trocken)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -56,6 +57,7 @@
     },
     {
       "name": "bf-002",
+      "label": "Jungbaum KB-002 (trocken)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -106,6 +108,7 @@
     },
     {
       "name": "bf-003",
+      "label": "Jungbaum KB-003 (trocken)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -156,6 +159,7 @@
     },
     {
       "name": "bf-004",
+      "label": "Jungbaum KB-004 (unauffällig)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -206,6 +210,7 @@
     },
     {
       "name": "bf-005",
+      "label": "Jungbaum KB-005 (unauffällig)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -256,6 +261,7 @@
     },
     {
       "name": "bf-006",
+      "label": "Jungbaum KB-006 (unauffällig)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -306,6 +312,7 @@
     },
     {
       "name": "bf-007",
+      "label": "Jungbaum KB-007 (frisch gegossen)",
       "fields": {
         "sensorId": {
           "kind": "constant",
@@ -356,6 +363,7 @@
     },
     {
       "name": "bf-008",
+      "label": "Jungbaum KB-008 (frisch gegossen)",
       "fields": {
         "sensorId": {
           "kind": "constant",

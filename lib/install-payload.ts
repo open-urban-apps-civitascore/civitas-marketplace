@@ -538,14 +538,29 @@ export function buildInstallationRequest(
     return { ...(datapoolId ? { datapoolId } : {}), package: { ...header, members } }
 }
 
-/** What `POST /v1/installations` answers: the installation and one line per artifact it made. */
+/**
+ * What `POST /v1/installations` answers, and `GET /v1/installations/{id}` returns later: the
+ * installation and one line per artifact it made.
+ */
 export interface InstallationReceipt {
     id?: string
     packageId?: string
     packageVersion?: string
     dataSetId?: string
     dataSetName?: string
-    artifacts?: { artifactType?: string; name?: string; urn?: string; action?: string }[]
+    artifacts?: InstalledArtifactLine[]
+}
+
+export interface InstalledArtifactLine {
+    artifactType?: string
+    name?: string
+    /** Logical CORE URN of the copy on this instance. */
+    urn?: string
+    /** The portal's id for the copy, where the artifact type has one. */
+    shellId?: string
+    /** The URN the artifact carried in the package: the link back to the bundle member. */
+    origin?: string
+    action?: string
 }
 
 const SUMMARY_KINDS: [artifactType: string, label: string][] = [

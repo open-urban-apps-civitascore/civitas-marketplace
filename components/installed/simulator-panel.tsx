@@ -108,7 +108,9 @@ export function SimulatorPanel({
                             key={status.id}
                             className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card px-3 py-2"
                         >
-                            <span className="text-sm font-medium text-foreground">{streamName}</span>
+                            <span className="text-sm font-medium text-foreground" title={streamName}>
+                                {status.name ?? streamName}
+                            </span>
                             <span
                                 className={
                                     status.enabled

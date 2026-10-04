@@ -193,6 +193,11 @@ export type GeneratorSpec =
 export interface SimulationStream {
     /** Stream slug, unique within the simulation; part of the simulator id. */
     name: string
+    /**
+     * What a person reads in the simulator, e.g. "Zählstelle Promenade". Absent
+     * means the slug made readable, which cannot restore an umlaut.
+     */
+    label?: string
     fields: Record<string, GeneratorSpec>
 }
 
@@ -251,6 +256,14 @@ export interface BundledSqlSimulation {
     /** Column types and the UPSERT key; the key must be among the columns. */
     table: { columns: Record<string, string>; primaryKey?: string }
     fields: Record<string, GeneratorSpec>
+    /**
+     * `fillToLimit`: the table is filled to `maxRows` at start and nothing
+     * follows — master data, such as a cadastre, exists whole rather than
+     * growing. Absent means `interval`: `seedRows`, then `insertsPerTick`.
+     */
+    cadence?: 'interval' | 'fillToLimit'
+    /** What a person reads in the simulator, e.g. "Baumkataster". Absent: the datasource title. */
+    label?: string
     /** Written once at start-up, so the first read is never of an empty table. */
     seedRows?: number
     insertsPerTick?: number

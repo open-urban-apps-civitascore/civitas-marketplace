@@ -41,6 +41,16 @@ function requireString(record: Record<string, unknown>, field: string, where: st
     return value
 }
 
+/** A label ends up in the simulator's name for the stream, which holds 200 characters. */
+const LABEL_MAX = 80
+
+function requireOptionalLabel(value: unknown, where: string): void {
+    if (value === undefined) return
+    if (typeof value !== 'string' || value.trim().length === 0 || value.length > LABEL_MAX) {
+        throw new CatalogIntegrityError(`${where}: label must be text of 1 to ${LABEL_MAX} characters`)
+    }
+}
+
 function parseMembers(value: unknown, where: string): PackageMember[] {
     if (value === undefined) return []
     if (!Array.isArray(value)) {
@@ -364,10 +374,14 @@ export function assembleCatalogEntry(
                         `${where} needs maxRows — every pipeline run re-reads the whole table`,
                     )
                 }
+                requireOptionalLabel(document.label, where)
             } else {
                 requireString(document, 'topicBase', where)
                 if (!Array.isArray(document.streams) || document.streams.length === 0) {
                     throw new CatalogIntegrityError(`${where} needs a non-empty streams array`)
+                }
+                for (const stream of document.streams) {
+                    if (isRecord(stream)) requireOptionalLabel(stream.label, `${where}, stream '${String(stream.name)}'`)
                 }
             }
             const simulation = document as unknown as BundledSimulation

@@ -6,6 +6,7 @@ import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry } from '@/lib/catalog/types'
 import { applyDeclaredDsnOverride, resolveDsnOverride } from '@/lib/install-payload'
+import { fetchInstallation } from '@/lib/installations'
 import {
     isSimulatorConfigured,
     listSimulations,
@@ -139,12 +140,21 @@ export async function reactivateDemoStreams(
           }
         : entry
 
+    // The platform's record names the streams as the install did. Unreadable,
+    // the names come from the package rather than the reactivation failing.
+    const installation = await fetchInstallation(installationId)
+
     let planned
     try {
         // Same broker resolution as the install path: the package's datasource
         // URL, overridden by SIMULATOR_BROKER_URL when the simulator lives
         // outside the docker network.
-        planned = planSimulations(effectiveEntry, installationId, process.env.SIMULATOR_BROKER_URL)
+        planned = planSimulations(
+            effectiveEntry,
+            installationId,
+            process.env.SIMULATOR_BROKER_URL,
+            installation ?? undefined,
+        )
     } catch (error) {
         return { status: 'error', detail: error instanceof Error ? error.message : String(error) }
     }

@@ -39,6 +39,7 @@ export interface SampleScenario {
     intervalSeconds?: number
     fields: Record<string, GeneratorSpec>
     table?: { columns: Record<string, string>; primaryKey?: string }
+    cadence?: 'interval' | 'fillToLimit'
     seedRows?: number
     insertsPerTick?: number
     maxRows?: number
@@ -60,8 +61,36 @@ export async function fetchSample(scenario: SampleScenario, count = 5): Promise<
     return body.records ?? []
 }
 
+/** A portal artifact: the name the portal shows, and the ids that find it. */
+export interface ArtifactRef {
+    name: string
+    /** Logical CORE URN of the installed copy. */
+    urn?: string
+    /** The portal's own id (the artifact's shell). */
+    id?: string
+}
+
+/**
+ * What a stream belongs to on the platform, so a person can find it next to
+ * the portal's artifacts and the simulator's UI can match it by id. A snapshot:
+ * every registration replaces it.
+ */
+export interface SimulationOrigin {
+    installationId?: string
+    useCase?: { id: string; name: string; version?: string }
+    dataSet?: ArtifactRef
+    dataSource?: ArtifactRef
+    dataStructure?: ArtifactRef
+    /** The stream's name in the package. */
+    stream?: string
+}
+
 /** Wire shape of `PUT /simulations/:id` — the simulator's `simulationInputSchema`. */
 export interface SimulationInput {
+    /** What a person reads; the id stays the technical key. */
+    name?: string
+    description?: string
+    origin?: SimulationOrigin
     transport:
         | { kind: 'mqtt'; url: string; topic: string }
         | { kind: 'sql'; table: string; readDsn?: string }
@@ -134,6 +163,9 @@ export async function listSimulationIds(): Promise<string[]> {
  */
 export interface SimulationStatus {
     id: string
+    /** What the registration named it; absent from simulators older than the names. */
+    name?: string | null
+    origin?: SimulationOrigin | null
     enabled: boolean
     topic: string
     url: string
