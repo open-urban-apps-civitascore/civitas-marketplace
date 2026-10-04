@@ -5,6 +5,7 @@ import {
     datasetSchema,
     DashboardBindingError,
     deriveInstallUuid,
+    installedDashboardIdentity,
 } from '@/lib/superset/rebind'
 
 import { CHART_UUID, DASHBOARD_UUID, DATABASE_UUID, DATASET_UUID, sampleDocument } from './fixtures'
@@ -100,6 +101,11 @@ describe('bindToInstallation', () => {
         expect(result.uuid).toBe(result.files[DASHBOARD].uuid)
     })
 
+    it('names the same dashboard a page computes without importing', () => {
+        const { uuid, title, slug } = bound()
+        expect(installedDashboardIdentity(sampleDocument(), binding.installationId)).toEqual({ uuid, title, slug })
+    })
+
     it('leaves the package document untouched', () => {
         const document = sampleDocument()
         bindToInstallation(document, binding)
@@ -118,6 +124,13 @@ describe('bindToInstallation', () => {
         const document = sampleDocument()
         document.files[DATASET].sql = 'SELECT * FROM ds_3529ec95_f50a_49fe_99e6_e6a634ca8020.verkehrsmessung'
         expect(() => bindToInstallation(document, binding)).toThrow(DashboardBindingError)
+    })
+
+    it('spells out accents in a slug derived from the title', () => {
+        const document = sampleDocument()
+        document.files[DASHBOARD].slug = null
+        document.files[DASHBOARD].dashboard_title = 'Café-Übersicht'
+        expect(bindToInstallation(document, binding).slug).toBe('cafe-uebersicht-7f3c2a10')
     })
 
     it('refuses a dashboard that reads more than one database', () => {

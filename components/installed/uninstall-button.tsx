@@ -30,16 +30,26 @@ function feedbackText(result: UninstallResult): string {
  * in reverse touch order, keeping artifacts other active installations still
  * reference. Released/provisioned datasets are refused by the backend with an
  * actionable message — the button shows it verbatim.
+ *
+ * `size`: 'sm' in the header of an installation card, 'md' next to the other
+ * buttons of a use case's detail page.
  */
-export function UninstallButton({ installationId }: { installationId: string }) {
+export function UninstallButton({
+    installationId,
+    size = 'sm',
+}: {
+    installationId: string
+    size?: 'sm' | 'md'
+}) {
     const [result, formAction, pending] = useActionState(uninstallInstallation, null)
 
     if (result?.status === 'uninstalled') {
         return <p className="text-xs text-success">{feedbackText(result)}</p>
     }
 
+    const iconClass = size === 'md' ? 'size-4' : 'size-3.5'
     return (
-        <div className="flex flex-col items-end gap-1">
+        <div className={`flex flex-col gap-1 ${size === 'md' ? 'items-start' : 'items-end'}`}>
             <form
                 action={formAction}
                 onSubmit={(event) => {
@@ -53,12 +63,12 @@ export function UninstallButton({ installationId }: { installationId: string }) 
                 <button
                     type="submit"
                     disabled={pending}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-error/40 px-2.5 py-1 text-xs font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:opacity-50"
+                    className={`inline-flex items-center gap-1.5 rounded-md border border-error/40 font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:opacity-50 ${size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs'}`}
                 >
                     {pending ? (
-                        <Loader2 className="size-3.5 animate-spin" />
+                        <Loader2 className={`${iconClass} animate-spin`} />
                     ) : (
-                        <Trash2 className="size-3.5" />
+                        <Trash2 className={iconClass} />
                     )}
                     {pending ? 'Deinstalliere …' : 'Deinstallieren'}
                 </button>
