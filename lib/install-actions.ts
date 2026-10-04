@@ -18,6 +18,8 @@ import {
     type InstallationReceipt,
     type InstallationRequest,
 } from '@/lib/install-payload'
+import { fetchInstalledDashboards } from '@/lib/installed-dashboards'
+import { fetchInstallationFacts, type InstallationFacts } from '@/lib/installations'
 import { datasetHref } from '@/lib/portal-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import {
@@ -27,7 +29,13 @@ import {
     registerSimulation,
 } from '@/lib/simulator/client'
 import { planSimulations, registerPlanned, simulationIdPrefix } from '@/lib/simulator/registration'
-import { installDashboard, missingSupersetSettings, supersetConfig } from '@/lib/superset/client'
+import {
+    installDashboard,
+    missingSupersetSettings,
+    removeInstallationDashboards,
+    supersetConfig,
+    type SupersetConfig,
+} from '@/lib/superset/client'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
@@ -239,8 +247,7 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
  * one that arrived must say where.
  */
 async function activateDashboards(entry: UseCaseEntry, receipt: InstallationReceipt): Promise<string> {
-    const dashboards = entry.bundle.dashboards ?? []
-    if (dashboards.length === 0) return ''
+    if ((entry.bundle.dashboards ?? []).length === 0) return ''
     const config = supersetConfig()
     if (!config) {
         return ` · Dashboard NICHT eingespielt: ${missingSupersetSettings().join(', ')} nicht konfiguriert`
@@ -249,25 +256,107 @@ async function activateDashboards(entry: UseCaseEntry, receipt: InstallationRece
     if (!installationId || !dataSetId) {
         return ' · Dashboard NICHT eingespielt: Antwort trägt keine Installations- oder Datensatz-ID'
     }
-    const notice = releaseNotice(receipt.dataSetName ?? entry.manifest.displayName, dataSetId)
-    const segments: string[] = []
-    for (const dashboard of dashboards) {
+    const outcomes = await importDashboards(
+        entry,
+        { installationId, dataSetId, dataSetName: receipt.dataSetName ?? entry.manifest.displayName },
+        config,
+    )
+    // The install leaves the dataset a draft, so the hint always applies here.
+    return outcomes
+        .map(({ ok, text }) => ` · ${text}${ok ? ' (zeigt Daten nach der Freigabe im Portal)' : ''}`)
+        .join('')
+}
+
+interface DashboardTarget {
+    installationId: string
+    dataSetId: string
+    dataSetName: string
+}
+
+/** Imports every dashboard of the entry for one installation: one outcome line each. */
+async function importDashboards(
+    entry: UseCaseEntry,
+    target: DashboardTarget,
+    config: SupersetConfig,
+): Promise<{ ok: boolean; text: string }[]> {
+    const notice = releaseNotice(target.dataSetName, target.dataSetId)
+    const outcomes: { ok: boolean; text: string }[] = []
+    for (const dashboard of entry.bundle.dashboards ?? []) {
         try {
             const installed = await installDashboard(
                 dashboard.content,
-                { installationId, datasetId: dataSetId, notice },
+                { installationId: target.installationId, datasetId: target.dataSetId, notice },
                 config,
             )
-            // The install leaves the dataset a draft, so the hint always applies here.
-            segments.push(
-                ` · Dashboard „${installed.title ?? dashboard.file}“: ${installed.url} (zeigt Daten nach der Freigabe im Portal)`,
-            )
+            outcomes.push({ ok: true, text: `Dashboard „${installed.title ?? dashboard.file}“: ${installed.url}` })
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error)
-            segments.push(` · Dashboard ${dashboard.file} NICHT eingespielt: ${reason}`)
+            outcomes.push({ ok: false, text: `Dashboard ${dashboard.file} NICHT eingespielt: ${reason}` })
         }
     }
-    return segments.join('')
+    return outcomes
+}
+
+export interface ReimportResult {
+    status: 'imported' | 'error'
+    detail: string
+}
+
+/**
+ * Imports the dashboards of an existing installation again: after an import
+ * that failed at install time, for an installation older than the Superset
+ * configuration, or after a dashboard was deleted in Superset. The
+ * installation and its release stay untouched. The import binds to the same
+ * derived UUIDs and slug, so it creates the dashboard the page links to, or
+ * replaces it with the package's version.
+ */
+export async function reimportDashboards(
+    _prev: ReimportResult | null,
+    formData: FormData,
+): Promise<ReimportResult> {
+    await requireSession()
+
+    const installationId = formData.get('installationId')
+    if (typeof installationId !== 'string' || installationId.length === 0) {
+        return { status: 'error', detail: 'installationId fehlt' }
+    }
+    // Package and dataset come from the platform's record, read with the
+    // user's token, never from the form.
+    const installation = await fetchInstallationFacts(installationId, await getAccessToken())
+    if (!installation?.active || !installation.packageId || !installation.dataSetId) {
+        return { status: 'error', detail: 'Keine aktive Installation mit Datensatz gefunden.' }
+    }
+    const config = supersetConfig()
+    if (!config) {
+        return { status: 'error', detail: `${missingSupersetSettings().join(', ')} nicht konfiguriert` }
+    }
+
+    let entry: CatalogEntry | undefined
+    try {
+        entry = await resolveCatalogEntry(installation.packageId)
+    } catch (error) {
+        return {
+            status: 'error',
+            detail: `Paket-Quelle nicht verfügbar: ${error instanceof Error ? error.message : String(error)}`,
+        }
+    }
+    if (!entry || isDataStructureEntry(entry) || (entry.bundle.dashboards ?? []).length === 0) {
+        return { status: 'error', detail: 'Das Paket bringt kein Dashboard mit.' }
+    }
+
+    const outcomes = await importDashboards(
+        entry,
+        {
+            installationId,
+            dataSetId: installation.dataSetId,
+            dataSetName: installation.dataSetName ?? entry.manifest.displayName,
+        },
+        config,
+    )
+    return {
+        status: outcomes.every(({ ok }) => ok) ? 'imported' : 'error',
+        detail: outcomes.map(({ text }) => text).join(' · '),
+    }
 }
 
 /**
@@ -300,6 +389,26 @@ async function removeDemoStreams(installationId: string): Promise<string> {
         return ids.length > 0 ? ` · ${ids.length} Demo-Stream(s) entfernt` : ''
     } catch (error) {
         return ` · Demo-Stream-Aufräumen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`
+    }
+}
+
+/**
+ * Removes what the installation brought into Superset: dashboards, charts and
+ * datasets. Runs after the uninstall committed, like the demo-stream sweep,
+ * and reports instead of failing: the platform side is gone either way.
+ */
+async function removeSupersetObjects(installationId: string, installation: InstallationFacts | null): Promise<string> {
+    const config = supersetConfig()
+    if (!config || !installation?.dataSetId) return ''
+    try {
+        const slugs = installation.packageId
+            ? (await fetchInstalledDashboards(installation.packageId, installationId)).map(({ slug }) => slug)
+            : []
+        const removed = await removeInstallationDashboards(config, { dataSetId: installation.dataSetId, slugs })
+        if (removed.dashboards + removed.charts + removed.datasets === 0) return ''
+        return ` · Superset: ${removed.dashboards} Dashboard(s), ${removed.charts} Chart(s), ${removed.datasets} Dataset(s) entfernt`
+    } catch (error) {
+        return ` · Superset-Aufräumen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`
     }
 }
 
@@ -355,6 +464,9 @@ export async function uninstallInstallation(
     }
 
     const accessToken = await getAccessToken()
+    // Read before the DELETE: the Superset cleanup needs the package (for the
+    // dashboard slug) and the dataset (for the schema).
+    const installation = await fetchInstallationFacts(installationId, accessToken)
     const response = await fetch(
         `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${encodeURIComponent(installationId)}`,
         {
@@ -366,12 +478,13 @@ export async function uninstallInstallation(
 
     if (response.status === 204) {
         const cleanup = await removeDemoStreams(installationId)
+        const supersetCleanup = await removeSupersetObjects(installationId, installation)
         revalidatePath('/installed')
         revalidatePath('/datastructures')
         revalidatePath('/use-cases')
         revalidatePath('/(authenticated)/use-cases/[publisher]/[slug]', 'page')
         revalidatePath('/instance')
-        return { status: 'uninstalled', detail: `Deinstalliert${cleanup}`, httpStatus: 204 }
+        return { status: 'uninstalled', detail: `Deinstalliert${cleanup}${supersetCleanup}`, httpStatus: 204 }
     }
 
     const failure = describeUninstallFailure(

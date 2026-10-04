@@ -22,6 +22,7 @@ describe('fetchInstalledDashboards', () => {
             {
                 title: 'Verkehrszählung',
                 url: 'http://localhost:8098/superset/dashboard/verkehrszaehlung-2833c08c/',
+                slug: 'verkehrszaehlung-2833c08c',
             },
         ])
     })

@@ -16,6 +16,7 @@ import { Chips } from '@/components/catalog/chip'
 import { Code } from '@/components/catalog/code'
 import { CurationTierBadge, curationHint } from '@/components/catalog/curation-tier'
 import { InstallDialog } from '@/components/catalog/install-dialog'
+import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
 import { SamplePreview } from '@/components/catalog/sample-preview'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import { findUseCaseByPath } from '@/lib/catalog/source'
@@ -208,6 +209,11 @@ export default async function UseCaseDetailPage({
                                             </li>
                                         ))}
                                     </ul>
+                                    {installation && (
+                                        <div className="mt-3">
+                                            <ReimportDashboardsButton installationId={installation.id} />
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
