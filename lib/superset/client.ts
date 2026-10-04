@@ -257,8 +257,8 @@ export interface RemovedSupersetObjects {
 /**
  * Removes what an installation brought into Superset: its dashboards, found by
  * the slug the import gave them, the charts on the datasets of its schema, and
- * those datasets. The schema `ds_<dataset id>` belongs to the installation
- * alone, so everything on it goes, and nothing outside it is touched.
+ * those datasets. The dataset's schema (see `datasetSchema`) belongs to the
+ * installation alone, so everything on it goes, and nothing outside it is touched.
  */
 export async function removeInstallationDashboards(
     config: SupersetConfig,

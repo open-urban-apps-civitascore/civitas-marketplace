@@ -22,7 +22,7 @@ import type { SupersetDashboardDocument } from '@/lib/superset/bundle'
 
 export interface InstallationBinding {
     installationId: string
-    /** The platform dataset whose data storage the dashboard reads (schema `ds_<id>`). */
+    /** The platform dataset whose data storage the dashboard reads (its schema: `datasetSchema`). */
     datasetId: string
     /** UUID of the instance's Superset connection to the platform's data storage. */
     databaseUuid: string
@@ -70,9 +70,16 @@ export function deriveInstallUuid(installationId: string, originalUuid: string):
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** The PostGIS schema the platform's sink writes a dataset into. */
+/**
+ * The PostGIS schema the platform's sink writes a dataset into. Follows the
+ * platform's rule in `WorkspaceNames.fromDatasetId` (config-adapter-api),
+ * which also names the dataset's GeoServer workspace: lowercased, every
+ * character other than a-z, 0-9 and _ replaced by _, and `ds_` in front only
+ * when the result starts with a digit, because a workspace name must not.
+ */
 export function datasetSchema(datasetId: string): string {
-    return `ds_${datasetId.replace(/-/g, '_')}`
+    const normalized = datasetId.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+    return /^[0-9]/.test(normalized) ? `ds_${normalized}` : normalized
 }
 
 /** The accents NFKD splits off a letter (U+0300 to U+036F), built without escape sequences in the source. */
