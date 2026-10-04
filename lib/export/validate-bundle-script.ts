@@ -79,9 +79,9 @@ for kind in MEMBER_KINDS:
             continue
         listed_files.append((kind, member["file"]))
 
-# Every listed file must exist; every JSON/ZIP in core-ir/ must be listed (or be
+# Every listed file must exist; every JSON in core-ir/ must be listed (or be
 # the manifest) — an unlisted file would silently not travel.
-on_disk = {name for name in os.listdir(CORE) if name.endswith(".json") or name.endswith(".zip")}
+on_disk = {name for name in os.listdir(CORE) if name.endswith(".json")}
 for kind, name in listed_files:
     if name not in on_disk:
         fail(f"members.{kind} lists '{name}' but {CORE}/{name} does not exist")

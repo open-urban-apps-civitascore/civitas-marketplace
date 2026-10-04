@@ -60,7 +60,7 @@ export function checkPackage(files: Record<string, string>): string[] {
 
     const onDisk = new Set(
         Object.keys(files)
-            .filter((path) => path.startsWith(`${CORE}/`) && (path.endsWith('.json') || path.endsWith('.zip')))
+            .filter((path) => path.startsWith(`${CORE}/`) && path.endsWith('.json'))
             .map((path) => path.slice(CORE.length + 1)),
     )
     for (const { kind, name } of listed) {
