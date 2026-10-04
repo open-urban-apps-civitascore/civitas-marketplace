@@ -8,6 +8,7 @@
     "catalog:serve": "python3 -m http.server 8787 --bind 127.0.0.1 --directory ../civitas-marketplace-catalog",
     "build": "next build",
     "generate-schema": "tsx scripts/generate-schema.ts",
+    "superset:member": "tsx scripts/superset-export-to-member.ts",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"
