@@ -47,6 +47,21 @@ describe('deriveInstallUuid', () => {
     })
 })
 
+// The platform's WorkspaceNames.fromDatasetId, which also names the GeoServer workspace.
+describe('datasetSchema', () => {
+    it('puts ds_ in front of an id that starts with a digit', () => {
+        expect(datasetSchema('3529ec95-f50a-49fe-99e6-e6a634ca8020')).toBe('ds_3529ec95_f50a_49fe_99e6_e6a634ca8020')
+    })
+
+    it('leaves an id that starts with a letter without a prefix', () => {
+        expect(datasetSchema('f5311229-021b-4b76-bb8e-b2251712cb7f')).toBe('f5311229_021b_4b76_bb8e_b2251712cb7f')
+    })
+
+    it('lowercases and replaces every character outside a-z, 0-9 and _', () => {
+        expect(datasetSchema('F5311229-021B.4b76')).toBe('f5311229_021b_4b76')
+    })
+})
+
 describe('bindToInstallation', () => {
     const bound = () => bindToInstallation(sampleDocument(), binding)
 
