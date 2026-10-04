@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { assembleCatalogEntry, CatalogIntegrityError, parsePackageManifest } from '@/lib/catalog/assemble'
 import { isDataStructureEntry } from '@/lib/catalog/types'
 import { mockPackages } from '@/lib/mock-catalog'
+import { readDashboardDocument } from '@/lib/superset/bundle'
 
 const readerFor = (files: Record<string, Record<string, unknown>>) => (file: string) => {
     const content = files[file]
@@ -63,8 +64,9 @@ describe('assembleCatalogEntry', () => {
         const entry = assembleCatalogEntry(traffic.manifest, readerFor(traffic.files))
         if (isDataStructureEntry(entry)) throw new Error('expected a use case')
         expect(entry.bundle.dashboards).toHaveLength(1)
-        expect(entry.bundle.dashboards?.[0].tool).toBe('superset')
-        expect(entry.bundle.dashboards?.[0].bindings?.database).toBe('payload_data')
+        expect(entry.bundle.dashboards?.[0].file).toBe('verkehrsmessung.dashboard.json')
+        // The fixture is a real Superset export in package form, so the install can import it.
+        expect(() => readDashboardDocument(entry.bundle.dashboards?.[0].content)).not.toThrow()
     })
 })
 

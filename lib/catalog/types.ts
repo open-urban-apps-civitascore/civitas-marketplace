@@ -64,23 +64,6 @@ export interface PackageMember {
     parameters?: InstallParameter[]
 }
 
-export interface DashboardBindings {
-    /** Target database connection name in Superset, e.g. payload_data */
-    database?: string
-    /** Target schema name pattern, e.g. ds_${datasetId} */
-    schema?: string
-    /** Target table name inside the schema */
-    table?: string
-}
-
-export interface PackageDashboardMember {
-    /** File name inside the package's `core-ir/` directory (e.g. *.dashboard.json or *.zip). */
-    file: string
-    tool?: 'superset' | 'grafana'
-    targetVersion?: string
-    bindings?: DashboardBindings
-}
-
 export interface PackageMembers {
     dataStructures: PackageMember[]
     dataSources?: PackageMember[]
@@ -88,9 +71,13 @@ export interface PackageMembers {
     dataSinks?: PackageMember[]
     pipelines?: PackageMember[]
     simulations?: PackageMember[]
-    dashboards?: PackageDashboardMember[]
+    /**
+     * Superset dashboards in package form (lib/superset/bundle). What binds a
+     * dashboard to an instance (dataset schema, database connection) is set at
+     * install time, so a dashboard member declares nothing but its file.
+     */
+    dashboards?: PackageMember[]
 }
-
 
 /**
  * The package document (`core-ir/manifest.json` in an artifact repo): the
@@ -305,12 +292,9 @@ export interface DataStructureEntry {
     artifact: Record<string, unknown>
 }
 
+/** A bundled dashboard: the member file as read. Its shape is checked when it is imported. */
 export interface BundledDashboard {
     file: string
-    tool: 'superset' | 'grafana'
-    targetVersion?: string
-    bindings?: DashboardBindings
-    /** Content either as parsed JSON object or raw/base64 string */
     content: Record<string, unknown>
 }
 
