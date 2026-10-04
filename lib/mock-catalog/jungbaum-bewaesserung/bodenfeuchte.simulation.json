@@ -1,0 +1,416 @@
+{
+  "sourceRef": "Bodenfeuchte-Feed",
+  "messageClass": "#/$defs/BodenfeuchteMessung",
+  "topicBase": "openurbanapps/bodenfeuchte",
+  "intervalSeconds": 10,
+  "streams": [
+    {
+      "name": "bf-001",
+      "label": "Jungbaum KB-001 (trocken)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-001"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-001"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 6,
+          "max": 16,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 41
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-002",
+      "label": "Jungbaum KB-002 (trocken)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-002"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-002"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 8,
+          "max": 19,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 88
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-003",
+      "label": "Jungbaum KB-003 (trocken)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-003"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-003"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 9,
+          "max": 17,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 23
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-004",
+      "label": "Jungbaum KB-004 (unauffällig)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-004"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-004"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 22,
+          "max": 33,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 95
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-005",
+      "label": "Jungbaum KB-005 (unauffällig)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-005"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-005"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 24,
+          "max": 35,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 72
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-006",
+      "label": "Jungbaum KB-006 (unauffällig)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-006"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-006"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 21,
+          "max": 31,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 64
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-007",
+      "label": "Jungbaum KB-007 (frisch gegossen)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-007"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-007"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 36,
+          "max": 47,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 99
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    },
+    {
+      "name": "bf-008",
+      "label": "Jungbaum KB-008 (frisch gegossen)",
+      "fields": {
+        "sensorId": {
+          "kind": "constant",
+          "value": "BF-008"
+        },
+        "baumId": {
+          "kind": "constant",
+          "value": "KB-008"
+        },
+        "timestamp": {
+          "kind": "now"
+        },
+        "feuchte.value": {
+          "kind": "dailyProfile",
+          "min": 38,
+          "max": 49,
+          "peakHours": [
+            4
+          ],
+          "noise": 0.12
+        },
+        "feuchte.unit": {
+          "kind": "constant",
+          "value": "%"
+        },
+        "bodentemperatur.value": {
+          "kind": "dailyProfile",
+          "min": 11,
+          "max": 26,
+          "peakHours": [
+            15
+          ],
+          "noise": 0.15
+        },
+        "bodentemperatur.unit": {
+          "kind": "constant",
+          "value": "Cel"
+        },
+        "batterie.value": {
+          "kind": "constant",
+          "value": 91
+        },
+        "batterie.unit": {
+          "kind": "constant",
+          "value": "%"
+        }
+      }
+    }
+  ]
+}

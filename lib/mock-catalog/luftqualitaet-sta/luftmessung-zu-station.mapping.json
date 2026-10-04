@@ -1,0 +1,87 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:environment:luftmessungzustation:qguc1fua9r",
+  "name": "Luftmessung → Luftstation",
+  "description": "Übersetzt die PM2,5-Rohmessung in den SensorThings-Baum der Zielstruktur: Station und Messreihe werden über properties.reference gesucht und beim ersten Datensatz vollständig angelegt (find-or-create, daher die konstanten Stammdaten-Felder), die Beobachtung wird an die Messreihe angehängt.",
+  "document": {
+    "title": "Luftmessung → Luftstation",
+    "source": "urn:core:standard:openurbanapps:datastructure:environment:luftmessung:8vuby3re7d",
+    "target": "urn:core:standard:openurbanapps:datastructure:environment:luftstation:v6lve8eqmu",
+    "fields": {
+      "$.properties.reference": "$.stationId",
+      "$.name": {
+        "op": "concat",
+        "separator": " ",
+        "inputs": [{ "op": "const", "value": "Luftstation" }, "$.stationId"]
+      },
+      "$.description": {
+        "op": "const",
+        "value": "Bürger-Messstation für Luftqualität (Feinstaub)."
+      },
+      "$.Locations[].name": {
+        "op": "concat",
+        "separator": " ",
+        "inputs": [{ "op": "const", "value": "Standort" }, "$.stationId"]
+      },
+      "$.Locations[].description": {
+        "op": "const",
+        "value": "Aufstellungsort laut GPS-Modul der Station."
+      },
+      "$.Locations[].encodingType": { "op": "const", "value": "application/geo+json" },
+      "$.Locations[].location": {
+        "op": "geoPoint",
+        "lon": "$.location.lon",
+        "lat": "$.location.lat"
+      },
+      "$.Datastreams[].properties.reference": {
+        "op": "concat",
+        "separator": "-",
+        "inputs": ["$.stationId", { "op": "const", "value": "pm25" }]
+      },
+      "$.Datastreams[].name": {
+        "op": "concat",
+        "separator": " ",
+        "inputs": [{ "op": "const", "value": "Feinstaub PM2,5" }, "$.stationId"]
+      },
+      "$.Datastreams[].description": {
+        "op": "const",
+        "value": "PM2,5-Messreihe des SDS011-Sensors dieser Station."
+      },
+      "$.Datastreams[].observationType": {
+        "op": "const",
+        "value": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement"
+      },
+      "$.Datastreams[].unitOfMeasurement.name": {
+        "op": "const",
+        "value": "Mikrogramm pro Kubikmeter"
+      },
+      "$.Datastreams[].unitOfMeasurement.symbol": "$.pm25.unit",
+      "$.Datastreams[].unitOfMeasurement.definition": {
+        "op": "const",
+        "value": "http://qudt.org/vocab/unit/MicroGM-PER-M3"
+      },
+      "$.Datastreams[].Sensor.name": { "op": "const", "value": "SDS011" },
+      "$.Datastreams[].Sensor.description": {
+        "op": "const",
+        "value": "Nova Fitness SDS011 — Feinstaubsensor nach dem Laserstreuungsprinzip."
+      },
+      "$.Datastreams[].Sensor.encodingType": { "op": "const", "value": "text/html" },
+      "$.Datastreams[].Sensor.metadata": {
+        "op": "const",
+        "value": "https://sensor.community/de/sensors/sds011/"
+      },
+      "$.Datastreams[].ObservedProperty.name": { "op": "const", "value": "PM2.5" },
+      "$.Datastreams[].ObservedProperty.definition": {
+        "op": "const",
+        "value": "https://www.eea.europa.eu/help/glossary/eea-glossary/pm2.5"
+      },
+      "$.Datastreams[].ObservedProperty.description": {
+        "op": "const",
+        "value": "Feinstaub mit aerodynamischem Durchmesser bis 2,5 µm."
+      },
+      "$.Datastreams[].Observations[].result": "$.pm25.value",
+      "$.Datastreams[].Observations[].phenomenonTime": "$.timestamp",
+      "$.Datastreams[].Observations[].resultTime": "$.timestamp",
+      "$.Datastreams[].Observations[].resultQuality": "$.pm25.quality"
+    }
+  }
+}

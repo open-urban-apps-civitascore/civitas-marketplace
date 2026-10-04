@@ -1,0 +1,48 @@
+{
+  "sourceRef": "Zählstellen-Feed",
+  "messageClass": "#/$defs/Messung",
+  "topicBase": "openurbanapps/verkehrszaehlung",
+  "intervalSeconds": 10,
+  "streams": [
+    {
+      "name": "zaehlstelle-promenade",
+      "fields": {
+        "counterId": { "kind": "constant", "value": "Z-001" },
+        "timestamp": { "kind": "now" },
+        "vehicleCount": { "kind": "dailyProfile", "min": 0, "max": 45, "peakHours": [8, 17], "integer": true },
+        "avgSpeedKmh": { "kind": "randomWalk", "min": 14, "max": 32, "step": 3 },
+        "direction": { "kind": "enum", "values": ["inbound", "outbound"] }
+      }
+    },
+    {
+      "name": "zaehlstelle-wolbecker",
+      "fields": {
+        "counterId": { "kind": "constant", "value": "Z-002" },
+        "timestamp": { "kind": "now" },
+        "vehicleCount": { "kind": "dailyProfile", "min": 2, "max": 80, "peakHours": [7, 8, 17, 18], "integer": true },
+        "avgSpeedKmh": { "kind": "randomWalk", "min": 22, "max": 55, "step": 4 },
+        "direction": { "kind": "enum", "values": ["inbound", "outbound"] }
+      }
+    },
+    {
+      "name": "zaehlstelle-ring",
+      "fields": {
+        "counterId": { "kind": "constant", "value": "Z-003" },
+        "timestamp": { "kind": "now" },
+        "vehicleCount": { "kind": "dailyProfile", "min": 5, "max": 120, "peakHours": [8, 16, 17], "noise": 0.2, "integer": true },
+        "avgSpeedKmh": { "kind": "randomWalk", "min": 28, "max": 60, "step": 5 },
+        "direction": { "kind": "enum", "values": ["inbound", "outbound"] }
+      }
+    },
+    {
+      "name": "zaehlstelle-hafen",
+      "fields": {
+        "counterId": { "kind": "constant", "value": "Z-004" },
+        "timestamp": { "kind": "now" },
+        "vehicleCount": { "kind": "dailyProfile", "min": 0, "max": 35, "peakHours": [12, 19], "integer": true },
+        "avgSpeedKmh": { "kind": "randomWalk", "min": 18, "max": 40, "step": 3 },
+        "direction": { "kind": "enum", "values": ["inbound", "outbound"] }
+      }
+    }
+  ]
+}

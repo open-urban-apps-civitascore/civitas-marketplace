@@ -1,0 +1,185 @@
+{
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:luftstation:v6lve8eqmu",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Luftstation",
+  "description": "Thing-förmiges Zielmodell für den SensorThings-Speicher: eine Station (Thing) mit Standort, PM2,5-Messreihe (Datastream samt Sensor, Messgröße und Einheit) und deren Beobachtungen. Die FROST-Senke sucht Station und Messreihe über properties.reference und legt beides beim ersten Datensatz an (find-or-create); Beobachtungen werden angehängt.",
+  "$ref": "#/$defs/Luftstation",
+  "$defs": {
+    "Luftstation": {
+      "type": "object",
+      "title": "Luftstation",
+      "description": "Die Station als SensorThings-Thing. Ein Datensatz der Quelle entspricht einer Station mit genau einer berührten Messreihe.",
+      "required": ["name", "properties"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Anzeigename der Station."
+        },
+        "description": {
+          "type": "string",
+          "description": "Beschreibung der Station."
+        },
+        "properties": {
+          "$ref": "#/$defs/Kennung",
+          "description": "Fachlicher Schlüssel der Station; die Senke sucht darüber (find-or-create)."
+        },
+        "Locations": {
+          "type": "array",
+          "description": "Standorte der Station (SensorThings-Navigation).",
+          "items": { "$ref": "#/$defs/Standort" }
+        },
+        "Datastreams": {
+          "type": "array",
+          "description": "Messreihen der Station (SensorThings-Navigation).",
+          "items": { "$ref": "#/$defs/Messreihe" }
+        }
+      }
+    },
+    "Kennung": {
+      "type": "object",
+      "title": "Kennung",
+      "description": "Fachlicher Schlüssel im SensorThings-properties-Beutel. 'reference' ist der Match-Key, über den die Senke findet statt dupliziert.",
+      "required": ["reference"],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "description": "Eindeutige fachliche Kennung, z. B. 'KIEZ-001' (Station) oder 'KIEZ-001-pm25' (Messreihe)."
+        }
+      }
+    },
+    "Standort": {
+      "type": "object",
+      "title": "Standort",
+      "description": "SensorThings-Location der Station.",
+      "required": ["name", "location"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name des Standorts."
+        },
+        "description": {
+          "type": "string",
+          "description": "Beschreibung des Standorts."
+        },
+        "encodingType": {
+          "type": "string",
+          "description": "Kodierung der Geometrie, für GeoJSON 'application/geo+json'."
+        },
+        "location": {
+          "type": "object",
+          "description": "GeoJSON-Punkt (WGS 84).",
+          "properties": {
+            "type": { "type": "string", "description": "GeoJSON-Typ, hier 'Point'." },
+            "coordinates": {
+              "type": "array",
+              "description": "Koordinaten als [Längengrad, Breitengrad].",
+              "items": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "Messreihe": {
+      "type": "object",
+      "title": "Messreihe",
+      "description": "SensorThings-Datastream: verbindet Station, Sensor, Messgröße und Einheit mit den Beobachtungen.",
+      "required": ["name", "properties"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Anzeigename der Messreihe."
+        },
+        "description": {
+          "type": "string",
+          "description": "Beschreibung der Messreihe."
+        },
+        "observationType": {
+          "type": "string",
+          "description": "O&M-Beobachtungstyp, für Zahlenwerte OM_Measurement."
+        },
+        "properties": {
+          "$ref": "#/$defs/Kennung",
+          "description": "Fachlicher Schlüssel der Messreihe; die Senke sucht darüber (find-or-create)."
+        },
+        "unitOfMeasurement": {
+          "$ref": "#/$defs/Einheit",
+          "description": "Einheit aller Beobachtungen dieser Messreihe."
+        },
+        "Sensor": {
+          "$ref": "#/$defs/Sensor",
+          "description": "Messender Sensor (SensorThings-Navigation)."
+        },
+        "ObservedProperty": {
+          "$ref": "#/$defs/Messgroesse",
+          "description": "Gemessene Größe (SensorThings-Navigation)."
+        },
+        "Observations": {
+          "type": "array",
+          "description": "Beobachtungen der Messreihe (SensorThings-Navigation).",
+          "items": { "$ref": "#/$defs/Beobachtung" }
+        }
+      }
+    },
+    "Einheit": {
+      "type": "object",
+      "title": "Einheit",
+      "description": "SensorThings-unitOfMeasurement.",
+      "required": ["name", "symbol", "definition"],
+      "properties": {
+        "name": { "type": "string", "description": "Name der Einheit, z. B. 'Mikrogramm pro Kubikmeter'." },
+        "symbol": { "type": "string", "description": "Symbol der Einheit, z. B. 'µg/m³'." },
+        "definition": { "type": "string", "description": "Definitions-URI der Einheit (UCUM/QUDT)." }
+      }
+    },
+    "Sensor": {
+      "type": "object",
+      "title": "Sensor",
+      "description": "SensorThings-Sensor: das messende Gerät.",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Gerätename, z. B. 'SDS011'." },
+        "description": { "type": "string", "description": "Beschreibung des Geräts." },
+        "encodingType": { "type": "string", "description": "Kodierung der metadata-Angabe." },
+        "metadata": { "type": "string", "description": "Verweis auf Datenblatt oder Dokumentation." }
+      }
+    },
+    "Messgroesse": {
+      "type": "object",
+      "title": "Messgroesse",
+      "description": "SensorThings-ObservedProperty: die gemessene Größe.",
+      "required": ["name", "definition"],
+      "properties": {
+        "name": { "type": "string", "description": "Name der Größe, z. B. 'PM2.5'." },
+        "definition": { "type": "string", "description": "Definitions-URI der Größe." },
+        "description": { "type": "string", "description": "Beschreibung der Größe." }
+      }
+    },
+    "Beobachtung": {
+      "type": "object",
+      "title": "Beobachtung",
+      "description": "SensorThings-Observation: eine einzelne Messung der Messreihe.",
+      "required": ["result", "phenomenonTime"],
+      "properties": {
+        "result": {
+          "type": "number",
+          "description": "Beobachteter Wert in der Einheit der Messreihe."
+        },
+        "phenomenonTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Zeitpunkt, auf den sich die Messung bezieht (ISO 8601)."
+        },
+        "resultTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Zeitpunkt, zu dem das Ergebnis erfasst wurde."
+        },
+        "resultQuality": {
+          "type": "string",
+          "enum": ["good", "suspect", "bad", "unknown"],
+          "description": "Qualitätskennzeichen der Messung."
+        }
+      }
+    }
+  }
+}

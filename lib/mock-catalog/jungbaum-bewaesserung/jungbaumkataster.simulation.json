@@ -1,0 +1,82 @@
+{
+  "sourceRef": "Jungbaumkataster-DB",
+  "transport": "sql",
+  "label": "Baumkataster",
+  "messageClass": "#/$defs/JungbaumZeile",
+  "table": {
+    "columns": {
+      "baum_id": "text",
+      "gattung": "text",
+      "art_deutsch": "text",
+      "pflanzjahr": "integer",
+      "standort": "text",
+      "lon": "double",
+      "lat": "double",
+      "sensor_id": "text"
+    },
+    "primaryKey": "baum_id"
+  },
+  "cadence": "fillToLimit",
+  "maxRows": 25,
+  "fields": {
+    "baum_id": {
+      "kind": "sequence",
+      "prefix": "KB-",
+      "padTo": 3
+    },
+    "sensor_id": {
+      "kind": "sequence",
+      "prefix": "BF-",
+      "padTo": 3
+    },
+    "gattung": {
+      "kind": "enum",
+      "values": [
+        "Tilia",
+        "Acer",
+        "Carpinus",
+        "Quercus",
+        "Sorbus"
+      ]
+    },
+    "art_deutsch": {
+      "kind": "enum",
+      "values": [
+        "Winterlinde",
+        "Spitzahorn",
+        "Hainbuche",
+        "Stieleiche",
+        "Eberesche"
+      ]
+    },
+    "pflanzjahr": {
+      "kind": "enum",
+      "values": [
+        2022,
+        2023,
+        2024,
+        2025
+      ]
+    },
+    "standort": {
+      "kind": "enum",
+      "values": [
+        "Wolbecker Straße",
+        "Hansaring",
+        "Bremer Platz",
+        "Gartenstraße",
+        "Hafenweg"
+      ]
+    },
+    "lon": {
+      "kind": "jitter",
+      "center": 7.6345,
+      "spread": 0.0045
+    },
+    "lat": {
+      "kind": "jitter",
+      "center": 51.9566,
+      "spread": 0.003
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasource/v1",
+  "id": "urn:core:standard:openurbanapps:datasource:environment:baumkatasterdb:al7cx8sr5i",
+  "title": "Baumkataster-DB",
+  "description": "Liest das Baumkataster per Cron aus der PostgreSQL-Datenbank des Fachverfahrens (Vollabzug je Lauf; Dedup übernimmt der UPSERT der Senke).",
+  "connectionType": "sql",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:baumkatasterzeile:ny4qd9zowt",
+  "driver": "postgres",
+  "dsn": "postgres://baumkataster-db:5432/fachverfahren",
+  "table": "kataster.kiez_baeume",
+  "columns": [
+    "baum_id",
+    "gattung",
+    "art_deutsch",
+    "pflanzjahr",
+    "kronendurchmesser_m",
+    "stammumfang_cm",
+    "standort",
+    "lon",
+    "lat"
+  ],
+  "user": "kataster",
+  "password": "kataster"
+}

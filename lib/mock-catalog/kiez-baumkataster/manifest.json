@@ -1,0 +1,44 @@
+{
+  "id": "urn:openurbanapps:usecase:kiez-baumkataster",
+  "type": "usecase",
+  "displayName": "Kiez-Baumkataster",
+  "description": "Baumkataster aus einer Fachverfahrens-Datenbank: SQL-Quelle mit Cron-Abruf, Geometrie-Mapping und PostGIS-Senke für den Karten-Layer.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": [
+    "baumkataster",
+    "stadtgruen",
+    "karte",
+    "sql"
+  ],
+  "members": {
+    "dataStructures": [
+      { "file": "baumkataster-zeile.datastructure.json" },
+      { "file": "kiez-baum.datastructure.json" }
+    ],
+    "dataSources": [
+      { "file": "baumkataster-db.datasource.json" }
+    ],
+    "mappings": [
+      { "file": "kataster-import.mapping.json" }
+    ],
+    "dataSinks": [
+      {
+        "file": "kiez-baeume-tabelle.datasink.json",
+        "parameters": [
+          {
+            "field": "tableName",
+            "label": "PostGIS-Tabellenname",
+            "description": "Name der Zieltabelle in der PostGIS-Datenbank der Instanz."
+          }
+        ]
+      }
+    ],
+    "pipelines": [
+      { "file": "kataster-import.pipeline.json" }
+    ],
+    "simulations": []
+  },
+  "dependencies": []
+}

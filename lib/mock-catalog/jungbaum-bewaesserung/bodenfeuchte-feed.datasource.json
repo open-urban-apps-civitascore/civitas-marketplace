@@ -1,0 +1,11 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasource/v1",
+  "id": "urn:core:standard:openurbanapps:datasource:environment:bodenfeuchtefeed:iol8s6bud3",
+  "title": "Bodenfeuchte-Feed",
+  "description": "Empfängt die Messungen der Bodenfeuchte-Sensoren über den Plattform-Broker (MQTT), ein Topic je Sensor.",
+  "connectionType": "mqtt",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtemessung:gpslwk9jh7",
+  "urls": ["tcp://civitas-mosquitto:1883"],
+  "topics": ["openurbanapps/bodenfeuchte/+"],
+  "qos": 1
+}

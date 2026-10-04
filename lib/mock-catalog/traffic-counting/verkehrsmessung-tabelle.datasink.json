@@ -1,0 +1,9 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:mobility:verkehrsmessungtabelle:tqkdzyym08",
+  "title": "Verkehrsmessung-Tabelle",
+  "description": "Schreibt die normalisierten Messungen in eine PostGIS-Tabelle der Instanz.",
+  "connectionType": "postgis",
+  "tableName": "verkehrsmessung",
+  "element": "urn:core:standard:openurbanapps:datastructure:mobility:verkehrsmessung:70dn2lp8jo"
+}
