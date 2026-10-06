@@ -1,30 +1,43 @@
 'use server'
 
 import { useCaseSlugPattern } from '@/lib/catalog/schema'
-import { applyCatalogEntry, buildCatalogEntry } from '@/lib/export/catalog-entry'
+import { applyCatalogEntry, buildCatalogEntry, catalogInputFromManifest } from '@/lib/export/catalog-entry'
 import {
     bundleBranch,
     catalogBranch,
     exportConfig,
     exportReadiness,
     packageDir,
+    parseBundleBranch,
+    type ExportConfig,
     type ExportTarget,
 } from '@/lib/export/config'
 import {
     clientFor,
+    currentUser,
     getProject,
     GitLabError,
+    listMergeRequestsBy,
     listTree,
     openMergeRequest,
     parseProjectUrl,
     readFile,
+    type GitLabClient,
+    type MergeRequestRef,
 } from '@/lib/export/gitlab'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
 import { PortalReadError, readUseCase } from '@/lib/export/portal-reader'
-import { readBundleStatus, readCatalogStatus, type BundleStatus, type CatalogStatus } from '@/lib/export/status'
+import {
+    inspectBundle,
+    readBundleStatus,
+    readCatalogStatus,
+    type BundleStatus,
+    type BundleVerification,
+    type CatalogStatus,
+} from '@/lib/export/status'
 import { transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import { getAccessToken, requireSession } from '@/lib/session'
 
@@ -334,92 +347,7 @@ export async function exportAction(
         }
 
         // intent === 'catalog'
-        if (!config.catalog) {
-            return {
-                intent: 'catalog',
-                status: 'unconfigured',
-                detail: 'Kein Katalog-Repository bekannt (REPO_LIST_URL oder CATALOG_REPO_URL).',
-            }
-        }
-        const bundle = await readBundleStatus(client, target, form.options.slug, form.options.version, id)
-        if (bundle.state !== 'on-base' || !bundle.sha) {
-            return {
-                intent: 'catalog',
-                status: 'not-merged',
-                detail:
-                    bundle.state === 'mr-open'
-                        ? 'Der Bundle-Merge-Request ist noch offen — der Katalog-Eintrag kann erst auf den gemergten Commit zeigen.'
-                        : (bundle.detail ?? `Auf ${target.baseBranch} liegt noch kein Paket ${form.options.slug} ${form.options.version}.`),
-                bundle,
-            }
-        }
-        const catalogClient = clientFor(config.catalog.url, token)
-        const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
-        const indexRaw = await readFile(catalogClient, catalogProject.id, 'index.json', config.catalog.baseBranch)
-        if (!indexRaw) {
-            return { intent: 'catalog', status: 'error', detail: `index.json fehlt auf ${config.catalog.baseBranch} in ${config.catalog.url}.` }
-        }
-        const entry = buildCatalogEntry({
-            id,
-            displayName: form.options.displayName,
-            description: form.options.description,
-            version: form.options.version,
-            maintainer: form.options.maintainer,
-            license: form.options.license,
-            keywords: form.options.keywords,
-            metadata: form.options.metadata,
-            repoUrl: target.url,
-            path: packageDir(target, form.options.slug),
-            commitSha: bundle.sha,
-        })
-        const edit = applyCatalogEntry(indexRaw, entry)
-        if (edit.status === 'withdrawn') {
-            return {
-                intent: 'catalog',
-                status: 'invalid',
-                detail: `Dieser Eintrag wurde aus dem Katalog zurückgezogen${edit.reason ? `: ${edit.reason}` : ''}. Ein erneutes Teilen macht ihn nicht wieder sichtbar — bitte die Katalog-Pflege ansprechen.`,
-                bundle,
-            }
-        }
-        if (edit.status === 'conflict') {
-            return {
-                intent: 'catalog',
-                status: 'invalid',
-                detail: `Die Adresse dieses Anwendungsfalls ist schon belegt — \`${edit.conflictingId}\` führt zur selben Katalogseite. Bitte einen anderen Paket-Slug wählen.`,
-                bundle,
-            }
-        }
-        if (edit.status === 'unchanged') {
-            return { intent: 'catalog', status: 'unchanged', detail: 'Der Katalog listet dieses Paket bereits in dieser Version an diesem Commit.', bundle }
-        }
-        const outcome = await openMergeRequest(catalogClient, {
-            upstream: catalogProject,
-            baseBranch: config.catalog.baseBranch,
-            branch: catalogBranch(form.options.slug, form.options.version),
-            title: `${edit.status === 'replaced' ? 'Update' : 'Add'} use case: ${form.options.displayName} ${form.options.version}`,
-            description: [
-                `Proposed by the Open Urban Apps marketplace on behalf of **${requestedBy}**.`,
-                '',
-                `${edit.status === 'replaced' ? `Replaces version ${edit.previousVersion ?? '?'} of` : 'Adds'} \`${id}\` in \`useCases\`, pinned to`,
-                `\`${bundle.sha}\` of ${target.url} (path \`${packageDir(target, form.options.slug)}\`), where \`core-ir/manifest.json\` was verified to carry id and version.`,
-                '',
-                `Index version bumped to ${edit.indexVersion}.`,
-                '',
-                'Check: `python3 ci/validate-index.py`',
-            ].join('\n'),
-            files: { 'index.json': edit.content },
-            existingPaths: new Set(['index.json']),
-        })
-        if (outcome.status === 'already-open') {
-            return { intent: 'catalog', status: 'already-open', detail: `Es liegt bereits ein offener Katalog-Merge-Request (!${outcome.iid}) vor.`, mrUrl: outcome.url, bundle }
-        }
-        return {
-            intent: 'catalog',
-            status: 'ok',
-            detail: `Katalog-Merge-Request !${outcome.iid} erstellt — nach dem Merge ist das Paket installierbar.`,
-            mrUrl: outcome.url,
-            bundle,
-        }
+        return await proposeCatalog(config, target, token, form.options.slug, form.options.version, id, requestedBy)
     } catch (error) {
         if (error instanceof PortalReadError) {
             return { intent: form.intent, status: 'error', detail: `Portal-Backend: ${error.message}` }
@@ -427,6 +355,253 @@ export async function exportAction(
         if (error instanceof GitLabError) {
             return { intent: form.intent, status: 'error', detail: gitlabMessage(error) }
         }
+        throw error
+    }
+}
+
+/**
+ * Proposes the catalogue entry for a package on the target's base branch, for
+ * the export form and the list of shared packages alike.
+ *
+ * Built from the MERGED manifest, not from a form: the entry then lists what
+ * the bundle review saw, and the step still works days after the export.
+ * Refused unless the package directory on the base branch is, by tree id, the
+ * one the export's merge request brought.
+ */
+async function proposeCatalog(
+    config: ExportConfig,
+    target: ExportTarget,
+    token: string,
+    slug: string,
+    version: string,
+    expectedId: string | undefined,
+    requestedBy: string,
+): Promise<ExportActionResult> {
+    if (!config.catalog) {
+        return {
+            intent: 'catalog',
+            status: 'unconfigured',
+            detail: 'Kein Katalog-Repository bekannt (REPO_LIST_URL oder CATALOG_REPO_URL).',
+        }
+    }
+    const { status: bundle, manifestRaw } = await inspectBundle(
+        clientFor(target.url, token),
+        target,
+        slug,
+        version,
+        expectedId,
+    )
+    if (bundle.state !== 'on-base' || !bundle.sha || !manifestRaw) {
+        return {
+            intent: 'catalog',
+            status: 'not-merged',
+            detail:
+                bundle.state === 'mr-open'
+                    ? 'Der Bundle-Merge-Request ist noch offen. Der Katalog-Eintrag kann erst auf den gemergten Stand zeigen.'
+                    : (bundle.detail ?? `Auf ${target.baseBranch} liegt noch kein Paket ${slug} ${version}.`),
+            bundle,
+        }
+    }
+    if (bundle.verification?.state !== 'verified') {
+        return {
+            intent: 'catalog',
+            status: 'invalid',
+            detail: verificationRefusal(bundle.verification, target.baseBranch),
+            bundle,
+        }
+    }
+
+    const dir = packageDir(target, slug)
+    const input = catalogInputFromManifest(manifestRaw, { repoUrl: target.url, path: dir, commitSha: bundle.sha })
+    if (typeof input === 'string') {
+        return { intent: 'catalog', status: 'invalid', detail: `Kein Katalog-Eintrag: ${input}`, bundle }
+    }
+
+    const catalogClient = clientFor(config.catalog.url, token)
+    const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
+    const indexRaw = await readFile(catalogClient, catalogProject.id, 'index.json', config.catalog.baseBranch)
+    if (!indexRaw) {
+        return { intent: 'catalog', status: 'error', detail: `index.json fehlt auf ${config.catalog.baseBranch} in ${config.catalog.url}.` }
+    }
+    const edit = applyCatalogEntry(indexRaw, buildCatalogEntry(input))
+    if (edit.status === 'withdrawn') {
+        return {
+            intent: 'catalog',
+            status: 'invalid',
+            detail: `Dieser Eintrag wurde aus dem Katalog zurückgezogen${edit.reason ? `: ${edit.reason}` : ''}. Ein erneutes Teilen macht ihn nicht wieder sichtbar, bitte die Katalog-Pflege ansprechen.`,
+            bundle,
+        }
+    }
+    if (edit.status === 'conflict') {
+        return {
+            intent: 'catalog',
+            status: 'invalid',
+            detail: `Die Adresse dieses Anwendungsfalls ist schon belegt: \`${edit.conflictingId}\` führt zur selben Katalogseite. Bitte mit einem anderen Paket-Slug neu teilen.`,
+            bundle,
+        }
+    }
+    if (edit.status === 'unchanged') {
+        return { intent: 'catalog', status: 'unchanged', detail: 'Der Katalog listet dieses Paket bereits in dieser Version an diesem Commit.', bundle }
+    }
+    const outcome = await openMergeRequest(catalogClient, {
+        upstream: catalogProject,
+        baseBranch: config.catalog.baseBranch,
+        branch: catalogBranch(slug, version),
+        title: `${edit.status === 'replaced' ? 'Update' : 'Add'} use case: ${input.displayName} ${version}`,
+        description: [
+            `Proposed by the Open Urban Apps marketplace on behalf of **${requestedBy}**.`,
+            '',
+            `${edit.status === 'replaced' ? `Replaces version ${edit.previousVersion ?? '?'} of` : 'Adds'} \`${input.id}\` in \`useCases\`, pinned to`,
+            `\`${bundle.sha}\` of ${target.url} (path \`${dir}\`).`,
+            '',
+            `The entry is built from the merged \`core-ir/manifest.json\`. The package directory at the pin has the same tree id as in ${bundle.verification.mergedMrUrl ?? 'the merged export'}, so it is the reviewed package, file for file.` +
+                (bundle.verification.changedInReview ? ' The review changed the package before the merge.' : ''),
+            '',
+            `Index version bumped to ${edit.indexVersion}.`,
+            '',
+            'Check: `python3 ci/validate-index.py`',
+        ].join('\n'),
+        files: { 'index.json': edit.content },
+        existingPaths: new Set(['index.json']),
+    })
+    if (outcome.status === 'already-open') {
+        return { intent: 'catalog', status: 'already-open', detail: `Es liegt bereits ein offener Katalog-Merge-Request (!${outcome.iid}) vor.`, mrUrl: outcome.url, bundle }
+    }
+    return {
+        intent: 'catalog',
+        status: 'ok',
+        detail: `Katalog-Merge-Request !${outcome.iid} erstellt. Nach dem Merge ist das Paket installierbar.`,
+        mrUrl: outcome.url,
+        bundle,
+    }
+}
+
+function verificationRefusal(verification: BundleVerification | undefined, baseBranch: string): string {
+    switch (verification?.state) {
+        case 'changed-after-merge':
+            return `Kein Katalog-Eintrag: Das Paket auf ${baseBranch} weicht vom gemergten Merge Request ab, jemand hat es danach geändert. Bitte die Änderung prüfen oder neu teilen.`
+        case 'unverifiable':
+            return 'Kein Katalog-Eintrag: Der Stand des gemergten Merge Requests ist in GitLab nicht mehr lesbar, der Inhalt lässt sich nicht prüfen.'
+        default:
+            return `Kein Katalog-Eintrag: Für dieses Paket gibt es keinen gemergten Export-Merge-Request, gegen den sich der Inhalt auf ${baseBranch} prüfen ließe.`
+    }
+}
+
+/** One shared package version in one target repository. */
+export interface SharedPackageRow {
+    /** `<target url>#<branch>`. */
+    key: string
+    targetKey: string
+    targetLabel: string
+    slug: string
+    version: string
+    displayName: string
+    bundleMr: { url: string; state: string }
+    /** Read for a merged bundle only. */
+    bundle?: BundleStatus
+    catalog?: CatalogStatus
+}
+
+/** Each merged row costs about ten GitLab requests, so the list stops at the newest. */
+const MAX_SHARED_ROWS = 15
+
+/**
+ * What this marketplace's bot has proposed, newest first, and where each
+ * stands. Read from GitLab every time, like the status: the bot's merge
+ * requests on `export/…` branches are the record, no marketplace bookkeeping.
+ * A merged bundle is checked and gets its catalogue state, so the list can
+ * offer the catalogue step without the form.
+ */
+export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; error?: string }> {
+    await requireSession()
+    const config = exportConfig()
+    if (exportReadiness(config) !== 'ready') return { rows: [] }
+    const token = config.token as string
+
+    try {
+        const rows: SharedPackageRow[] = []
+        for (const target of config.targets) {
+            const client = clientFor(target.url, token)
+            const project = await getProject(client, parseProjectUrl(target.url).projectPath)
+            const bot = await currentUser(client)
+            const seen = new Set<string>()
+            for (const mr of await listMergeRequestsBy(client, project.id, bot.id)) {
+                const parsed = parseBundleBranch(mr.source_branch)
+                // Newest first: the first request per branch is the one that counts.
+                if (!parsed || seen.has(mr.source_branch)) continue
+                seen.add(mr.source_branch)
+                rows.push(await sharedPackageRow(config, target, client, token, mr, parsed))
+                if (seen.size >= MAX_SHARED_ROWS) break
+            }
+        }
+        return { rows }
+    } catch (error) {
+        if (error instanceof GitLabError) return { rows: [], error: gitlabMessage(error) }
+        throw error
+    }
+}
+
+async function sharedPackageRow(
+    config: ExportConfig,
+    target: ExportTarget,
+    client: GitLabClient,
+    token: string,
+    mr: MergeRequestRef,
+    parsed: { slug: string; version: string },
+): Promise<SharedPackageRow> {
+    const row: SharedPackageRow = {
+        key: `${target.key}#${mr.source_branch}`,
+        targetKey: target.key,
+        targetLabel: target.label,
+        slug: parsed.slug,
+        version: parsed.version,
+        displayName: displayNameOf(mr.title, parsed.version) ?? parsed.slug,
+        bundleMr: { url: mr.web_url, state: mr.state },
+    }
+    if (mr.state !== 'merged') return row
+
+    const bundle = await readBundleStatus(client, target, parsed.slug, parsed.version)
+    if (!bundle.packageId) return { ...row, bundle }
+    const catalog = await readCatalogStatus(
+        config.catalog ? clientFor(config.catalog.url, token) : client,
+        config.catalog,
+        parsed.slug,
+        parsed.version,
+        bundle.packageId,
+    )
+    return { ...row, bundle, catalog }
+}
+
+/** The display name inside the bundle request's title, as `exportAction` writes it. */
+function displayNameOf(title: string | undefined, version: string): string | undefined {
+    const match = title?.match(/^Export use case: (.+) (\d+\.\d+\.\d+)$/)
+    return match && match[2] === version ? match[1] : undefined
+}
+
+/**
+ * The catalogue step from the list of shared packages: no form, the merged
+ * manifest is the source. Arguments are re-checked here, since a server
+ * action answers any caller.
+ */
+export async function proposeSharedCatalogEntry(
+    targetKey: string,
+    slug: string,
+    version: string,
+): Promise<ExportActionResult> {
+    const session = await requireSession()
+    const requestedBy = session.user?.name ?? session.user?.email ?? 'unbekannt'
+    const config = exportConfig()
+    const target = config.targets.find((candidate) => candidate.key === targetKey)
+    if (exportReadiness(config) !== 'ready' || !target) {
+        return { intent: 'catalog', status: 'unconfigured', detail: 'Zielrepository oder GitLab-Zugang ist nicht konfiguriert.' }
+    }
+    if (!SLUG.test(slug) || !VERSION.test(version)) {
+        return { intent: 'catalog', status: 'invalid', detail: 'Ungültiger Paket-Slug oder ungültige Version.' }
+    }
+    try {
+        return await proposeCatalog(config, target, config.token as string, slug, version, undefined, requestedBy)
+    } catch (error) {
+        if (error instanceof GitLabError) return { intent: 'catalog', status: 'error', detail: gitlabMessage(error) }
         throw error
     }
 }

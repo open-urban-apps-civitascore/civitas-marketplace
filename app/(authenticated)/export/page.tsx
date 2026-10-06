@@ -1,4 +1,5 @@
 import { ExportPanel } from '@/components/export/export-panel'
+import { SharedPackages } from '@/components/export/shared-packages'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -68,6 +69,9 @@ export default async function ExportPage() {
                     }}
                 />
             )}
+
+            {/* The way back after a merge: the catalogue step from here needs no form. */}
+            {readiness === 'ready' && <SharedPackages />}
         </div>
     )
 }

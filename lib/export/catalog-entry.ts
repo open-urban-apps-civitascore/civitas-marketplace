@@ -26,6 +26,56 @@ export interface CatalogEntryInput {
     commitSha: string
 }
 
+/**
+ * The catalogue input for a package as it was merged, read from its manifest.
+ * The export writes the whole profile there, so the entry needs no form, and
+ * it lists exactly what the bundle review saw. A string names what is wrong.
+ */
+export function catalogInputFromManifest(
+    raw: string,
+    location: Pick<CatalogEntryInput, 'repoUrl' | 'path' | 'commitSha'>,
+): CatalogEntryInput | string {
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(raw)
+    } catch {
+        return 'manifest.json ist kein gültiges JSON.'
+    }
+    const manifest = asRecord(parsed)
+    if (!manifest) return 'manifest.json ist kein Objekt.'
+
+    const text = (key: string): string | undefined => {
+        const value = manifest[key]
+        return typeof value === 'string' && value.trim() ? value : undefined
+    }
+    const required = ['id', 'displayName', 'description', 'version', 'maintainer', 'license'] as const
+    const missing = required.filter((key) => !text(key))
+    if (missing.length) return `manifest.json nennt kein ${missing.join(', ')}.`
+
+    const picked = Object.fromEntries(
+        Object.keys(exportMetadataSchema.shape)
+            .filter((key) => key in manifest)
+            .map((key) => [key, manifest[key]]),
+    )
+    const metadata = exportMetadataSchema.safeParse(picked)
+    if (!metadata.success) {
+        return `Der Steckbrief im Manifest ist ungültig: ${metadata.error.issues.map((issue) => issue.message).join('; ')}`
+    }
+    return {
+        id: text('id') as string,
+        displayName: text('displayName') as string,
+        description: text('description') as string,
+        version: text('version') as string,
+        maintainer: text('maintainer') as string,
+        license: text('license') as string,
+        keywords: Array.isArray(manifest.keywords)
+            ? manifest.keywords.filter((keyword): keyword is string => typeof keyword === 'string')
+            : [],
+        metadata: metadata.data,
+        ...location,
+    }
+}
+
 export function buildCatalogEntry(input: CatalogEntryInput): Record<string, unknown> {
     const { themes, ...described } = exportMetadataSchema.parse(input.metadata ?? {})
     return {

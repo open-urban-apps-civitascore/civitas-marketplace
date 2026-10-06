@@ -5,6 +5,7 @@ import { ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 
 import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
+import { verificationLabel } from '@/lib/export/labels'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
@@ -84,7 +85,8 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
     const [metadata, setMetadata] = useState(() => metadataDraft(catalog?.metadata))
     const [targetKey, setTargetKey] = useState(targets[0]?.key ?? '')
     const forgeReady = readiness === 'ready' && targets.length > 0
-    const bundleOnBase = result?.bundle?.state === 'on-base'
+    // The catalogue step needs the package on the base branch AND, by tree id, the merged one.
+    const bundleReady = result?.bundle?.state === 'on-base' && result.bundle.verification?.state === 'verified'
     useEffect(() => {
         let cancelled = false
         inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
@@ -167,16 +169,16 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
                 <button type="button" disabled={pending} className={buttonClass('secondary')} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</button>
                 <button type="button" disabled={pending || !forgeReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('bundle')}><GitPullRequest className="size-4" />Bundle-MR erstellen</button>
                 <button type="button" disabled={pending || !forgeReady} className={buttonClass('secondary')} onClick={() => run('status')}><RefreshCw className="size-4" />Status prüfen</button>
-                <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleOnBase || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>
+                <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>
             </div>
-            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten.</p>
+            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unten unter „Geteilte Pakete“, ohne dieses Formular.</p>
         </>}
         {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
         {result && <div role={result.status === 'invalid' || result.status === 'error' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
             {result.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
         </div>}
         {step === 3 && result?.preview && !!result.preview.errors.length && <List title="Paketprüfung" items={result.preview.errors} tone="error" />}
-        {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
+        {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.bundle.verification && <Badge label={`Prüfung: ${verificationLabel(result.bundle.verification)}`} url={result.bundle.verification.mergedMrUrl} />}{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
     </div>
 }
 
