@@ -1,8 +1,12 @@
+import { Fragment } from 'react'
 import Link from 'next/link'
 import {
+    ArrowDown,
     ArrowUpRight,
     Database,
+    FlaskConical,
     FolderOpen,
+    Layers,
     LayoutDashboard,
     Radio,
     TriangleAlert,
@@ -10,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
+import { SupersetMark } from '@/components/icons/superset-mark'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import type { DatasetOverview } from '@/lib/datapool-of-dataset'
 import type { InstalledDashboardLink } from '@/lib/installed-dashboards'
@@ -25,15 +30,24 @@ const DATASET_STATUS_LABELS: Record<string, string> = {
     AVAILABLE: 'Freigegeben',
 }
 
+/** Icon tile colours, one per system. */
+const TONES = {
+    simulator: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    platform: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    dashboards: 'bg-sky-500/10 text-sky-700 dark:text-sky-400',
+} as const
+
 /**
  * What an installed use case is in THIS instance, below the catalogue's
  * description of it. The hero above answers "should we install this?"; this
  * card answers "what runs now, and how do I reach, maintain or remove it?",
  * so it only exists for an installed entry.
  *
- * Three parts, in the order of how often they are needed: links into the
- * systems the installation lives in (portal, Superset, simulator), the
- * maintenance actions, and, set apart at the bottom, the removal.
+ * Grouped by the system each thing lives in, because each has its own owner
+ * and lifetime: the simulator is an add-on whose streams are gone after a
+ * restart, the platform holds the data, Superset shows it. The groups follow
+ * the data (generated, processed, shown), and an action sits with the thing it
+ * acts on. The removal is set apart at the bottom.
  *
  * `streams` is null when the simulator is not configured or not reachable,
  * an empty list when it is reachable and holds none for this installation.
@@ -53,17 +67,124 @@ export function InstallationSection({
 }) {
     const blocker = uninstallBlocker(dataset)
     const released = dataset?.status === 'AVAILABLE'
-    const streamLinks = simulatorUiBase ? (streams ?? []) : []
+    // Before the release the sinks do not exist yet; an unknown status says nothing.
+    const awaitingRelease = dataset?.status !== undefined && !released
     // The restart case of the installed page: a reachable simulator without
     // streams for an installation that could have them.
     const demoMissing = streams !== null && streams.length === 0 && installation.hasDataSource
-    const dataSetName = installation.dataSetName ?? 'Datensatz'
 
-    const hasLinks =
-        Boolean(installation.dataSetId) ||
-        Boolean(dataset?.datapool) ||
-        dashboards.length > 0 ||
-        streamLinks.length > 0
+    const groups: { key: string; node: React.ReactNode }[] = []
+
+    if (streams !== null && (streams.length > 0 || demoMissing)) {
+        const active = streams.filter(({ status }) => status.enabled).length
+        groups.push({
+            key: 'simulator',
+            node: (
+                <SystemGroup
+                    icon={FlaskConical}
+                    tone="simulator"
+                    title="Simulator"
+                    subtitle="Demo-Daten, eigenständiges Add-on"
+                    meta={streams.length > 0 ? `${active} von ${streams.length} aktiv` : undefined}
+                >
+                    {streams.map(({ streamName, status }) => (
+                        <Item
+                            key={status.id}
+                            icon={<Radio className="size-4" />}
+                            name={streamName}
+                            href={simulatorUiBase ? simulationUiHref(simulatorUiBase, status.id) : undefined}
+                            target="Simulator"
+                            badge={
+                                <Chip tone={status.enabled ? 'success' : 'muted'}>
+                                    {status.enabled ? 'Aktiv' : 'Pausiert'}
+                                </Chip>
+                            }
+                        />
+                    ))}
+                    {demoMissing && (
+                        <Note>
+                            Für diese Installation laufen keine Demo-Daten, zum Beispiel nach einem
+                            Neustart des Simulators.{' '}
+                            <Link
+                                href="/installed"
+                                className="font-medium text-primary underline-offset-2 hover:underline"
+                            >
+                                Unter „Installiert“ einschalten
+                            </Link>
+                        </Note>
+                    )}
+                </SystemGroup>
+            ),
+        })
+    }
+
+    if (installation.dataSetId || dataset?.datapool) {
+        groups.push({
+            key: 'platform',
+            node: (
+                <SystemGroup icon={Layers} tone="platform" title="Plattform" subtitle="CIVITAS/CORE">
+                    {/* Container first, then what it contains. */}
+                    {dataset?.datapool && (
+                        <Item
+                            icon={<FolderOpen className="size-4" />}
+                            kind="Datenpool"
+                            name={dataset.datapool.name}
+                            href={datapoolHref(dataset.datapool.id)}
+                            target="Portal"
+                        />
+                    )}
+                    {installation.dataSetId && (
+                        <Item
+                            icon={<Database className="size-4" />}
+                            kind="Datensatz"
+                            name={installation.dataSetName ?? 'Datensatz'}
+                            href={datasetHref(installation.dataSetId)}
+                            target="Portal"
+                            badge={
+                                dataset?.status ? (
+                                    <Chip tone={released ? 'success' : 'muted'}>
+                                        {DATASET_STATUS_LABELS[dataset.status] ?? dataset.status}
+                                    </Chip>
+                                ) : undefined
+                            }
+                            note={awaitingRelease ? 'Daten fließen erst nach der Freigabe im Portal.' : undefined}
+                        />
+                    )}
+                </SystemGroup>
+            ),
+        })
+    }
+
+    if (dashboards.length > 0) {
+        groups.push({
+            key: 'dashboards',
+            node: (
+                <SystemGroup
+                    icon={LayoutDashboard}
+                    tone="dashboards"
+                    title="Dashboards"
+                    subtitle="Auswertung"
+                    footer={<ReimportDashboardsButton installationId={installation.id} />}
+                >
+                    {dashboards.map((dashboard) => (
+                        <Item
+                            key={dashboard.url}
+                            icon={<SupersetMark className="w-5" />}
+                            kind="Dashboard"
+                            name={dashboard.title}
+                            href={dashboard.url}
+                            target="Superset"
+                            note={
+                                awaitingRelease
+                                    ? 'Meldet bis zur Freigabe des Datensatzes eine fehlende Tabelle.'
+                                    : undefined
+                            }
+                        />
+                    ))}
+                </SystemGroup>
+            ),
+        })
+    }
 
     return (
         <section aria-labelledby="installation-heading" className="overflow-hidden rounded-md border bg-card">
@@ -72,110 +193,20 @@ export function InstallationSection({
                     In dieser Instanz
                 </h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                    Was die Installation angelegt hat und wo es läuft.
+                    Was die Installation angelegt hat, in der Reihenfolge, in der die Daten fließen.
                 </p>
             </div>
 
-            <div className="flex flex-col gap-6 px-6 py-5">
-                {dataset?.status && (
-                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                        <span className="text-muted-foreground">Datensatz</span>
-                        <span
-                            className={
-                                released
-                                    ? 'rounded-md bg-success/10 px-2 py-0.5 text-xs font-medium text-success dark:bg-success/20'
-                                    : 'rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-                            }
-                        >
-                            {DATASET_STATUS_LABELS[dataset.status] ?? dataset.status}
-                        </span>
-                        {!released && (
-                            <span className="text-muted-foreground">
-                                Daten fließen erst nach der Freigabe im Portal.
-                                {dashboards.length > 0 && ' Bis dahin meldet das Dashboard eine fehlende Tabelle.'}
-                            </span>
-                        )}
-                    </p>
-                )}
-
-                {(hasLinks || demoMissing) && (
-                    <Group label="Öffnen">
-                        {hasLinks && (
-                            <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border">
-                                {installation.dataSetId && (
-                                    <OpenRow
-                                        icon={Database}
-                                        kind="Datensatz"
-                                        name={dataSetName}
-                                        href={datasetHref(installation.dataSetId)}
-                                        target="Portal"
-                                    />
-                                )}
-                                {dataset?.datapool && (
-                                    <OpenRow
-                                        icon={FolderOpen}
-                                        kind="Datenpool"
-                                        name={dataset.datapool.name}
-                                        href={datapoolHref(dataset.datapool.id)}
-                                        target="Portal"
-                                    />
-                                )}
-                                {dashboards.map((dashboard) => (
-                                    <OpenRow
-                                        key={dashboard.url}
-                                        icon={LayoutDashboard}
-                                        kind="Dashboard"
-                                        name={dashboard.title}
-                                        href={dashboard.url}
-                                        target="Superset"
-                                    />
-                                ))}
-                                {simulatorUiBase &&
-                                    streamLinks.map(({ streamName, status }) => (
-                                        <OpenRow
-                                            key={status.id}
-                                            icon={Radio}
-                                            kind="Demo-Stream"
-                                            name={streamName}
-                                            href={simulationUiHref(simulatorUiBase, status.id)}
-                                            target="Simulator"
-                                        >
-                                            <span
-                                                className={
-                                                    status.enabled
-                                                        ? 'shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-xs text-success dark:bg-success/20'
-                                                        : 'shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
-                                                }
-                                            >
-                                                {status.enabled ? 'Aktiv' : 'Pausiert'}
-                                            </span>
-                                        </OpenRow>
-                                    ))}
-                            </ul>
-                        )}
-                        {demoMissing && (
-                            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                                Für diese Installation laufen keine Demo-Daten, zum Beispiel nach einem
-                                Neustart des Simulators.{' '}
-                                <Link
-                                    href="/installed"
-                                    className="font-medium text-primary underline-offset-2 hover:underline"
-                                >
-                                    Unter „Installiert“ einschalten
-                                </Link>
-                            </p>
-                        )}
-                    </Group>
-                )}
-
-                {dashboards.length > 0 && (
-                    <Group label="Pflege">
-                        <div className="mt-2">
-                            <ReimportDashboardsButton installationId={installation.id} />
-                        </div>
-                    </Group>
-                )}
-            </div>
+            {groups.length > 0 && (
+                <div className="flex flex-col px-6 py-5">
+                    {groups.map(({ key, node }, index) => (
+                        <Fragment key={key}>
+                            {index > 0 && <FlowArrow />}
+                            {node}
+                        </Fragment>
+                    ))}
+                </div>
+            )}
 
             <div className="flex flex-col gap-3 border-t bg-muted/20 px-6 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1 text-xs leading-relaxed">
@@ -216,54 +247,135 @@ export function InstallationSection({
     )
 }
 
-function Group({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * One system the installation lives in. Its things hang off the icon tile on a
+ * guide line: `ml-[1.875rem]` is the tile's centre (`px-4` plus half of
+ * `size-7`), so the line starts right below it.
+ */
+function SystemGroup({
+    icon: Icon,
+    tone,
+    title,
+    subtitle,
+    meta,
+    footer,
+    children,
+}: {
+    icon: LucideIcon
+    tone: keyof typeof TONES
+    title: string
+    subtitle?: string
+    meta?: string
+    footer?: React.ReactNode
+    children: React.ReactNode
+}) {
     return (
-        <div>
-            <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</h3>
-            {children}
+        <div className="rounded-lg border bg-card">
+            <div className="flex items-center gap-3 px-4 pb-2 pt-3">
+                <span aria-hidden className={`grid size-7 shrink-0 place-items-center rounded-md ${TONES[tone]}`}>
+                    <Icon className="size-4" />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                    <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+                    {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+                </div>
+                {meta && <span className="shrink-0 text-xs text-muted-foreground">{meta}</span>}
+            </div>
+            <div className="mb-3 ml-[1.875rem] mr-3 border-l border-border">
+                <ul>{children}</ul>
+                {footer && <div className="pl-4 pt-2">{footer}</div>}
+            </div>
         </div>
     )
 }
 
 /**
- * One link out of the marketplace: what it is, its name, and in which system
- * it opens. Every row names its target, so a click never lands somewhere
- * unexpected.
+ * One thing in a system: what it is, its name, and where a click opens it.
+ * Without `href` the row only reports, for a system the page cannot link into.
  */
-function OpenRow({
-    icon: Icon,
+function Item({
+    icon,
     kind,
     name,
     href,
     target,
-    children,
+    badge,
+    note,
 }: {
-    icon: LucideIcon
-    kind: string
+    icon: React.ReactNode
+    kind?: string
     name: string
-    href: string
-    target: string
-    children?: React.ReactNode
+    href?: string
+    target?: string
+    badge?: React.ReactNode
+    note?: string
 }) {
-    return (
-        <li>
-            <a
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className="group flex items-center gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-muted/60"
-            >
-                <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+    const body = (
+        <>
+            <span className="flex items-center gap-3">
+                <span aria-hidden className="flex w-5 shrink-0 justify-center text-muted-foreground">
+                    {icon}
+                </span>
                 <span className="min-w-0 flex-1 break-words">
-                    <span className="text-muted-foreground">{kind}</span>{' '}
-                    <span className="font-medium text-foreground">„{name}“</span>
+                    {kind ? (
+                        <>
+                            <span className="text-muted-foreground">{kind}</span>{' '}
+                            <span className="font-medium text-foreground">„{name}“</span>
+                        </>
+                    ) : (
+                        <span className="font-medium text-foreground">{name}</span>
+                    )}
                 </span>
-                {children}
-                <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-                    {target}
-                    <ArrowUpRight aria-hidden className="size-3.5" />
-                </span>
-            </a>
+                {badge}
+                {href && target && (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+                        {target}
+                        <ArrowUpRight aria-hidden className="size-3.5" />
+                    </span>
+                )}
+            </span>
+            {/* Indented by the icon column, so it reads as part of the name. */}
+            {note && <span className="mt-0.5 block pl-8 text-xs leading-relaxed text-muted-foreground">{note}</span>}
+        </>
+    )
+    const row = 'block rounded-r-md py-2 pl-4 pr-3 text-sm'
+
+    return (
+        <li className="relative before:absolute before:left-0 before:top-[1.125rem] before:h-px before:w-2.5 before:bg-border">
+            {href ? (
+                <a href={href} target="_blank" rel="noreferrer" className={`group ${row} transition-colors hover:bg-muted/60`}>
+                    {body}
+                </a>
+            ) : (
+                <div className={row}>{body}</div>
+            )}
         </li>
+    )
+}
+
+function Note({ children }: { children: React.ReactNode }) {
+    return <li className="py-2 pl-4 pr-3 text-xs leading-relaxed text-muted-foreground">{children}</li>
+}
+
+function Chip({ tone, children }: { tone: 'success' | 'muted'; children: React.ReactNode }) {
+    return (
+        <span
+            className={
+                tone === 'success'
+                    ? 'shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-xs text-success dark:bg-success/20'
+                    : 'shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
+            }
+        >
+            {children}
+        </span>
+    )
+}
+
+/** The data moves on to the next system. Centred under the icon tiles. */
+function FlowArrow() {
+    return (
+        <div aria-hidden className="flex h-7 items-center pl-[23px] text-muted-foreground/60">
+            <ArrowDown className="size-4" />
+        </div>
     )
 }
