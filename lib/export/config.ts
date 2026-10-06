@@ -142,6 +142,16 @@ export function bundleBranch(slug: string, version: string): string {
     return `export/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }
 
+/**
+ * The inverse of {@link bundleBranch}, for listing what was shared: the version
+ * is the SemVer at the end, the slug everything before it. Undefined for any
+ * branch the export did not name.
+ */
+export function parseBundleBranch(branch: string): { slug: string; version: string } | undefined {
+    const match = /^export\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
+    return match ? { slug: match[1], version: match[2] } : undefined
+}
+
 export function catalogBranch(slug: string, version: string): string {
     return `catalog/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }

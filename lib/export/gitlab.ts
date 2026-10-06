@@ -48,9 +48,13 @@ export interface MergeRequestRef {
     web_url: string
     state: 'opened' | 'merged' | 'closed' | 'locked' | string
     source_branch: string
+    /** The head of the source branch; after the merge still reachable in the target project. */
     sha?: string
     merge_commit_sha?: string | null
     squash_commit_sha?: string | null
+    title?: string
+    merged_at?: string | null
+    updated_at?: string
 }
 
 /** Splits a project web URL into API base and `group/project` path. */
@@ -229,6 +233,68 @@ export async function findMergeRequests(
         client,
         `/projects/${targetProjectId}/merge_requests?source_branch=${encode(sourceBranch)}&state=all&order_by=updated_at&sort=desc&per_page=20`,
     )
+}
+
+/** The account the token belongs to: the bot every export is proposed by. */
+export async function currentUser(client: GitLabClient): Promise<{ id: number; username: string }> {
+    return gl<{ id: number; username: string }>(client, '/user')
+}
+
+/** Merge requests into `targetProjectId` opened by one author, newest first, any state. */
+export async function listMergeRequestsBy(
+    client: GitLabClient,
+    targetProjectId: number,
+    authorId: number,
+): Promise<MergeRequestRef[]> {
+    return gl<MergeRequestRef[]>(
+        client,
+        `/projects/${targetProjectId}/merge_requests?author_id=${authorId}&state=all&order_by=updated_at&sort=desc&per_page=50`,
+    )
+}
+
+/** The commits of a merge request, newest first, as GitLab lists them. */
+export async function mergeRequestCommits(
+    client: GitLabClient,
+    projectId: number,
+    iid: number,
+): Promise<{ id: string }[]> {
+    return gl<{ id: string }[]>(client, `/projects/${projectId}/merge_requests/${iid}/commits?per_page=100`)
+}
+
+/**
+ * The tree id of a directory at a ref: git's own hash over everything below
+ * it, and nothing else. Equal ids mean equal contents, whatever happened
+ * elsewhere in the repository or to the history around it, so a rebase or a
+ * squash leaves it alone. The API names a directory's id only in its
+ * parent's listing, which is read here; undefined when the directory does not
+ * exist at that ref, or the ref does not.
+ */
+export async function treeIdOf(
+    client: GitLabClient,
+    projectId: number,
+    dir: string,
+    ref: string,
+): Promise<string | undefined> {
+    const parts = dir.split('/').filter(Boolean)
+    const name = parts.pop()
+    if (!name) return undefined
+    const parent = parts.join('/')
+    for (let page = 1; ; page++) {
+        let batch: { id: string; name: string; type: string }[]
+        try {
+            batch = await gl(
+                client,
+                `/projects/${projectId}/repository/tree?per_page=100&page=${page}&ref=${encode(ref)}` +
+                    (parent ? `&path=${encode(parent)}` : ''),
+            )
+        } catch (error) {
+            if (error instanceof GitLabError && error.status === 404) return undefined
+            throw error
+        }
+        const entry = batch.find((candidate) => candidate.name === name && candidate.type === 'tree')
+        if (entry) return entry.id
+        if (batch.length < 100) return undefined
+    }
 }
 
 export type MergeRequestOutcome =
