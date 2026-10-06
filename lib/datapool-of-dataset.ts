@@ -29,6 +29,13 @@ export interface DatasetOverview {
      * then does the table a dashboard reads exist.
      */
     status?: string
+    /**
+     * The platform's `pendingSagaType`: the operation running on the dataset
+     * right now (CREATE after a release, UPDATE, UNRELEASE, DELETE). A release
+     * sets AVAILABLE at once, so only this tells that its pipeline does not run
+     * yet.
+     */
+    pendingOperation?: string
 }
 
 function datapoolOf(dataset: Record<string, unknown>): DatapoolRef | null {
@@ -62,6 +69,9 @@ export async function fetchDatasetOverview(
         return {
             datapool: datapoolOf(dataset),
             ...(typeof dataset.dataSetStatus === 'string' ? { status: dataset.dataSetStatus } : {}),
+            ...(typeof dataset.pendingSagaType === 'string' && dataset.pendingSagaType
+                ? { pendingOperation: dataset.pendingSagaType }
+                : {}),
         }
     } catch {
         return null

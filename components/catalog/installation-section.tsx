@@ -13,6 +13,7 @@ import {
     type LucideIcon,
 } from 'lucide-react'
 
+import { RefreshWhilePending } from '@/components/catalog/refresh-while-pending'
 import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
 import { SupersetMark } from '@/components/icons/superset-mark'
 import { UninstallButton } from '@/components/installed/uninstall-button'
@@ -28,6 +29,14 @@ const DATASET_STATUS_LABELS: Record<string, string> = {
     DRAFT: 'Entwurf',
     READY: 'Bereit zur Freigabe',
     AVAILABLE: 'Freigegeben',
+}
+
+/** While an operation runs, it says more than the status it will end in. */
+const PENDING_OPERATION_LABELS: Record<string, string> = {
+    CREATE: 'Wird freigegeben …',
+    UPDATE: 'Wird aktualisiert …',
+    UNRELEASE: 'Freigabe wird zurückgenommen …',
+    DELETE: 'Wird gelöscht …',
 }
 
 /** Icon tile colours, one per system. */
@@ -66,8 +75,11 @@ export function InstallationSection({
     simulatorUiBase?: string
 }) {
     const blocker = uninstallBlocker(dataset)
-    const released = dataset?.status === 'AVAILABLE'
-    // Before the release the sinks do not exist yet; an unknown status says nothing.
+    // A release sets AVAILABLE at once; its pipeline runs only once the
+    // platform has provisioned it (the pending CREATE).
+    const releasing = dataset?.pendingOperation === 'CREATE'
+    const released = dataset?.status === 'AVAILABLE' && !releasing
+    // Before that the sinks do not exist yet; an unknown status says nothing.
     const awaitingRelease = dataset?.status !== undefined && !released
     // The restart case of the installed page: a reachable simulator without
     // streams for an installation that could have them.
@@ -143,11 +155,21 @@ export function InstallationSection({
                             badge={
                                 dataset?.status ? (
                                     <Chip tone={released ? 'success' : 'muted'}>
-                                        {DATASET_STATUS_LABELS[dataset.status] ?? dataset.status}
+                                        {(dataset.pendingOperation
+                                            ? PENDING_OPERATION_LABELS[dataset.pendingOperation]
+                                            : undefined) ??
+                                            DATASET_STATUS_LABELS[dataset.status] ??
+                                            dataset.status}
                                     </Chip>
                                 ) : undefined
                             }
-                            note={awaitingRelease ? 'Daten fließen erst nach der Freigabe im Portal.' : undefined}
+                            note={
+                                releasing
+                                    ? 'Die Plattform richtet Speicher und Pipeline ein, danach fließen die Daten.'
+                                    : awaitingRelease
+                                      ? 'Daten fließen erst nach der Freigabe im Portal.'
+                                      : undefined
+                            }
                         />
                     )}
                 </SystemGroup>
@@ -175,9 +197,11 @@ export function InstallationSection({
                             href={dashboard.url}
                             target="Superset"
                             note={
-                                awaitingRelease
-                                    ? 'Meldet bis zur Freigabe des Datensatzes eine fehlende Tabelle.'
-                                    : undefined
+                                releasing
+                                    ? 'Zeigt Daten, sobald die Freigabe abgeschlossen ist.'
+                                    : awaitingRelease
+                                      ? 'Meldet bis zur Freigabe des Datensatzes eine fehlende Tabelle.'
+                                      : undefined
                             }
                         />
                     ))}
@@ -188,6 +212,7 @@ export function InstallationSection({
 
     return (
         <section aria-labelledby="installation-heading" className="overflow-hidden rounded-md border bg-card">
+            <RefreshWhilePending pending={Boolean(dataset?.pendingOperation)} />
             <div className="border-b px-6 py-4">
                 <h2 id="installation-heading" className="text-lg font-semibold text-foreground">
                     In dieser Instanz

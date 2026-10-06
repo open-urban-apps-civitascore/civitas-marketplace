@@ -11,6 +11,7 @@ import {
     applyDeclaredUrlOverride,
     buildInstallationRequest,
     describeInstallFailure,
+    describeReleaseFailure,
     describeUninstallFailure,
     resolveBrokerOverride,
     resolveDsnOverride,
@@ -73,6 +74,10 @@ export async function installEntry(
     const customBrokerUrl = typeof brokerField === 'string' ? brokerField.trim() : ''
     const poolField = formData.get('datapoolId')
     const datapoolId = typeof poolField === 'string' ? poolField.trim() : ''
+    // The dialog's release choice. Anything else, the dialog-less structure
+    // form included, installs a draft: a release publishes data, so it is
+    // never the default.
+    const releaseRequested = formData.get('releaseMode') === 'release'
 
     let entry: CatalogEntry | undefined
     try {
@@ -128,6 +133,13 @@ export async function installEntry(
 
     const receipt = (await res.response.json()) as InstallationReceipt
     const summary = summarizeInstallation(receipt, entry.manifest.displayName)
+    // The first follow-up, so the platform provisions while the demo data and
+    // the dashboards are still being set up. Like them, a refusal is a remark
+    // in the summary, never an install failure.
+    const release =
+        releaseRequested && !isDataStructureEntry(effectiveEntry)
+            ? await releaseInstalledDataset(receipt.dataSetId)
+            : { started: false, segment: '' }
     // Demo activation happens AFTER the install committed, and its failure is a
     // warning in the summary, never an install failure: the simulator is an
     // add-on, and a dead add-on must not make a use case uninstallable.
@@ -144,7 +156,7 @@ export async function installEntry(
     // that fails to import is a remark in the summary, never an install failure.
     const dashboardSegment = isDataStructureEntry(effectiveEntry)
         ? ''
-        : await activateDashboards(effectiveEntry, receipt)
+        : await activateDashboards(effectiveEntry, receipt, release.started)
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -156,8 +168,63 @@ export async function installEntry(
     revalidatePath('/instance')
     return {
         status: 'created',
-        detail: `${summary}${demoSegment}${dashboardSegment}${installation}`,
+        detail: `${summary}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
         httpStatus: 201,
+    }
+}
+
+/**
+ * Releases the dataset an install just created, in the two steps the portal
+ * takes as well: stage (DRAFT to READY, checked at once), then release (READY
+ * to AVAILABLE). The platform then provisions sinks, routes and the pipeline
+ * in a saga, and the data flows once that is done.
+ *
+ * A refused step ends here and says which one it was: a refused stage leaves
+ * the draft, a refused release a staged dataset, and the portal can release
+ * either. Nothing is rolled back, because nothing is wrong with the install.
+ */
+async function releaseInstalledDataset(
+    dataSetId: string | undefined,
+): Promise<{ started: boolean; segment: string }> {
+    if (!dataSetId) {
+        return { started: false, segment: ' · Freigabe NICHT gestartet: Antwort trägt keine Datensatz-ID' }
+    }
+    // Outside the try block: a missing session ends in a redirect, which
+    // travels as an exception and must not read as an unreachable backend.
+    const accessToken = await getAccessToken()
+
+    for (const step of ['stage', 'release'] as const) {
+        let response: Response
+        try {
+            response = await fetch(
+                `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/datasets/${encodeURIComponent(dataSetId)}/${step}`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    cache: 'no-store',
+                },
+            )
+        } catch (error) {
+            return {
+                started: false,
+                segment: ` · Freigabe NICHT gestartet: Portal-Backend nicht erreichbar (${error instanceof Error ? error.message : String(error)})`,
+            }
+        }
+        if (!response.ok) {
+            return {
+                started: false,
+                segment: describeReleaseFailure(
+                    step,
+                    response.status,
+                    response.statusText,
+                    await response.text().catch(() => ''),
+                ),
+            }
+        }
+    }
+    return {
+        started: true,
+        segment: ' · Freigabe gestartet: Die Plattform richtet Speicher und Pipeline ein, danach fließen die Daten',
     }
 }
 
@@ -246,7 +313,11 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
  * back as a summary segment: a dashboard that is missing must say why, and
  * one that arrived must say where.
  */
-async function activateDashboards(entry: UseCaseEntry, receipt: InstallationReceipt): Promise<string> {
+async function activateDashboards(
+    entry: UseCaseEntry,
+    receipt: InstallationReceipt,
+    releaseStarted: boolean,
+): Promise<string> {
     if ((entry.bundle.dashboards ?? []).length === 0) return ''
     const config = supersetConfig()
     if (!config) {
@@ -261,10 +332,12 @@ async function activateDashboards(entry: UseCaseEntry, receipt: InstallationRece
         { installationId, dataSetId, dataSetName: receipt.dataSetName ?? entry.manifest.displayName },
         config,
     )
-    // The install leaves the dataset a draft, so the hint always applies here.
-    return outcomes
-        .map(({ ok, text }) => ` · ${text}${ok ? ' (zeigt Daten nach der Freigabe im Portal)' : ''}`)
-        .join('')
+    // Until its dataset is released, a dashboard's table does not exist. After a
+    // release started here it appears once the platform has provisioned it.
+    const hint = releaseStarted
+        ? ' (zeigt Daten, sobald die Freigabe abgeschlossen ist)'
+        : ' (zeigt Daten nach der Freigabe im Portal)'
+    return outcomes.map(({ ok, text }) => ` · ${text}${ok ? hint : ''}`).join('')
 }
 
 interface DashboardTarget {
