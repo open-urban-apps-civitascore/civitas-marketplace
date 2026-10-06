@@ -5,6 +5,7 @@ import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
 import { SubmitButton } from '@/components/catalog/submit-button'
+import { DATAPOOL_NAME_MAX, DATAPOOL_NAME_MIN, suggestDatapoolName } from '@/lib/datapool-name'
 import type { DatapoolOption } from '@/lib/datapools'
 import { installEntry } from '@/lib/install-actions'
 
@@ -21,14 +22,20 @@ import { installEntry } from '@/lib/install-actions'
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
 type ReleaseMode = 'draft' | 'release'
+/**
+ * Where the install goes. A new pool is the default, under a proposed name:
+ * it puts nothing next to data whose access was set up for something else.
+ * Choosing an existing pool stays a deliberate step.
+ */
+type DatapoolMode = 'new' | 'existing'
 
 const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
 
 /**
- * Which datapool the dialog opens with. A single pool is no choice, so it is
- * taken. With several, none is preselected: a default would let a user click
- * through into a pool they never looked at, and the pool decides who gets
- * access to what is installed there.
+ * Which existing datapool is selected once the user switches to one. A single
+ * pool is no choice, so it is taken. With several, none is preselected: a
+ * default would let a user click through into a pool they never looked at, and
+ * the pool decides who gets access to what is installed there.
  */
 function initialDatapoolId(datapools: DatapoolOption[]): string {
     return datapools.length === 1 ? datapools[0].id : ''
@@ -59,6 +66,14 @@ export function InstallDialog({
     const [step, setStep] = useState(0)
     const [mode, setMode] = useState<DataSourceMode>(demoAvailable ? 'demo' : 'later')
     const [brokerUrl, setBrokerUrl] = useState('')
+    const [datapoolMode, setDatapoolMode] = useState<DatapoolMode>('new')
+    const [newDatapoolName, setNewDatapoolName] = useState(() =>
+        suggestDatapoolName(
+            displayName,
+            version,
+            datapools.map((pool) => pool.name),
+        ),
+    )
     const [datapoolId, setDatapoolId] = useState(() => initialDatapoolId(datapools))
     const [releaseMode, setReleaseMode] = useState<ReleaseMode>('draft')
     const [result, formAction, pending] = useActionState(installEntry, null)
@@ -70,7 +85,10 @@ export function InstallDialog({
     // for the target: without a datapool the platform refuses the whole install.
     const stepIncomplete =
         (step === 0 && mode === 'custom' && brokerUrl.trim() === '') ||
-        (step === 1 && !datapool)
+        (step === 1 &&
+            (datapoolMode === 'existing'
+                ? !datapool
+                : newDatapoolName.trim().length < DATAPOOL_NAME_MIN))
 
     function close() {
         setOpen(false)
@@ -159,6 +177,10 @@ export function InstallDialog({
                                 <TargetStep
                                     datapools={datapools}
                                     datapoolProblem={datapoolProblem}
+                                    datapoolMode={datapoolMode}
+                                    onDatapoolMode={setDatapoolMode}
+                                    newDatapoolName={newDatapoolName}
+                                    onNewDatapoolName={setNewDatapoolName}
                                     datapoolId={datapoolId}
                                     onDatapool={setDatapoolId}
                                     releaseMode={releaseMode}
@@ -171,7 +193,11 @@ export function InstallDialog({
                                     version={version}
                                     mode={mode}
                                     brokerUrl={brokerUrl}
-                                    datapoolName={datapool?.name ?? ''}
+                                    datapoolName={
+                                        datapoolMode === 'new'
+                                            ? `„${newDatapoolName.trim()}“, wird neu angelegt`
+                                            : (datapool?.name ?? '')
+                                    }
                                     releaseMode={releaseMode}
                                 />
                             )}
@@ -213,7 +239,17 @@ export function InstallDialog({
                                     <input type="hidden" name="entryId" value={entryId} />
                                     <input type="hidden" name="dataSourceMode" value={mode} />
                                     <input type="hidden" name="brokerUrl" value={brokerUrl} />
-                                    <input type="hidden" name="datapoolId" value={datapoolId} />
+                                    <input type="hidden" name="datapoolMode" value={datapoolMode} />
+                                    <input
+                                        type="hidden"
+                                        name="datapoolId"
+                                        value={datapoolMode === 'existing' ? datapoolId : ''}
+                                    />
+                                    <input
+                                        type="hidden"
+                                        name="newDatapoolName"
+                                        value={datapoolMode === 'new' ? newDatapoolName.trim() : ''}
+                                    />
                                     <input type="hidden" name="releaseMode" value={releaseMode} />
                                     <SubmitButton
                                         pending={pending}
@@ -348,6 +384,10 @@ function DataSourceStep({
 function TargetStep({
     datapools,
     datapoolProblem,
+    datapoolMode,
+    onDatapoolMode,
+    newDatapoolName,
+    onNewDatapoolName,
     datapoolId,
     onDatapool,
     releaseMode,
@@ -355,12 +395,17 @@ function TargetStep({
 }: {
     datapools: DatapoolOption[]
     datapoolProblem?: string
+    datapoolMode: DatapoolMode
+    onDatapoolMode: (mode: DatapoolMode) => void
+    newDatapoolName: string
+    onNewDatapoolName: (name: string) => void
     datapoolId: string
     onDatapool: (id: string) => void
     releaseMode: ReleaseMode
     onReleaseMode: (mode: ReleaseMode) => void
 }) {
     const selected = datapools.find((pool) => pool.id === datapoolId)
+    const nameTooShort = newDatapoolName.trim().length < DATAPOOL_NAME_MIN
 
     return (
         <div className="flex flex-col gap-6">
@@ -370,12 +415,40 @@ function TargetStep({
                     Datensatz gehören danach zu diesem Pool. Über ihn werden auch die
                     Zugriffsrechte vergeben.
                 </p>
-                {datapools.length === 0 ? (
-                    <p className="rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm leading-relaxed text-warn dark:bg-warn/15">
-                        {datapoolProblem ??
-                            'Auf dieser Instanz gibt es noch keinen Datenpool, den Sie lesen dürfen. Legen Sie im Portal einen an (Datenpools → Neu) und öffnen Sie diese Seite erneut.'}
-                    </p>
-                ) : (
+                <OptionCard
+                    selected={datapoolMode === 'new'}
+                    onSelect={() => onDatapoolMode('new')}
+                    title="Neuen Datenpool anlegen"
+                    description="Wird mit der Installation angelegt. Wer darauf zugreifen darf, legen Sie danach im Portal fest."
+                >
+                    <label className="flex flex-col gap-1 text-xs font-medium">
+                        Name des Datenpools
+                        <input
+                            type="text"
+                            value={newDatapoolName}
+                            onChange={(event) => onNewDatapoolName(event.target.value)}
+                            maxLength={DATAPOOL_NAME_MAX}
+                            className="rounded-md border bg-background px-2 py-1.5 text-sm font-normal"
+                        />
+                        {nameTooShort && (
+                            <span className="font-normal text-warn">
+                                Mindestens {DATAPOOL_NAME_MIN} Zeichen.
+                            </span>
+                        )}
+                    </label>
+                </OptionCard>
+                <OptionCard
+                    selected={datapoolMode === 'existing'}
+                    disabled={datapools.length === 0}
+                    onSelect={() => onDatapoolMode('existing')}
+                    title="Bestehenden Datenpool wählen"
+                    description={
+                        datapools.length === 0
+                            ? (datapoolProblem ??
+                              'Auf dieser Instanz gibt es noch keinen Datenpool, den Sie lesen dürfen.')
+                            : 'Datenquellen und Datensatz kommen zu dem, was dort schon liegt, und erben dessen Zugriffsrechte.'
+                    }
+                >
                     <label className="flex flex-col gap-1 text-xs font-medium">
                         Datenpool
                         <select
@@ -398,7 +471,7 @@ function TargetStep({
                             </span>
                         )}
                     </label>
-                )}
+                </OptionCard>
             </div>
 
             <div className="flex flex-col gap-3">

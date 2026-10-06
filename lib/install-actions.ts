@@ -5,11 +5,14 @@ import { revalidatePath } from 'next/cache'
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
+import { DATAPOOL_NAME_MIN } from '@/lib/datapool-name'
+import { createDatapool, deleteDatapool, type DatapoolOption } from '@/lib/datapools'
 import {
     InstallPayloadError,
     applyDeclaredDsnOverride,
     applyDeclaredUrlOverride,
     buildInstallationRequest,
+    clampDescription,
     describeInstallFailure,
     describeReleaseFailure,
     describeUninstallFailure,
@@ -72,8 +75,14 @@ export async function installEntry(
         modeRaw === 'demo' || modeRaw === 'custom' ? modeRaw : 'later'
     const brokerField = formData.get('brokerUrl')
     const customBrokerUrl = typeof brokerField === 'string' ? brokerField.trim() : ''
+    // The dialog sends either a pool to install into or the name of one to
+    // create; its mode decides which of the two fields counts.
+    const newPoolRequested = formData.get('datapoolMode') === 'new'
     const poolField = formData.get('datapoolId')
-    const datapoolId = typeof poolField === 'string' ? poolField.trim() : ''
+    const datapoolId = !newPoolRequested && typeof poolField === 'string' ? poolField.trim() : ''
+    const newPoolField = formData.get('newDatapoolName')
+    const newDatapoolName =
+        newPoolRequested && typeof newPoolField === 'string' ? newPoolField.trim() : ''
     // The dialog's release choice. Anything else, the dialog-less structure
     // form included, installs a draft: a release publishes data, so it is
     // never the default.
@@ -106,10 +115,17 @@ export async function installEntry(
     if (!isDataStructureEntry(entry)) {
         // The dialog does not let the user get this far without a datapool; this is for the
         // request that never went through the dialog.
-        if (!datapoolId) {
+        if (!datapoolId && !newDatapoolName) {
             return {
                 status: 'error',
                 detail: 'Kein Datenpool gewählt. Datenquellen und Datensatz eines Anwendungsfalls werden in einem Datenpool angelegt.',
+                httpStatus: 0,
+            }
+        }
+        if (newDatapoolName && newDatapoolName.length < DATAPOOL_NAME_MIN) {
+            return {
+                status: 'invalid',
+                detail: `Der Name des neuen Datenpools braucht mindestens ${DATAPOOL_NAME_MIN} Zeichen.`,
                 httpStatus: 0,
             }
         }
@@ -128,11 +144,31 @@ export async function installEntry(
         }
     }
 
+    // The new pool comes only now, once the package has become a valid request:
+    // a package that cannot be installed must not leave an empty pool behind.
+    let createdPool: DatapoolOption | undefined
+    if (newDatapoolName && !isDataStructureEntry(effectiveEntry)) {
+        const creation = await createDatapool(
+            newDatapoolName,
+            clampDescription(
+                `Angelegt bei der Installation von „${entry.manifest.displayName}“ v${entry.manifest.version} aus dem Marketplace.`,
+            ) ?? newDatapoolName,
+        )
+        if (!creation.ok) return creation.failure
+        createdPool = creation.pool
+        request = { ...request, datapoolId: creation.pool.id }
+    }
+
     const res = await postInstallation(request)
-    if (!res.ok) return res.failure
+    if (!res.ok) {
+        // Nothing went into the new pool, so it goes again rather than linger empty.
+        if (!createdPool) return res.failure
+        return { ...res.failure, detail: `${res.failure.detail}${await discardCreatedPool(createdPool)}` }
+    }
 
     const receipt = (await res.response.json()) as InstallationReceipt
     const summary = summarizeInstallation(receipt, entry.manifest.displayName)
+    const poolSegment = createdPool ? ` · Datenpool „${createdPool.name}“ neu angelegt` : ''
     // The first follow-up, so the platform provisions while the demo data and
     // the dashboards are still being set up. Like them, a refusal is a remark
     // in the summary, never an install failure.
@@ -168,9 +204,16 @@ export async function installEntry(
     revalidatePath('/instance')
     return {
         status: 'created',
-        detail: `${summary}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
+        detail: `${summary}${poolSegment}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
         httpStatus: 201,
     }
+}
+
+/** Removes a pool this install created and could not fill, and says how that went. */
+async function discardCreatedPool(pool: DatapoolOption): Promise<string> {
+    return (await deleteDatapool(pool.id))
+        ? ` · Der dafür angelegte Datenpool „${pool.name}“ wurde wieder entfernt`
+        : ` · Der dafür angelegte Datenpool „${pool.name}“ ist leer stehen geblieben und lässt sich im Portal löschen`
 }
 
 /**
