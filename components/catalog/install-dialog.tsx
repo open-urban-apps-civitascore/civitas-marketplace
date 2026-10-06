@@ -77,11 +77,11 @@ export function InstallDialog({
         setStep(0)
     }
 
-    // Installed when the page loaded: the page's installation section has taken
-    // over, and a disabled trigger would only repeat the badge. An install from
-    // this dialog re-renders the page as installed too (revalidatePath), so the
-    // dialog stays while it has an outcome of its own to show.
-    if (installed && !result) return null
+    // Installed and closed: the page's installation section has taken over, and
+    // a disabled trigger would only repeat the badge. An install from this
+    // dialog re-renders the page as installed (revalidatePath) while the dialog
+    // is still open, so its outcome stays readable until "Fertig".
+    if (installed && !open) return null
 
     return (
         <div className="flex flex-col gap-2">
@@ -95,7 +95,9 @@ export function InstallDialog({
                     Installieren
                 </button>
             )}
-            {!open && result && (
+            {/* A refusal stays below the trigger once the dialog is closed, so
+                the user can retry knowing why. A success needs no trace here. */}
+            {!open && result && result.status !== 'created' && (
                 <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
                     {feedbackText(result)}
                 </p>
