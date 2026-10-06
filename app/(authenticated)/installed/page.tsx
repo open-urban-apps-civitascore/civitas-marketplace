@@ -5,6 +5,7 @@ import { partitionInstallations, readAllInstallations } from '@/lib/installation
 import { getAccessToken, requireSession } from '@/lib/session'
 import { isSimulatorConfigured, listSimulations, type SimulationStatus } from '@/lib/simulator/client'
 import { streamsOfInstallation } from '@/lib/simulator/registration'
+import { simulatorUiUrl } from '@/lib/simulator/ui-links'
 
 interface InstalledArtifactRow {
     artifactType:
@@ -72,15 +73,23 @@ function InstallationSimulator({
     installationId,
     catalogEntryId,
     hasDataSource,
+    simulatorUiBase,
 }: {
     simulations: SimulationStatus[]
     installationId: string
     catalogEntryId?: string
     hasDataSource: boolean
+    simulatorUiBase?: string
 }) {
     const streams = streamsOfInstallation(simulations, installationId)
     if (streams.length > 0) {
-        return <SimulatorPanel installationId={installationId} initialStreams={streams} />
+        return (
+            <SimulatorPanel
+                installationId={installationId}
+                initialStreams={streams}
+                simulatorUiUrl={simulatorUiBase}
+            />
+        )
     }
     if (!catalogEntryId || !hasDataSource) return null
     return <ReactivateDemoPanel installationId={installationId} catalogEntryId={catalogEntryId} />
@@ -95,10 +104,12 @@ function InstallationCard({
     installation,
     simulations,
     simulatorLive,
+    simulatorUiBase,
 }: {
     installation: InstallationRow
     simulations: SimulationStatus[]
     simulatorLive: boolean
+    simulatorUiBase?: string
 }) {
     return (
         <div className="overflow-hidden rounded-xl border bg-card">
@@ -147,6 +158,7 @@ function InstallationCard({
                     hasDataSource={installation.artifacts.some(
                         (artifact) => artifact.artifactType === 'DATA_SOURCE',
                     )}
+                    simulatorUiBase={simulatorUiBase}
                 />
             )}
 
@@ -248,6 +260,7 @@ export default async function InstalledPage() {
             // degrade to no panels
         }
     }
+    const simulatorUiBase = simulatorUiUrl()
 
     return (
         <div className="flex flex-col gap-6">
@@ -280,6 +293,7 @@ export default async function InstalledPage() {
                         installation={installation}
                         simulations={simulations}
                         simulatorLive={simulatorLive}
+                        simulatorUiBase={simulatorUiBase}
                     />
                 ))
             )}
@@ -299,6 +313,7 @@ export default async function InstalledPage() {
                                 installation={installation}
                                 simulations={simulations}
                                 simulatorLive={simulatorLive}
+                                simulatorUiBase={simulatorUiBase}
                             />
                         ))}
                     </div>
