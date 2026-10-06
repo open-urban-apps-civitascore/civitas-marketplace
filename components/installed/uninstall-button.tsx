@@ -36,13 +36,21 @@ function feedbackText(result: UninstallResult): string {
  *
  * `size`: 'sm' in the header of an installation card, 'md' next to the other
  * buttons of a use case's detail page.
+ *
+ * `disabled`: set by a page that already knows the platform would refuse, and
+ * says why in the element `describedBy` names. It reflects the state the page
+ * was rendered with; the server still decides on every click.
  */
 export function UninstallButton({
     installationId,
     size = 'sm',
+    disabled = false,
+    describedBy,
 }: {
     installationId: string
     size?: 'sm' | 'md'
+    disabled?: boolean
+    describedBy?: string
 }) {
     const [result, formAction, pending] = useActionState(uninstallInstallation, null)
 
@@ -65,8 +73,9 @@ export function UninstallButton({
                 <input type="hidden" name="installationId" value={installationId} />
                 <button
                     type="submit"
-                    disabled={pending}
-                    className={`inline-flex items-center gap-1.5 rounded-md border border-error/40 font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:opacity-50 ${size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs'}`}
+                    disabled={pending || disabled}
+                    aria-describedby={describedBy}
+                    className={`inline-flex items-center gap-1.5 rounded-md border border-error/40 font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent ${size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs'}`}
                 >
                     {pending ? (
                         <Loader2 className={`${iconClass} animate-spin`} />
