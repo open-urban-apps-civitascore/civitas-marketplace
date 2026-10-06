@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildCatalogEntry, catalogInputFromManifest, type CatalogEntryInput } from '@/lib/export/catalog-entry'
+import type { ExportMetadata } from '@/lib/export/metadata'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
 import { transformSnapshot } from '@/lib/export/transform'
 
@@ -13,7 +14,7 @@ const snapshot: InstanceSnapshot = {
     pipelines: [],
     warnings: [],
 }
-const metadata = {
+const metadata: ExportMetadata = {
     themes: ['umwelt-klima'],
     contact: { email: 'amt@stadt.example' },
     implementation: { collaboration: { wanted: false } },
