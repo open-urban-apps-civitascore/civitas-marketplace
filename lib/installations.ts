@@ -13,12 +13,20 @@ interface InstallationRow {
     /** The dataset the install produced, if any. */
     dataSetId?: string
     dataSetName?: string
+    /** One line per artifact the install created. */
+    artifacts?: { artifactType?: string }[]
 }
 
 /** What a page needs to know about the active installation of an entry. */
 export interface ActiveInstallation {
     id: string
     dataSetId?: string
+    dataSetName?: string
+    /**
+     * Whether the install created a data source. Demo streams publish into
+     * one, so without it an installation never has streams to miss.
+     */
+    hasDataSource: boolean
 }
 
 /**
@@ -101,7 +109,12 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
 
         const row = activeInstallationOf(list.rows, entryId)
         if (!row) return null
-        return { id: row.id, ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}) }
+        return {
+            id: row.id,
+            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
+            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
+        }
     } catch {
         return null
     }

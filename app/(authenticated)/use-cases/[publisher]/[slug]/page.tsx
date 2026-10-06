@@ -16,9 +16,8 @@ import { Chips } from '@/components/catalog/chip'
 import { Code } from '@/components/catalog/code'
 import { CurationTierBadge, curationHint } from '@/components/catalog/curation-tier'
 import { InstallDialog } from '@/components/catalog/install-dialog'
-import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
+import { InstallationSection } from '@/components/catalog/installation-section'
 import { SamplePreview } from '@/components/catalog/sample-preview'
-import { UninstallButton } from '@/components/installed/uninstall-button'
 import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { FIELD_LABELS } from '@/lib/catalog/vocabulary'
@@ -26,7 +25,6 @@ import { fetchDatapools, type DatapoolListing } from '@/lib/datapools'
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import { fetchActiveInstallation } from '@/lib/installations'
-import { datapoolHref } from '@/lib/portal-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import {
     buildUseCaseListing,
@@ -35,7 +33,9 @@ import {
     factGroups,
     type Fact,
 } from '@/lib/use-case-catalog/listing'
-import { isSimulatorConfigured } from '@/lib/simulator/client'
+import { isSimulatorConfigured, listSimulations } from '@/lib/simulator/client'
+import { streamsOfInstallation, type InstallationStream } from '@/lib/simulator/registration'
+import { simulatorUiUrl } from '@/lib/simulator/ui-links'
 
 /**
  * One use case in full, for the person who has to decide whether their
@@ -46,6 +46,11 @@ import { isSimulatorConfigured } from '@/lib/simulator/client'
  * to it. They are not two templates: the same row shape carries both, and the
  * pin is the only thing that differs, so the page branches on the pin in two
  * places and is otherwise one layout.
+ *
+ * The hero is for deciding: what this is, and installing it. Once installed,
+ * everything about running it (links into portal, Superset and simulator,
+ * maintenance, removal) moves into its own section below, so the two concerns
+ * never share one row of buttons.
  */
 export default async function UseCaseDetailPage({
     params,
@@ -73,22 +78,23 @@ export default async function UseCaseDetailPage({
         listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
     ])
     const installed = installation !== null
-    // What depends on the installation waits for it, and the two reads start
+    // What depends on the installation waits for it, and the three reads start
     // together. The dataset gives the pool for the link into the portal (read
     // from the dataset, not from the install record: a dataset can be moved to
-    // another pool later) and the release status for the dashboard hint.
-    const [dataset, dashboards]: [DatasetOverview | null, InstalledDashboardLink[]] = installation
+    // another pool later) and the release status.
+    const [dataset, dashboards, streams]: [
+        DatasetOverview | null,
+        InstalledDashboardLink[],
+        InstallationStream[] | null,
+    ] = installation
         ? await Promise.all([
               installation.dataSetId
                   ? fetchDatasetOverview(installation.dataSetId, await getAccessToken())
                   : Promise.resolve(null),
               fetchInstalledDashboards(listing.id, installation.id),
+              readInstallationStreams(installation.id),
           ])
-        : [null, []]
-    const installedInto = dataset?.datapool ?? null
-    // Only a released dataset has its sinks rolled out, so before that the
-    // table a dashboard reads does not exist yet. An unknown status says nothing.
-    const awaitingRelease = dataset?.status !== undefined && dataset.status !== 'AVAILABLE'
+        : [null, [], null]
     const previewAvailable = isSimulatorConfigured()
 
     return (
@@ -154,8 +160,12 @@ export default async function UseCaseDetailPage({
                                     </span>
                                 </span>
                             </div>
+                            {/* Deciding only. Installed, the dialog renders nothing
+                                (until it has an outcome of its own to show) and the
+                                sample preview gives way to the live streams below,
+                                so the row collapses instead of leaving a gap. */}
                             {listing.install && (
-                                <div className="mt-5 flex flex-wrap items-start gap-2">
+                                <div className="mt-5 flex flex-wrap items-start gap-2 empty:hidden">
                                     <InstallDialog
                                         entryId={listing.id}
                                         displayName={listing.displayName}
@@ -165,59 +175,16 @@ export default async function UseCaseDetailPage({
                                         datapools={datapools.pools}
                                         datapoolProblem={datapools.problem}
                                     />
-                                    {installedInto && (
-                                        <a
-                                            href={datapoolHref(installedInto.id)}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
-                                        >
-                                            Datenpool „{installedInto.name}“ im Portal öffnen
-                                            <ArrowUpRight className="size-4" />
-                                        </a>
-                                    )}
-                                    {previewAvailable && (
+                                    {previewAvailable && !installed && (
                                         <SamplePreview entryId={listing.id} displayName={listing.displayName} />
                                     )}
-                                    {installation && (
-                                        <UninstallButton installationId={installation.id} size="md" />
-                                    )}
                                 </div>
                             )}
 
-                            {dashboards.length > 0 && (
-                                <div className="mt-5 rounded-lg border bg-muted/30 px-4 py-3">
-                                    <h2 className="text-sm font-semibold text-foreground">Dashboards</h2>
-                                    {awaitingRelease && (
-                                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                                            Zeigen Daten, sobald der Datensatz im Portal freigegeben ist. Bis
-                                            dahin meldet Superset, dass die Tabelle fehlt.
-                                        </p>
-                                    )}
-                                    <ul className="mt-2 flex flex-col gap-1.5">
-                                        {dashboards.map((dashboard) => (
-                                            <li key={dashboard.url}>
-                                                <a
-                                                    href={dashboard.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-2 hover:underline"
-                                                >
-                                                    {dashboard.title}
-                                                    <ArrowUpRight className="size-4" />
-                                                </a>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                    {installation && (
-                                        <div className="mt-3">
-                                            <ReimportDashboardsButton installationId={installation.id} />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {listing.reference && (
+                            {/* An installable entry's reference is its package source,
+                                a technical detail; it is listed there. A described
+                                entry has nothing else to offer, so it stays here. */}
+                            {listing.reference && !listing.install && (
                                 <div className="mt-5 flex flex-col items-start gap-1.5">
                                     <a
                                         href={listing.reference.url}
@@ -238,6 +205,17 @@ export default async function UseCaseDetailPage({
                             )}
                         </div>
                     </section>
+
+                    {installation && (
+                        <InstallationSection
+                            installation={installation}
+                            dataset={dataset}
+                            dashboards={dashboards}
+                            streams={streams}
+                            simulatorUiBase={simulatorUiUrl()}
+                        />
+                    )}
+
                     {logicModel.length > 0 && (
                         <section className="rounded-md border bg-card p-6">
                             <h2 className="text-lg font-semibold text-foreground">
@@ -382,6 +360,19 @@ export default async function UseCaseDetailPage({
                             </Code>
                         </Row>
                     )}
+                    {listing.install && listing.reference && (
+                        <Row label="Referenz">
+                            <a
+                                href={listing.reference.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                            >
+                                {listing.reference.source ?? 'Quelle'}
+                                <ArrowUpRight className="size-4" />
+                            </a>
+                        </Row>
+                    )}
                 </dl>
 
                 {listing.stack.length > 0 && (
@@ -403,6 +394,21 @@ export default async function UseCaseDetailPage({
             </p>
         </div>
     )
+}
+
+/**
+ * The installation's demo streams, or null when the simulator is not
+ * configured or not reachable. Null and an empty list are different states, as
+ * on the installed page: only a REACHABLE simulator without streams is the
+ * restart case that the hint to switch them on again exists for.
+ */
+async function readInstallationStreams(installationId: string): Promise<InstallationStream[] | null> {
+    if (!isSimulatorConfigured()) return null
+    try {
+        return streamsOfInstallation(await listSimulations(), installationId)
+    } catch {
+        return null
+    }
 }
 
 function InfoGroup({ label, children }: { label: string; children: React.ReactNode }) {
