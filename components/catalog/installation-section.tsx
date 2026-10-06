@@ -236,7 +236,7 @@ export function InstallationSection({
             <div className="flex flex-col gap-3 border-t bg-muted/20 px-6 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1 text-xs leading-relaxed">
                     {blocker ? (
-                        <div role="note" className="flex gap-2 text-warn">
+                        <div id="uninstall-blocker" role="note" className="flex gap-2 text-warn">
                             <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
                             <p>
                                 <span className="font-medium">{blocker.reason}</span> {blocker.remedy}
@@ -265,7 +265,12 @@ export function InstallationSection({
                     )}
                 </div>
                 <div className="sm:max-w-xs sm:shrink-0">
-                    <UninstallButton installationId={installation.id} size="md" />
+                    <UninstallButton
+                        installationId={installation.id}
+                        size="md"
+                        disabled={blocker !== null}
+                        describedBy={blocker ? 'uninstall-blocker' : undefined}
+                    />
                 </div>
             </div>
         </section>

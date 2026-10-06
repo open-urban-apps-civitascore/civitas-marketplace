@@ -23,9 +23,11 @@ import { installEntry } from '@/lib/install-actions'
 type DataSourceMode = 'demo' | 'custom' | 'later'
 type ReleaseMode = 'draft' | 'release'
 /**
- * Where the install goes. A new pool is the default, under a proposed name:
- * it puts nothing next to data whose access was set up for something else.
- * Choosing an existing pool stays a deliberate step.
+ * Where the install goes. For a person who may create pools, a new one is the
+ * default, under a proposed name: it puts nothing next to data whose access was
+ * set up for something else, and choosing an existing pool stays a deliberate
+ * step. Without that right the new pool is shown but not offered, so the
+ * dialog does not preselect what the platform would refuse.
  */
 type DatapoolMode = 'new' | 'existing'
 
@@ -49,6 +51,7 @@ export function InstallDialog({
     demoAvailable = false,
     datapools = [],
     datapoolProblem,
+    canCreateDatapool = false,
 }: {
     entryId: string
     displayName: string
@@ -61,12 +64,14 @@ export function InstallDialog({
     datapools?: DatapoolOption[]
     /** Why the list is empty although the instance may well have datapools. */
     datapoolProblem?: string
+    /** DATAPOOL_CREATE across the tenant: decides whether a new pool is offered. */
+    canCreateDatapool?: boolean
 }) {
     const [open, setOpen] = useState(false)
     const [step, setStep] = useState(0)
     const [mode, setMode] = useState<DataSourceMode>(demoAvailable ? 'demo' : 'later')
     const [brokerUrl, setBrokerUrl] = useState('')
-    const [datapoolMode, setDatapoolMode] = useState<DatapoolMode>('new')
+    const [datapoolMode, setDatapoolMode] = useState<DatapoolMode>(canCreateDatapool ? 'new' : 'existing')
     const [newDatapoolName, setNewDatapoolName] = useState(() =>
         suggestDatapoolName(
             displayName,
@@ -177,6 +182,7 @@ export function InstallDialog({
                                 <TargetStep
                                     datapools={datapools}
                                     datapoolProblem={datapoolProblem}
+                                    canCreateDatapool={canCreateDatapool}
                                     datapoolMode={datapoolMode}
                                     onDatapoolMode={setDatapoolMode}
                                     newDatapoolName={newDatapoolName}
@@ -384,6 +390,7 @@ function DataSourceStep({
 function TargetStep({
     datapools,
     datapoolProblem,
+    canCreateDatapool,
     datapoolMode,
     onDatapoolMode,
     newDatapoolName,
@@ -395,6 +402,7 @@ function TargetStep({
 }: {
     datapools: DatapoolOption[]
     datapoolProblem?: string
+    canCreateDatapool: boolean
     datapoolMode: DatapoolMode
     onDatapoolMode: (mode: DatapoolMode) => void
     newDatapoolName: string
@@ -417,9 +425,14 @@ function TargetStep({
                 </p>
                 <OptionCard
                     selected={datapoolMode === 'new'}
+                    disabled={!canCreateDatapool}
                     onSelect={() => onDatapoolMode('new')}
                     title="Neuen Datenpool anlegen"
-                    description="Wird mit der Installation angelegt. Wer darauf zugreifen darf, legen Sie danach im Portal fest."
+                    description={
+                        canCreateDatapool
+                            ? 'Wird mit der Installation angelegt. Wer darauf zugreifen darf, legen Sie danach im Portal fest.'
+                            : 'Ihrer Rolle fehlt das Recht, Datenpools anzulegen (in CIVITAS/CORE hat es der Data Architect). Wählen Sie einen bestehenden Datenpool.'
+                    }
                 >
                     <label className="flex flex-col gap-1 text-xs font-medium">
                         Name des Datenpools

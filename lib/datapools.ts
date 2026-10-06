@@ -1,4 +1,5 @@
 import { describeDatapoolCreateFailure, type FailureDescription } from '@/lib/install-payload'
+import { hasTenantPermission } from '@/lib/permissions'
 import { getAccessToken } from '@/lib/session'
 
 export interface DatapoolOption {
@@ -68,6 +69,27 @@ export async function fetchDatapools(): Promise<DatapoolListing> {
         return { pools: pools.sort((a, b) => a.name.localeCompare(b.name, 'de')) }
     } catch {
         return { pools: [], problem: 'Das Portal-Backend ist nicht erreichbar.' }
+    }
+}
+
+/**
+ * Whether the signed-in person may create datapools: DATAPOOL_CREATE on a tenant-wide assignment,
+ * read from `GET /v1/users/me` (open to every signed-in person) exactly as the portal decides
+ * whether to show its own create button. False when that cannot be read; the install dialog then
+ * offers existing pools only.
+ */
+export async function fetchCanCreateDatapool(): Promise<boolean> {
+    // Outside the try block, for the same reason as above.
+    const accessToken = await getAccessToken()
+    try {
+        const res = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/users/me`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: 'no-store',
+        })
+        if (!res.ok) return false
+        return hasTenantPermission(await res.json(), 'DATAPOOL_CREATE')
+    } catch {
+        return false
     }
 }
 

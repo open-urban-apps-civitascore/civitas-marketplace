@@ -21,7 +21,7 @@ import { SamplePreview } from '@/components/catalog/sample-preview'
 import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { FIELD_LABELS } from '@/lib/catalog/vocabulary'
-import { fetchDatapools, type DatapoolListing } from '@/lib/datapools'
+import { fetchCanCreateDatapool, fetchDatapools, type DatapoolListing } from '@/lib/datapools'
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import { fetchActiveInstallation } from '@/lib/installations'
@@ -71,11 +71,13 @@ export default async function UseCaseDetailPage({
     const logicModel = logicModelSteps(summary)
     const collaboration = collaborationInvite(summary)
 
-    // Both reads start at once. Only an entry that can be installed needs the
-    // datapools: a described one has no dialog to choose a target in.
-    const [installation, datapools] = await Promise.all([
+    // The reads start at once. Only an entry that can be installed needs the
+    // datapools and the right to create one: a described one has no dialog to
+    // choose a target in.
+    const [installation, datapools, canCreateDatapool] = await Promise.all([
         fetchActiveInstallation(listing.id),
         listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
+        listing.install ? fetchCanCreateDatapool() : Promise.resolve(false),
     ])
     const installed = installation !== null
     // What depends on the installation waits for it, and the three reads start
@@ -174,6 +176,7 @@ export default async function UseCaseDetailPage({
                                         demoAvailable={previewAvailable}
                                         datapools={datapools.pools}
                                         datapoolProblem={datapools.problem}
+                                        canCreateDatapool={canCreateDatapool}
                                     />
                                     {previewAvailable && !installed && (
                                         <SamplePreview entryId={listing.id} displayName={listing.displayName} />
