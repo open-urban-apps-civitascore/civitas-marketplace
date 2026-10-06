@@ -13,13 +13,14 @@ import { installEntry } from '@/lib/install-actions'
  *
  * The target is the datapool the use case is installed into. A package cannot
  * carry it, because datapools exist only on the receiving instance, so the
- * dialog asks. The release half of that step is deliberately inert for now:
- * it shows where the choice will live, but its only enabled option is today's
- * reality, install as draft. Wiring "release immediately" means driving the
- * release saga from here, which is its own increment.
+ * dialog asks. The release half of that step decides how the use case stands
+ * afterwards: as a draft, the default, because a release publishes data and is
+ * the operator's call; or released in the same step, which stages and releases
+ * the dataset right after the install (see installEntry).
  */
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
+type ReleaseMode = 'draft' | 'release'
 
 const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
 
@@ -59,6 +60,7 @@ export function InstallDialog({
     const [mode, setMode] = useState<DataSourceMode>(demoAvailable ? 'demo' : 'later')
     const [brokerUrl, setBrokerUrl] = useState('')
     const [datapoolId, setDatapoolId] = useState(() => initialDatapoolId(datapools))
+    const [releaseMode, setReleaseMode] = useState<ReleaseMode>('draft')
     const [result, formAction, pending] = useActionState(installEntry, null)
 
     const done = installed || result?.status === 'created'
@@ -157,6 +159,8 @@ export function InstallDialog({
                                     datapoolProblem={datapoolProblem}
                                     datapoolId={datapoolId}
                                     onDatapool={setDatapoolId}
+                                    releaseMode={releaseMode}
+                                    onReleaseMode={setReleaseMode}
                                 />
                             )}
                             {step === 2 && (
@@ -166,6 +170,7 @@ export function InstallDialog({
                                     mode={mode}
                                     brokerUrl={brokerUrl}
                                     datapoolName={datapool?.name ?? ''}
+                                    releaseMode={releaseMode}
                                 />
                             )}
 
@@ -207,6 +212,7 @@ export function InstallDialog({
                                     <input type="hidden" name="dataSourceMode" value={mode} />
                                     <input type="hidden" name="brokerUrl" value={brokerUrl} />
                                     <input type="hidden" name="datapoolId" value={datapoolId} />
+                                    <input type="hidden" name="releaseMode" value={releaseMode} />
                                     <SubmitButton
                                         pending={pending}
                                         icon={Download}
@@ -342,11 +348,15 @@ function TargetStep({
     datapoolProblem,
     datapoolId,
     onDatapool,
+    releaseMode,
+    onReleaseMode,
 }: {
     datapools: DatapoolOption[]
     datapoolProblem?: string
     datapoolId: string
     onDatapool: (id: string) => void
+    releaseMode: ReleaseMode
+    onReleaseMode: (mode: ReleaseMode) => void
 }) {
     const selected = datapools.find((pool) => pool.id === datapoolId)
 
@@ -394,18 +404,16 @@ function TargetStep({
                     Wie soll der Anwendungsfall nach der Installation stehen?
                 </p>
                 <OptionCard
-                    selected
-                    onSelect={() => undefined}
+                    selected={releaseMode === 'draft'}
+                    onSelect={() => onReleaseMode('draft')}
                     title="Als Entwurf installieren"
                     description="Datenstrukturen und Datenquellen werden freigegeben, der Datensatz bleibt ein Entwurf. Seine Freigabe erfolgt anschließend im Portal (Datensatz → Freigeben)."
                 />
                 <OptionCard
-                    selected={false}
-                    disabled
-                    onSelect={() => undefined}
+                    selected={releaseMode === 'release'}
+                    onSelect={() => onReleaseMode('release')}
                     title="Sofort freigeben"
-                    badge="Bald verfügbar"
-                    description="Installiert und gibt in einem Schritt frei, sodass die Pipeline direkt läuft."
+                    description="Installiert und gibt in einem Schritt frei. Die Plattform richtet danach Speicher und Pipeline ein, dann fließen die Daten. Zurücknehmen lässt sich die Freigabe im Portal."
                 />
             </div>
         </div>
@@ -424,12 +432,14 @@ function ReviewStep({
     mode,
     brokerUrl,
     datapoolName,
+    releaseMode,
 }: {
     displayName: string
     version: string
     mode: DataSourceMode
     brokerUrl: string
     datapoolName: string
+    releaseMode: ReleaseMode
 }) {
     return (
         <dl className="flex flex-col gap-3 text-sm">
@@ -437,7 +447,14 @@ function ReviewStep({
             <ReviewRow label="Datenquelle" value={MODE_LABELS[mode]} />
             {mode === 'custom' && <ReviewRow label="MQTT-Broker" value={brokerUrl} mono />}
             <ReviewRow label="Datenpool" value={datapoolName} />
-            <ReviewRow label="Freigabe" value="Als Entwurf, Freigabe danach im Portal" />
+            <ReviewRow
+                label="Freigabe"
+                value={
+                    releaseMode === 'release'
+                        ? 'Sofort freigeben, Daten fließen nach der Einrichtung'
+                        : 'Als Entwurf, Freigabe danach im Portal'
+                }
+            />
         </dl>
     )
 }

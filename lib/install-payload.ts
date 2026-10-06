@@ -648,6 +648,26 @@ export function describeInstallFailure(
     })
 }
 
+/**
+ * The summary segment for a release after install that did not go through. Which step refused
+ * decides what is left: a refused stage leaves the draft, a refused release a dataset that is
+ * already staged (READY). The portal continues from either.
+ */
+export function describeReleaseFailure(
+    step: 'stage' | 'release',
+    httpStatus: number,
+    statusText: string,
+    body: string,
+): string {
+    const failure = readFailure(body)
+    const said =
+        httpStatus === 403 && failure.reason === 'permission_denied'
+            ? 'Ihrer Rolle fehlt das Recht, Datensätze freizugeben'
+            : (failure.detail ?? failure.reason ?? `${httpStatus} ${statusText}`.trim())
+    const left = step === 'stage' ? 'Der Datensatz bleibt ein Entwurf' : 'Der Datensatz ist bereit zur Freigabe'
+    return ` · Freigabe NICHT gestartet (${httpStatus}): ${said.replace(/\.+$/, '')}. ${left}, freigeben lässt er sich im Portal`
+}
+
 export function describeUninstallFailure(
     httpStatus: number,
     statusText: string,
