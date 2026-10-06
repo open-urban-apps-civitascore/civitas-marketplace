@@ -664,6 +664,22 @@ export function describeInstallFailure(
 }
 
 /**
+ * Why a datapool the install was to create could not be created. Prefixed, because the install
+ * shows it in place of its own outcome and the user must see that nothing was installed yet.
+ */
+export function describeDatapoolCreateFailure(
+    httpStatus: number,
+    statusText: string,
+    body: string,
+): FailureDescription {
+    const failure = describeFailure(httpStatus, statusText, body, {
+        unserved: 'Diese Plattform-Version bietet das Anlegen von Datenpools nicht an (POST /v1/datapools).',
+        denied: 'Ihrer Rolle fehlt das Recht, Datenpools anzulegen. Wählen Sie einen bestehenden Datenpool oder lassen Sie einen im Portal anlegen.',
+    })
+    return { ...failure, detail: `Datenpool nicht angelegt, nichts installiert: ${failure.detail}` }
+}
+
+/**
  * The summary segment for a release after install that did not go through. Which step refused
  * decides what is left: a refused stage leaves the draft, a refused release a dataset that is
  * already staged (READY). The portal continues from either.
