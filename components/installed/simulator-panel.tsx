@@ -1,11 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronRight, Loader2, Pause, Play } from 'lucide-react'
+import { ArrowUpRight, ChevronRight, Loader2, Pause, Play } from 'lucide-react'
 
 import { fetchInstallationSimulations, toggleSimulation } from '@/lib/simulator-actions'
 import type { InstallationStream } from '@/lib/simulator/registration'
 import type { SimulationStatus } from '@/lib/simulator/client'
+import { simulationUiHref } from '@/lib/simulator/ui-links'
 
 /** Registry polling cadence while the panel is open. */
 const POLL_INTERVAL_MS = 5000
@@ -22,13 +23,18 @@ const timeFormat = new Intl.DateTimeFormat('de-DE', {
  * broker traffic, so this doubles as the "is data flowing?" check without a
  * broker subscription. Rendered only when the server found streams for this
  * installation, so an empty panel never appears.
+ *
+ * `simulatorUiUrl` is the simulator UI's address, read on the server (see
+ * lib/simulator/ui-links). Unset, the rows have no link into it.
  */
 export function SimulatorPanel({
     installationId,
     initialStreams,
+    simulatorUiUrl,
 }: {
     installationId: string
     initialStreams: InstallationStream[]
+    simulatorUiUrl?: string
 }) {
     const [open, setOpen] = useState(false)
     const [streams, setStreams] = useState(initialStreams)
@@ -123,21 +129,34 @@ export function SimulatorPanel({
                             <span className="break-all text-xs text-muted-foreground">
                                 {status.topic} · alle {status.intervalSeconds}s
                             </span>
-                            <button
-                                type="button"
-                                onClick={() => void onToggle(status)}
-                                disabled={togglingId === status.id}
-                                className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
-                            >
-                                {togglingId === status.id ? (
-                                    <Loader2 className="size-3.5 animate-spin" />
-                                ) : status.enabled ? (
-                                    <Pause className="size-3.5" />
-                                ) : (
-                                    <Play className="size-3.5" />
+                            <div className="ml-auto flex items-center gap-3">
+                                {simulatorUiUrl && (
+                                    <a
+                                        href={simulationUiHref(simulatorUiUrl, status.id)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                                    >
+                                        Im Simulator
+                                        <ArrowUpRight className="size-3.5" />
+                                    </a>
                                 )}
-                                {status.enabled ? 'Stoppen' : 'Starten'}
-                            </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void onToggle(status)}
+                                    disabled={togglingId === status.id}
+                                    className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                                >
+                                    {togglingId === status.id ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                    ) : status.enabled ? (
+                                        <Pause className="size-3.5" />
+                                    ) : (
+                                        <Play className="size-3.5" />
+                                    )}
+                                    {status.enabled ? 'Stoppen' : 'Starten'}
+                                </button>
+                            </div>
 
                             <div className="w-full text-xs text-muted-foreground">
                                 {status.lastError ? (
