@@ -45,7 +45,7 @@ export function InstallDialog({
     entryId: string
     displayName: string
     version: string
-    /** Already present in this instance — the trigger is then closed. */
+    /** Already present in this instance: the dialog then renders nothing. */
     installed?: boolean
     /** Simulator reachable — gates the demo-data option, not the dialog. */
     demoAvailable?: boolean
@@ -75,17 +75,24 @@ export function InstallDialog({
         setStep(0)
     }
 
+    // Installed when the page loaded: the page's installation section has taken
+    // over, and a disabled trigger would only repeat the badge. An install from
+    // this dialog re-renders the page as installed too (revalidatePath), so the
+    // dialog stays while it has an outcome of its own to show.
+    if (installed && !result) return null
+
     return (
         <div className="flex flex-col gap-2">
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                disabled={done}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-                <Download className="size-4" />
-                Installieren
-            </button>
+            {!done && (
+                <button
+                    type="button"
+                    onClick={() => setOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                    <Download className="size-4" />
+                    Installieren
+                </button>
+            )}
             {!open && result && (
                 <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
                     {feedbackText(result)}
