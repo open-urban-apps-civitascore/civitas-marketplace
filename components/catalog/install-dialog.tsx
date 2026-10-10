@@ -30,11 +30,6 @@ type ReleaseMode = 'draft' | 'release'
  * dialog does not preselect what the platform would refuse.
  */
 type DatapoolMode = 'new' | 'existing'
-/**
- * How the data structures are identified: minted by the instance (the platform's default), or
- * kept from the package, so they are the same on every instance (experimental).
- */
-type IdentityMode = 'mint' | 'keep'
 
 const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
 
@@ -86,7 +81,6 @@ export function InstallDialog({
     )
     const [datapoolId, setDatapoolId] = useState(() => initialDatapoolId(datapools))
     const [releaseMode, setReleaseMode] = useState<ReleaseMode>('draft')
-    const [identityMode, setIdentityMode] = useState<IdentityMode>('mint')
     const [result, formAction, pending] = useActionState(installEntry, null)
 
     const done = installed || result?.status === 'created'
@@ -197,8 +191,6 @@ export function InstallDialog({
                                     onDatapool={setDatapoolId}
                                     releaseMode={releaseMode}
                                     onReleaseMode={setReleaseMode}
-                                    identityMode={identityMode}
-                                    onIdentityMode={setIdentityMode}
                                 />
                             )}
                             {step === 2 && (
@@ -213,7 +205,6 @@ export function InstallDialog({
                                             : (datapool?.name ?? '')
                                     }
                                     releaseMode={releaseMode}
-                                    identityMode={identityMode}
                                 />
                             )}
 
@@ -266,7 +257,6 @@ export function InstallDialog({
                                         value={datapoolMode === 'new' ? newDatapoolName.trim() : ''}
                                     />
                                     <input type="hidden" name="releaseMode" value={releaseMode} />
-                                    <input type="hidden" name="structureIdentity" value={identityMode} />
                                     <SubmitButton
                                         pending={pending}
                                         icon={Download}
@@ -409,8 +399,6 @@ function TargetStep({
     onDatapool,
     releaseMode,
     onReleaseMode,
-    identityMode,
-    onIdentityMode,
 }: {
     datapools: DatapoolOption[]
     datapoolProblem?: string
@@ -423,8 +411,6 @@ function TargetStep({
     onDatapool: (id: string) => void
     releaseMode: ReleaseMode
     onReleaseMode: (mode: ReleaseMode) => void
-    identityMode: IdentityMode
-    onIdentityMode: (mode: IdentityMode) => void
 }) {
     const selected = datapools.find((pool) => pool.id === datapoolId)
     const nameTooShort = newDatapoolName.trim().length < DATAPOOL_NAME_MIN
@@ -518,24 +504,6 @@ function TargetStep({
                     description="Installiert und gibt in einem Schritt frei. Die Plattform richtet danach Speicher und Pipeline ein, dann fließen die Daten. Zurücknehmen lässt sich die Freigabe im Portal."
                 />
             </div>
-
-            <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
-                    Welche Kennungen sollen die Datenstrukturen bekommen?
-                </p>
-                <OptionCard
-                    selected={identityMode === 'mint'}
-                    onSelect={() => onIdentityMode('mint')}
-                    title="Eigene Kennungen dieser Instanz"
-                    description="Die Instanz vergibt neue Kennungen. Jede Installation bekommt ihre eigene Kopie der Datenstrukturen."
-                />
-                <OptionCard
-                    selected={identityMode === 'keep'}
-                    onSelect={() => onIdentityMode('keep')}
-                    title="Kennungen aus dem Paket übernehmen (experimentell)"
-                    description="Die Datenstrukturen behalten die Kennungen des Pakets und sind damit auf allen Instanzen dieselben. Liegt eine davon hier schon vor, wird sie wiederverwendet statt kopiert. Speichert man eine solche Struktur später im Editor, kann sie eine neue Kennung bekommen."
-                />
-            </div>
         </div>
     )
 }
@@ -553,7 +521,6 @@ function ReviewStep({
     brokerUrl,
     datapoolName,
     releaseMode,
-    identityMode,
 }: {
     displayName: string
     version: string
@@ -561,7 +528,6 @@ function ReviewStep({
     brokerUrl: string
     datapoolName: string
     releaseMode: ReleaseMode
-    identityMode: IdentityMode
 }) {
     return (
         <dl className="flex flex-col gap-3 text-sm">
@@ -575,14 +541,6 @@ function ReviewStep({
                     releaseMode === 'release'
                         ? 'Sofort freigeben, Daten fließen nach der Einrichtung'
                         : 'Als Entwurf, Freigabe danach im Portal'
-                }
-            />
-            <ReviewRow
-                label="Kennungen der Datenstrukturen"
-                value={
-                    identityMode === 'keep'
-                        ? 'Aus dem Paket übernehmen (experimentell)'
-                        : 'Neu vergeben durch diese Instanz'
                 }
             />
         </dl>
