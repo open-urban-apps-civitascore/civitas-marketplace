@@ -134,7 +134,6 @@ describe('transformSnapshot', () => {
             'README.md',
             'ci/validate-bundle.py',
             'core-ir/baumkataster-db.datasource.json',
-            'core-ir/baumkataster-db.simulation.json',
             'core-ir/baumkataster-zeile.datastructure.json',
             'core-ir/kataster-import.mapping.json',
             'core-ir/kataster-import.pipeline.json',
@@ -147,7 +146,6 @@ describe('transformSnapshot', () => {
             'baumkataster-zeile.datastructure.json',
             'kiez-baum.datastructure.json',
         ])
-        expect(pkg.manifest.members.simulations?.map((m) => m.file)).toEqual(['baumkataster-db.simulation.json'])
     })
 
     it('passes the package validator — the round trip is installable', () => {

@@ -1,7 +1,6 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
 import type { InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
-import { draftSimulation } from '@/lib/export/simulation-draft'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
 
@@ -18,8 +17,6 @@ import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
  *     references become bundle-local titles, as the package format demands
  *   - secrets: never leave the instance — stripped and declared as install
  *     parameters instead, so the receiving instance asks for its own
- *   - demo data: every MQTT and SQL source gets a drafted simulation
- *     (`simulation-draft.ts`), so the package can be tried without sensors
  */
 
 export interface ExportOptions {
@@ -42,12 +39,6 @@ export interface ExportOptions {
         exportedBy?: string
         exportedAt: string
     }
-    /**
-     * Draft a demo-data simulation per MQTT and SQL source (default: yes). An
-     * install uses it only in its "Demo" mode, so a draft never reaches a real
-     * broker or database.
-     */
-    simulations?: boolean
 }
 
 export interface IdentityChange {
@@ -190,7 +181,6 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
 
     // ── Structures: the identity map every other member resolves against ──
     const urnMap = new Map<string, string>() // logical instance URN → package URN
-    const modelByPackageUrn = new Map<string, Record<string, unknown>>() // as exported, for the simulation drafts
     const structureMembers: PackageMember[] = []
     for (const structure of snapshot.structures) {
         const from = logicalUrn(structure.modelUrn)
@@ -216,7 +206,6 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         }
         const file = nameFile(structure.name, 'datastructure')
         files[`core-ir/${file}`] = json(model)
-        modelByPackageUrn.set(to, model)
         structureMembers.push({ file })
     }
     const resolveStructure = (ref: unknown, where: string): string | undefined => {
@@ -233,7 +222,6 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // ── Sources ──
     const sourceMembers: PackageMember[] = []
     const sourceTitleByUrn = new Map<string, string>()
-    const exportedSources: { title: string; document: Record<string, unknown>; element?: string }[] = []
     for (const source of snapshot.sources) {
         const file = nameFile(source.name, 'datasource')
         const connectionType = source.connectorType.toLowerCase()
@@ -255,7 +243,6 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...configuration,
         }
         files[`core-ir/${file}`] = json(document)
-        exportedSources.push({ title: source.name, document, element })
         const strippedHere = stripped.filter((s) => s.file === file).map((s) => s.field)
         const params = installParameters(connectionType, document, strippedHere)
         sourceMembers.push(params.length ? { file, parameters: params } : { file })
@@ -359,24 +346,6 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         pipelineMembers.push({ file })
     }
 
-    // ── Simulations: a demo-data draft per source, derived from its structure ──
-    const simulationMembers: PackageMember[] = []
-    if (options.simulations ?? true) {
-        for (const source of exportedSources) {
-            // A source without a bundled structure was already warned about above.
-            const structure = source.element ? modelByPackageUrn.get(source.element) : undefined
-            if (!structure) continue
-            const draft = draftSimulation({ sourceTitle: source.title, source: source.document, structure })
-            if ('note' in draft) {
-                warnings.push(draft.note)
-                continue
-            }
-            const file = nameFile(source.title, 'simulation')
-            files[`core-ir/${file}`] = json(draft.document)
-            simulationMembers.push({ file })
-        }
-    }
-
     const manifest: PackageManifest = {
         ...exportMetadataSchema.parse(options.metadata ?? {}),
         id: `urn:${publisher}:usecase:${options.slug}`,
@@ -393,7 +362,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             mappings: mappingMembers,
             dataSinks: sinkMembers,
             pipelines: pipelineMembers,
-            simulations: simulationMembers,
+            simulations: [],
             dashboards: [],
         },
         dependencies: [],
@@ -424,8 +393,6 @@ function readme(
     const strippedRows = stripped.length
         ? [...new Set(stripped.map((s) => `- \`${s.file}\`: \`${s.field}\` (${s.reason})`))].join('\n')
         : '- none'
-    const simulations = manifest.members.simulations ?? []
-    const simulationRows = simulations.length ? simulations.map((m) => `- \`${m.file}\``).join('\n') : '- none'
     const { provenance } = options
     return `# ${manifest.displayName} — CORE-IR Use-Case Package
 
@@ -462,15 +429,6 @@ ${parameterRows}
 Stripped on export:
 
 ${strippedRows}
-
-## Demo data
-
-Drafted on export from each source's structure, so the use case can be tried
-without sensors. An install registers them with the data-source simulator only
-in its "Demo" mode. Station names, coordinates and value ranges are generic:
-adjust them here before sharing.
-
-${simulationRows}
 
 ## Identity (URNs)
 
