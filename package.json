@@ -9,6 +9,7 @@
     "build": "next build",
     "generate-schema": "tsx scripts/generate-schema.ts",
     "superset:member": "tsx scripts/superset-export-to-member.ts",
+    "geo:apply": "tsx scripts/apply-geo-members.ts",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"

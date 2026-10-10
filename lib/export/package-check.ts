@@ -6,7 +6,18 @@
  */
 
 const CORE = 'core-ir'
-const MEMBER_KINDS = ['dataStructures', 'dataSources', 'mappings', 'dataSinks', 'pipelines', 'simulations', 'dashboards'] as const
+const MEMBER_KINDS = [
+    'dataStructures',
+    'dataSources',
+    'mappings',
+    'dataSinks',
+    'pipelines',
+    'simulations',
+    'dashboards',
+    'apis',
+    'styles',
+    'layers',
+] as const
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -82,6 +93,7 @@ export function checkPackage(files: Record<string, string>): string[] {
     const sourceTitles = new Set<string>()
     const sinkTitles = new Set<string>()
     const mappingNames = new Set<string>()
+    const styleNames = new Set<string>()
 
     for (const [name, { kind, document }] of documents) {
         const where = `${CORE}/${name}`
@@ -118,6 +130,19 @@ export function checkPackage(files: Record<string, string>): string[] {
             if (!isRecord(document.model) || !Array.isArray(document.model.nodes)) {
                 fail(`${where}: pipeline needs model.nodes`)
             }
+        } else if (kind === 'apis') {
+            for (const field of ['name', 'slug', 'standard']) {
+                if (!nonEmptyString(document[field])) fail(`${where}: api needs field '${field}'`)
+            }
+        } else if (kind === 'styles') {
+            for (const field of ['name', 'sldContent']) {
+                if (!nonEmptyString(document[field])) fail(`${where}: style needs field '${field}'`)
+            }
+            if (nonEmptyString(document.name)) styleNames.add(document.name)
+        } else if (kind === 'layers') {
+            for (const field of ['layerName', 'sinkRef']) {
+                if (!nonEmptyString(document[field])) fail(`${where}: layer needs field '${field}'`)
+            }
         }
     }
 
@@ -144,6 +169,21 @@ export function checkPackage(files: Record<string, string>): string[] {
                     if (typeof ref === 'string' && !ref.startsWith('urn:') && !known.has(ref)) {
                         fail(`${where}: node '${String(node.id)}' ${field} '${ref}' matches no bundled ${label}`)
                     }
+                }
+            }
+        }
+        if (kind === 'layers') {
+            const sinkRef = document.sinkRef
+            if (typeof sinkRef === 'string' && !sinkRef.startsWith('urn:') && !sinkTitles.has(sinkRef)) {
+                fail(`${where}: sinkRef '${sinkRef}' matches no bundled datasink title`)
+            }
+            const styleRefs = [
+                document.defaultStyleRef,
+                ...(Array.isArray(document.alternativeStyleRefs) ? document.alternativeStyleRefs : []),
+            ]
+            for (const ref of styleRefs) {
+                if (typeof ref === 'string' && !ref.startsWith('urn:') && !styleNames.has(ref)) {
+                    fail(`${where}: style '${ref}' matches no bundled style name`)
                 }
             }
         }

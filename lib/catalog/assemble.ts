@@ -108,6 +108,9 @@ export function parsePackageManifest(value: unknown, where: string): PackageMani
     parseMembers(members.pipelines, `${where}: members.pipelines`)
     parseMembers(members.simulations, `${where}: members.simulations`)
     parseMembers(members.dashboards, `${where}: members.dashboards`)
+    parseMembers(members.apis, `${where}: members.apis`)
+    parseMembers(members.styles, `${where}: members.styles`)
+    parseMembers(members.layers, `${where}: members.layers`)
     return value as unknown as PackageManifest
 }
 
@@ -268,6 +271,146 @@ function validateSimulation(
     }
 }
 
+/** The platform's rules for a named API (NamedApiInputDTO, NamedApiAllowedSlugValidator). */
+const API_SLUG = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+const RESERVED_API_SLUGS = ['apis', 'usable-datasources', 'api', 'v1', 'admin']
+const API_STANDARDS = ['OWS', 'STA', 'CUSTOM']
+/** A layer name becomes a GeoServer feature-type name (LayerInputDTO). */
+const LAYER_NAME = /^[A-Za-z_-][A-Za-z0-9_-]*$/
+/** Style names: letters, digits, underscores and hyphens, as the platform's style endpoint takes them. */
+const STYLE_NAME = /^[A-Za-z0-9_-]+$/
+
+function optionalText(document: Record<string, unknown>, field: string, max: number, where: string): void {
+    const value = document[field]
+    if (value === undefined) return
+    if (typeof value !== 'string' || value.length > max) {
+        throw new CatalogIntegrityError(`${where}: ${field} must be text of at most ${max} characters`)
+    }
+}
+
+function optionalStrings(document: Record<string, unknown>, field: string, where: string): string[] {
+    const value = document[field]
+    if (value === undefined) return []
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+        throw new CatalogIntegrityError(`${where}: ${field} must be a list of strings`)
+    }
+    return value as string[]
+}
+
+/**
+ * Checks the geo members of a use case the way the platform will: each one by the rules of its
+ * endpoint, and all of them together the way a release checks a dataset. A layer is served only
+ * through an OWS API, an OWS API needs a PostGIS sink, an STA API a FROST sink — a package whose
+ * release is certain to fail must not reach the install button. Layers reference sinks by title
+ * and styles by name, like pipeline nodes reference their siblings.
+ */
+function validateGeoMembers(bundle: UseCaseEntry['bundle'], id: string): void {
+    const apis = bundle.apis ?? []
+    const styles = bundle.styles ?? []
+    const layers = bundle.layers ?? []
+    if (!apis.length && !styles.length && !layers.length) return
+
+    const sinkTypes = new Map<string, string>()
+    for (const sink of bundle.dataSinks) {
+        if (typeof sink.document.title === 'string') {
+            sinkTypes.set(sink.document.title, String(sink.document.connectionType ?? '').toLowerCase())
+        }
+    }
+
+    const standards: string[] = []
+    const slugs = new Set<string>()
+    for (const api of apis) {
+        const where = `${id}: api '${String(api.document.slug ?? api.document.name ?? '?')}'`
+        requireString(api.document, 'name', where)
+        const slug = requireString(api.document, 'slug', where)
+        if (slug.length > 32 || !API_SLUG.test(slug)) {
+            throw new CatalogIntegrityError(
+                `${where}: slug must be lowercase letters and digits with inner hyphens, at most 32 characters`,
+            )
+        }
+        if (RESERVED_API_SLUGS.includes(slug)) {
+            throw new CatalogIntegrityError(`${where}: slug '${slug}' is reserved by the platform`)
+        }
+        if (slugs.has(slug)) {
+            throw new CatalogIntegrityError(`${where}: slug '${slug}' is used twice`)
+        }
+        slugs.add(slug)
+        const standard = requireString(api.document, 'standard', where).toUpperCase()
+        if (!API_STANDARDS.includes(standard)) {
+            throw new CatalogIntegrityError(`${where}: standard must be one of ${API_STANDARDS.join(', ')}`)
+        }
+        standards.push(standard)
+        optionalText(api.document, 'version', 32, where)
+        optionalText(api.document, 'description', 150, where)
+    }
+    if (standards.filter((standard) => standard === 'OWS').length > 1) {
+        throw new CatalogIntegrityError(`${id}: a dataset serves at most one OWS api`)
+    }
+    const sinkKinds = [...sinkTypes.values()]
+    if (standards.includes('OWS') && !sinkKinds.includes('postgis')) {
+        throw new CatalogIntegrityError(`${id}: an OWS api needs a bundled PostGIS data sink to serve`)
+    }
+    if (standards.includes('STA') && !sinkKinds.includes('frost')) {
+        throw new CatalogIntegrityError(`${id}: an STA api needs a bundled FROST data sink to serve`)
+    }
+
+    const styleNames = new Set<string>()
+    for (const style of styles) {
+        const where = `${id}: style '${String(style.document.name ?? '?')}'`
+        const name = requireString(style.document, 'name', where)
+        if (!STYLE_NAME.test(name)) {
+            throw new CatalogIntegrityError(`${where}: name may contain only letters, digits, underscores and hyphens`)
+        }
+        if (styleNames.has(name)) {
+            throw new CatalogIntegrityError(`${where}: name '${name}' is used twice`)
+        }
+        styleNames.add(name)
+        requireString(style.document, 'sldContent', where)
+    }
+
+    if (layers.length && !standards.includes('OWS')) {
+        throw new CatalogIntegrityError(`${id}: layers need an OWS api that serves them`)
+    }
+    const layerNames = new Set<string>()
+    for (const layer of layers) {
+        const where = `${id}: layer '${String(layer.document.layerName ?? '?')}'`
+        const name = requireString(layer.document, 'layerName', where)
+        if (!LAYER_NAME.test(name)) {
+            throw new CatalogIntegrityError(
+                `${where}: layerName may contain only letters, digits, underscores and hyphens and must not start with a digit`,
+            )
+        }
+        if (layerNames.has(name)) {
+            throw new CatalogIntegrityError(`${where}: layerName '${name}' is used twice`)
+        }
+        layerNames.add(name)
+        const sinkRef = requireString(layer.document, 'sinkRef', where)
+        if (!sinkRef.startsWith('urn:') && !sinkTypes.has(sinkRef)) {
+            throw new CatalogIntegrityError(`${where}: sinkRef '${sinkRef}' matches no bundled datasink title`)
+        }
+        const defaultStyle = layer.document.defaultStyleRef
+        if (defaultStyle !== undefined && typeof defaultStyle !== 'string') {
+            throw new CatalogIntegrityError(`${where}: defaultStyleRef must be a style name`)
+        }
+        const styleRefs = [
+            ...(typeof defaultStyle === 'string' ? [defaultStyle] : []),
+            ...optionalStrings(layer.document, 'alternativeStyleRefs', where),
+        ]
+        for (const ref of styleRefs) {
+            if (!ref.startsWith('urn:') && !styleNames.has(ref)) {
+                throw new CatalogIntegrityError(`${where}: style '${ref}' matches no bundled style name`)
+            }
+        }
+        optionalStrings(layer.document, 'attribute', where)
+        optionalStrings(layer.document, 'keywords', where)
+        if ((layer.document.nativeBoundingBox === undefined) !== (layer.document.latLonBoundingBox === undefined)) {
+            throw new CatalogIntegrityError(
+                `${where}: nativeBoundingBox and latLonBoundingBox must be set together or both be left out`,
+            )
+        }
+    }
+}
+
 /** Reader for one member file; the two sources differ only in this function. */
 export type MemberReader = (file: string) => Record<string, unknown>
 
@@ -357,7 +500,11 @@ export function assembleCatalogEntry(
             file: member.file,
             content: read(member),
         })),
+        apis: (manifest.members.apis ?? []).map((member) => ({ document: read(member) })),
+        styles: (manifest.members.styles ?? []).map((member) => ({ document: read(member) })),
+        layers: (manifest.members.layers ?? []).map((member) => ({ document: read(member) })),
     }
+    validateGeoMembers(bundle, manifest.id)
 
     // Simulations resolve against the datasources and structures above, so they
     // are assembled after the rest of the bundle exists.

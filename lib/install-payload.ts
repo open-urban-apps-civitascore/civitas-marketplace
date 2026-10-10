@@ -213,14 +213,17 @@ export function versionProvenance(displayName: string, version: string): string 
     return `Aus Paket ${displayName.slice(0, Math.max(0, room))}… ${version}`
 }
 
-/** The six kinds of member the platform installs, in the spelling its API reads. */
+/** The kinds of member the platform installs, in the spelling its API reads. */
 export type PackageMemberKind =
     | 'datastructure'
     | 'datasource'
     | 'dataset'
+    | 'api'
     | 'mapping'
     | 'datasink'
     | 'pipeline'
+    | 'style'
+    | 'layer'
 
 export interface PackageMemberRequest {
     kind: PackageMemberKind
@@ -348,7 +351,7 @@ function packageNamespace(entry: UseCaseEntry): { owner: string; domain: string 
 function derivedIdentity(
     entry: UseCaseEntry,
     namespace: { owner: string; domain: string },
-    kind: 'dataset' | 'pipeline',
+    kind: 'dataset' | 'pipeline' | 'api' | 'style' | 'layer',
     title: string,
 ): string {
     const name = compactName(title)
@@ -400,6 +403,61 @@ function withResolvedReferences(
     }
 }
 
+/** One bundle-local reference of a layer, translated into the package URN of the member it names. */
+function resolveLayerReference(
+    layerName: string,
+    field: string,
+    value: string,
+    handles: Map<string, string | null>,
+    label: string,
+): string {
+    if (value.startsWith('urn:')) return value
+    const urn = handles.get(value)
+    if (urn === undefined) {
+        throw new InstallPayloadError(
+            `Kartenebene „${layerName}“ verweist in ${field} auf „${value}“, aber das Paket enthält keine ${label} mit diesem Namen.`,
+        )
+    }
+    if (urn === null) {
+        throw new InstallPayloadError(
+            `Kartenebene „${layerName}“ verweist in ${field} auf „${value}“, aber mehrere Mitglieder tragen diesen Namen.`,
+        )
+    }
+    return urn
+}
+
+/**
+ * A copy of a layer document in which the sink and style references are package URNs: the sink by
+ * the title of the datasink member, the styles by the name of the style members. Everything else
+ * travels as authored.
+ */
+function withResolvedLayerReferences(
+    document: Record<string, unknown>,
+    sinks: Map<string, string | null>,
+    styles: Map<string, string | null>,
+): Record<string, unknown> {
+    const layerName = String(document.layerName)
+    const resolved: Record<string, unknown> = { ...document }
+    if (typeof document.sinkRef === 'string') {
+        resolved.sinkRef = resolveLayerReference(layerName, 'sinkRef', document.sinkRef, sinks, 'Datensenke')
+    }
+    if (typeof document.defaultStyleRef === 'string') {
+        resolved.defaultStyleRef = resolveLayerReference(
+            layerName,
+            'defaultStyleRef',
+            document.defaultStyleRef,
+            styles,
+            'Stil',
+        )
+    }
+    if (Array.isArray(document.alternativeStyleRefs)) {
+        resolved.alternativeStyleRefs = document.alternativeStyleRefs.map((ref) =>
+            resolveLayerReference(layerName, 'alternativeStyleRefs', String(ref), styles, 'Stil'),
+        )
+    }
+    return resolved
+}
+
 function requireDistinctIdentities(members: PackageMemberRequest[]): void {
     const seen = new Set<string>()
     for (const { urn, name } of members) {
@@ -424,8 +482,10 @@ function requireDistinctIdentities(members: PackageMemberRequest[]): void {
  * - Pipeline nodes may name a source, sink or mapping by its TITLE. The platform resolves
  *   references by URN only, so a title is translated to the package URN of the sibling it names.
  *   A value that already is a URN passes through untouched.
- * - Dataset and pipeline carry no identity in a package. Theirs is derived from the package id
- *   and their name, so the same package always sends the same URNs.
+ * - Dataset, pipeline and the geo members (API, style, layer) carry no identity in a package.
+ *   Theirs is derived from the package id and their name, so the same package always sends the
+ *   same URNs. A layer names its sink by title and its styles by name, translated like a
+ *   pipeline's references.
  *
  * Everything else travels as authored: the platform strips the documents' own labels itself and
  * binds every reference to the copy it makes.
@@ -533,7 +593,41 @@ export function buildInstallationRequest(
         )
     })
 
-    const members = [...structures, ...sources, dataset, ...mappings, ...sinks, ...pipelines]
+    // The geo members: the dataset's named APIs, and the styles and map layers that publish its
+    // sinks. None carries an identity in a package; theirs derives from the package and their name,
+    // like a pipeline's. A layer's sink and style references are bound by title and name.
+    const apis = (bundle.apis ?? []).map((api) => {
+        const slug = String(api.document.slug)
+        const name = typeof api.document.name === 'string' && api.document.name ? api.document.name : slug
+        return packageMember('api', derivedIdentity(entry, namespace, 'api', slug), name, undefined, api.document)
+    })
+    const styles = (bundle.styles ?? []).map((style) => {
+        const name = String(style.document.name)
+        return packageMember('style', derivedIdentity(entry, namespace, 'style', name), name, undefined, style.document)
+    })
+    const styleHandles = handleIndex(styles)
+    const layers = (bundle.layers ?? []).map((layer) => {
+        const layerName = String(layer.document.layerName)
+        return packageMember(
+            'layer',
+            derivedIdentity(entry, namespace, 'layer', layerName),
+            layerName,
+            undefined,
+            withResolvedLayerReferences(layer.document, handles.datasink, styleHandles),
+        )
+    })
+
+    const members = [
+        ...structures,
+        ...sources,
+        dataset,
+        ...apis,
+        ...mappings,
+        ...sinks,
+        ...pipelines,
+        ...styles,
+        ...layers,
+    ]
     requireDistinctIdentities(members)
     return { ...(datapoolId ? { datapoolId } : {}), package: { ...header, members } }
 }
@@ -571,6 +665,12 @@ const SUMMARY_KINDS: [artifactType: string, label: string][] = [
     ['PIPELINE', 'Pipeline(s)'],
 ]
 
+const GEO_SUMMARY_KINDS: [artifactType: string, label: string][] = [
+    ['NAMED_API', 'API(s)'],
+    ['STYLE', 'Stil(e)'],
+    ['LAYER', 'Kartenebene(n)'],
+]
+
 /**
  * The install feedback, counted from the artifact lines the platform recorded. Every kind is
  * named, including the ones that came out as zero: a summary that reports three kinds reads as
@@ -587,7 +687,12 @@ export function summarizeInstallation(receipt: InstallationReceipt, fallbackName
         return `Datenstruktur „${structure?.name ?? fallbackName}“ angelegt${urn}`
     }
     const counts = SUMMARY_KINDS.map(([type, label]) => `${count(type)} ${label}`).join(' · ')
-    return `Dataset „${receipt.dataSetName ?? fallbackName}“ als Entwurf angelegt · ${counts}`
+    // The geo kinds only where a package has them: most packages ship no map, and three zeros
+    // would read as something missing.
+    const geo = GEO_SUMMARY_KINDS.filter(([type]) => count(type) > 0)
+        .map(([type, label]) => ` · ${count(type)} ${label}`)
+        .join('')
+    return `Dataset „${receipt.dataSetName ?? fallbackName}“ als Entwurf angelegt · ${counts}${geo}`
 }
 
 /**

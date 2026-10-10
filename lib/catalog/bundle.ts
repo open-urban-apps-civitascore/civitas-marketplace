@@ -128,6 +128,9 @@ export async function fetchCatalogEntry(summary: CatalogSummary): Promise<Fetche
         ...(manifest.members.pipelines ?? []),
         ...(manifest.members.simulations ?? []),
         ...(manifest.members.dashboards ?? []),
+        ...(manifest.members.apis ?? []),
+        ...(manifest.members.styles ?? []),
+        ...(manifest.members.layers ?? []),
     ].map((member) => member.file)
 
     const contents = new Map<string, Record<string, unknown>>()

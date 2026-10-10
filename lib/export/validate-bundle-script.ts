@@ -3,6 +3,9 @@
  * as of 2026-09-08). It travels with every exported package so the receiving repository's CI and a
  * contributor's local check apply the same rules the export pre-checked with (lib/export/package-check.ts
  * mirrors the essential ones). Regenerate from the package repo when the validator changes.
+ *
+ * Extended 2026-10-11 by the geo members (apis, styles, layers), ahead of the package repos: the
+ * package repos receive this version with the next export.
  */
 export const VALIDATE_BUNDLE_SCRIPT = String.raw`#!/usr/bin/env python3
 """CORE-IR package validator (catalogue format v2).
@@ -20,13 +23,22 @@ package hangs together:
     structure $ids; pipeline sourceRef/sinkRef/mappingRef -> member titles/names
     (or pass through as explicit URNs)
   - datastructure entries: exactly one structure member, id == its $id
+  - geo members: api slug/standard rules, style name/sldContent, layer
+    layerName/sinkRef; layer sinkRef -> datasink title, style refs -> style
+    names; a layer needs an OWS api, an OWS api a postgis sink, an STA api a
+    frost sink (the checks a release would fail on)
 """
 import json
 import os
+import re
 import sys
 
 CORE = "core-ir"
-MEMBER_KINDS = ("dataStructures", "dataSources", "mappings", "dataSinks", "pipelines", "simulations", "dashboards")
+MEMBER_KINDS = ("dataStructures", "dataSources", "mappings", "dataSinks", "pipelines", "simulations", "dashboards", "apis", "styles", "layers")
+API_SLUG = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+RESERVED_API_SLUGS = ("apis", "usable-datasources", "api", "v1", "admin")
+API_STANDARDS = ("OWS", "STA", "CUSTOM")
+LAYER_NAME = re.compile(r"^[A-Za-z_-][A-Za-z0-9_-]*$")
 GENERATOR_KINDS = {
     "constant": (),
     "now": (),
@@ -98,6 +110,7 @@ for kind, name in listed_files:
         documents[(kind, name)] = document
 
 structure_ids, source_titles, sink_titles, mapping_names = set(), set(), set(), set()
+sink_types, api_standards, api_slugs, style_names, layer_names = set(), [], set(), set(), set()
 
 for (kind, name), document in documents.items():
     where = f"{CORE}/{name}"
@@ -115,6 +128,8 @@ for (kind, name), document in documents.items():
                 fail(f"{where}: connector needs field '{field}'")
         if isinstance(document.get("title"), str):
             (source_titles if kind == "dataSources" else sink_titles).add(document["title"])
+        if kind == "dataSinks" and isinstance(document.get("connectionType"), str):
+            sink_types.add(document["connectionType"].lower())
     elif kind == "mappings":
         for field in ("mappingUrn", "name"):
             if not isinstance(document.get(field), str) or not document[field]:
@@ -152,6 +167,44 @@ for (kind, name), document in documents.items():
                 fail(f"{where}: simulation needs field 'topicBase'")
             if not isinstance(document.get("streams"), list) or not document["streams"]:
                 fail(f"{where}: simulation needs a non-empty streams array")
+    elif kind == "apis":
+        for field in ("name", "slug", "standard"):
+            if not isinstance(document.get(field), str) or not document[field]:
+                fail(f"{where}: api needs field '{field}'")
+        slug = document.get("slug")
+        if isinstance(slug, str) and slug:
+            if len(slug) > 32 or not API_SLUG.match(slug):
+                fail(f"{where}: api slug '{slug}' must be lowercase letters and digits with inner hyphens, at most 32 characters")
+            if slug in RESERVED_API_SLUGS:
+                fail(f"{where}: api slug '{slug}' is reserved by the platform")
+            if slug in api_slugs:
+                fail(f"{where}: api slug '{slug}' is used twice")
+            api_slugs.add(slug)
+        standard = document.get("standard")
+        if isinstance(standard, str) and standard:
+            if standard.upper() not in API_STANDARDS:
+                fail(f"{where}: api standard must be one of OWS, STA, CUSTOM")
+            api_standards.append(standard.upper())
+    elif kind == "styles":
+        for field in ("name", "sldContent"):
+            if not isinstance(document.get(field), str) or not document[field]:
+                fail(f"{where}: style needs field '{field}'")
+        style_name = document.get("name")
+        if isinstance(style_name, str) and style_name:
+            if style_name in style_names:
+                fail(f"{where}: style name '{style_name}' is used twice")
+            style_names.add(style_name)
+    elif kind == "layers":
+        for field in ("layerName", "sinkRef"):
+            if not isinstance(document.get(field), str) or not document[field]:
+                fail(f"{where}: layer needs field '{field}'")
+        layer_name = document.get("layerName")
+        if isinstance(layer_name, str) and layer_name:
+            if not LAYER_NAME.match(layer_name):
+                fail(f"{where}: layerName '{layer_name}' may contain only letters, digits, underscores and hyphens and must not start with a digit")
+            if layer_name in layer_names:
+                fail(f"{where}: layerName '{layer_name}' is used twice")
+            layer_names.add(layer_name)
 
 
 def _deref(node, root, where):
@@ -277,6 +330,28 @@ for (kind, name), document in documents.items():
                 ref = node.get(ref_field)
                 if isinstance(ref, str) and not ref.startswith("urn:") and ref not in known:
                     fail(f"{where}: node '{node.get('id')}' {ref_field} '{ref}' matches no bundled {label}")
+    if kind == "layers":
+        ref = document.get("sinkRef")
+        if isinstance(ref, str) and not ref.startswith("urn:") and ref not in sink_titles:
+            fail(f"{where}: layer sinkRef '{ref}' matches no bundled datasink title")
+        alternatives = document.get("alternativeStyleRefs") or []
+        if not isinstance(alternatives, list):
+            fail(f"{where}: layer alternativeStyleRefs must be a list")
+            alternatives = []
+        for ref in [document.get("defaultStyleRef")] + alternatives:
+            if isinstance(ref, str) and not ref.startswith("urn:") and ref not in style_names:
+                fail(f"{where}: layer style '{ref}' matches no bundled style name")
+
+# Geo members together, the way a release checks a dataset: a layer is served
+# only through an OWS api, which needs a postgis sink; an STA api needs a frost sink.
+if api_standards.count("OWS") > 1:
+    fail("a dataset serves at most one OWS api")
+if "OWS" in api_standards and "postgis" not in sink_types:
+    fail("an OWS api needs a bundled postgis data sink to serve")
+if "STA" in api_standards and "frost" not in sink_types:
+    fail("an STA api needs a bundled frost data sink to serve")
+if layer_names and "OWS" not in api_standards:
+    fail("layers need an OWS api that serves them")
 
 # Entry-type invariants.
 structure_members = members.get("dataStructures") or []

@@ -77,6 +77,12 @@ export interface PackageMembers {
      * install time, so a dashboard member declares nothing but its file.
      */
     dashboards?: PackageMember[]
+    /** Named APIs of the use case's dataset (see {@link BundledApi}). */
+    apis?: PackageMember[]
+    /** SLD styles the map layers use (see {@link BundledStyle}). */
+    styles?: PackageMember[]
+    /** Map layers that publish a data sink through the OWS API (see {@link BundledLayer}). */
+    layers?: PackageMember[]
 }
 
 /**
@@ -298,6 +304,34 @@ export interface BundledDashboard {
     content: Record<string, unknown>
 }
 
+/**
+ * A named API of the use case's dataset, in the form the platform's dataset
+ * endpoint takes it: `name`, `slug` (the path segment of its route),
+ * `standard` (`OWS` for maps, `STA` for SensorThings, `CUSTOM`) and
+ * optionally `version` and `description`. The route itself is the
+ * platform's, created at release, so a package never carries one.
+ */
+export interface BundledApi {
+    document: Record<string, unknown>
+}
+
+/** An SLD style: `name` (unique within the dataset) and `sldContent`, the SLD XML as text. */
+export interface BundledStyle {
+    document: Record<string, unknown>
+}
+
+/**
+ * A map layer: the fields of the platform's layer endpoint (`layerName`,
+ * `title`, `attribute`, `geometryColumnRef`, `cqlFilter`, `crs`, bounding
+ * boxes …) with its references in bundle-local form, like a pipeline's:
+ * `sinkRef` names the published data sink by its TITLE, `defaultStyleRef`
+ * and `alternativeStyleRefs` name styles by their NAME. The install
+ * translates both into package URNs; the platform binds those to the copies.
+ */
+export interface BundledLayer {
+    document: Record<string, unknown>
+}
+
 export interface UseCaseEntry {
     manifest: CatalogManifest & { type: 'usecase' }
     bundle: {
@@ -308,6 +342,9 @@ export interface UseCaseEntry {
         pipelines: BundledPipeline[]
         simulations: BundledSimulation[]
         dashboards?: BundledDashboard[]
+        apis?: BundledApi[]
+        styles?: BundledStyle[]
+        layers?: BundledLayer[]
     }
 }
 
