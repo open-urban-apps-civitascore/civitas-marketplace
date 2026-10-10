@@ -87,8 +87,6 @@ export async function installEntry(
     // form included, installs a draft: a release publishes data, so it is
     // never the default.
     const releaseRequested = formData.get('releaseMode') === 'release'
-    // Keeping the package's structure identities is an explicit, experimental choice.
-    const structureIdentity = formData.get('structureIdentity') === 'keep' ? 'KEEP' : 'MINT'
 
     let entry: CatalogEntry | undefined
     try {
@@ -136,7 +134,7 @@ export async function installEntry(
 
     let request: InstallationRequest
     try {
-        request = buildInstallationRequest(effectiveEntry, datapoolId || undefined, structureIdentity)
+        request = buildInstallationRequest(effectiveEntry, datapoolId || undefined)
     } catch (error) {
         if (!(error instanceof InstallPayloadError)) throw error
         return {

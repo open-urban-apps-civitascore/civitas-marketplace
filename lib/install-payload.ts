@@ -234,19 +234,10 @@ export interface PackageMemberRequest {
     content: Record<string, unknown>
 }
 
-/** How the platform identifies a package's data structures on install. */
-export type StructureIdentity = 'MINT' | 'KEEP'
-
 /** The body of `POST /v1/installations`. */
 export interface InstallationRequest {
     /** Where sources and the dataset are created. Instance knowledge, so never package content. */
     datapoolId?: string
-    /**
-     * MINT (the platform's default, so left out) copies structures under URNs the instance mints;
-     * KEEP keeps the package's URNs and reuses a structure the instance already holds under one.
-     * Experimental.
-     */
-    structureIdentity?: StructureIdentity
     package: {
         id: string
         version: string
@@ -442,11 +433,7 @@ function requireDistinctIdentities(members: PackageMemberRequest[]): void {
 export function buildInstallationRequest(
     entry: CatalogEntry,
     datapoolId?: string,
-    structureIdentity: StructureIdentity = 'MINT',
 ): InstallationRequest {
-    // Sent only when it differs from the platform's default, so a platform without the field
-    // keeps accepting the request.
-    const identity = structureIdentity === 'KEEP' ? { structureIdentity } : {}
     const header = {
         id: entry.manifest.id,
         version: entry.manifest.version,
@@ -459,7 +446,6 @@ export function buildInstallationRequest(
     if (isDataStructureEntry(entry)) {
         // A structure on its own belongs to no datapool, so none is sent even if one was chosen.
         return {
-            ...identity,
             package: {
                 ...header,
                 members: [
@@ -549,7 +535,7 @@ export function buildInstallationRequest(
 
     const members = [...structures, ...sources, dataset, ...mappings, ...sinks, ...pipelines]
     requireDistinctIdentities(members)
-    return { ...(datapoolId ? { datapoolId } : {}), ...identity, package: { ...header, members } }
+    return { ...(datapoolId ? { datapoolId } : {}), package: { ...header, members } }
 }
 
 /**
