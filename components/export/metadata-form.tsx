@@ -2,6 +2,7 @@
 
 import { METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { THEME_LABELS, THEME_ORDER } from '@/lib/catalog/vocabulary'
+import { Select } from '@/components/ui/select'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 
@@ -21,17 +22,15 @@ export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChan
             <legend className="px-2 font-semibold">{group.title}</legend>
             {group.fields.map((field) => <label key={field.path} className={`flex flex-col gap-1 text-sm ${field.kind === 'multiline' ? 'md:col-span-2' : ''}`}>
                 <span>{field.label}</span>
-                {field.options ? <select className={inputClass} value={value.fields[field.path] ?? ''} onChange={(event) => changeField(field.path, event.target.value)}>
-                    <option value="">Keine Angabe</option>
-                    {Object.entries(field.options).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                </select> : field.kind === 'multiline' || field.kind === 'list' ? <textarea className={inputClass} rows={3} value={value.fields[field.path] ?? ''} onChange={(event) => changeField(field.path, event.target.value)} />
+                {field.options ? <Select value={value.fields[field.path] ?? ''} onValueChange={(next) => changeField(field.path, next)} noneLabel="Keine Angabe"
+                    options={Object.entries(field.options).map(([key, label]) => ({ value: key, label }))} /> : field.kind === 'multiline' || field.kind === 'list' ? <textarea className={inputClass} rows={3} value={value.fields[field.path] ?? ''} onChange={(event) => changeField(field.path, event.target.value)} />
                     : <input className={inputClass} type={field.kind ?? 'text'} value={value.fields[field.path] ?? ''} onChange={(event) => changeField(field.path, event.target.value)} />}
                 {(field.hint || field.kind === 'list') && <span className="text-xs text-muted-foreground">{field.hint ?? 'Ein Eintrag pro Zeile.'}</span>}
             </label>)}
         </fieldset>)}
         <fieldset className="flex flex-col gap-4 rounded-xl border bg-card p-5">
             <legend className="px-2 font-semibold">Bilder & Screenshots</legend>
-            <p className="text-sm text-muted-foreground">HTTPS-Adresse oder Bildpfad im Paketrepository. Bilder werden hier verlinkt, nicht hochgeladen — und derzeit noch nicht auf der Detailseite angezeigt, solange sie nicht über den Marktplatz ausgeliefert werden.</p>
+            <p className="text-sm text-muted-foreground">HTTPS-Adresse oder Bildpfad im Paketrepository. Bilder werden hier verlinkt, nicht hochgeladen - und derzeit noch nicht auf der Detailseite angezeigt, solange sie nicht über den Marktplatz ausgeliefert werden.</p>
             {value.media.map((item, index) => <div key={index} className="grid gap-3 rounded-lg border p-4">
                 {/* Required only once the row says something. An untouched row is
                     dropped on submit anyway (see draftMetadata), so marking its

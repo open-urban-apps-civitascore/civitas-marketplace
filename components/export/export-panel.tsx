@@ -11,6 +11,7 @@ import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { MetadataForm } from '@/components/export/metadata-form'
+import { Select } from '@/components/ui/select'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
@@ -50,10 +51,8 @@ export function ExportPanel(props: PanelProps) {
             {props.sourceNotice && <p className="text-sm text-warn">{props.sourceNotice}</p>}
             <label className="flex flex-col gap-2 text-sm">
                 <span>Lokaler Use Case</span>
-                <select className={inputClass} value={selection} onChange={(event) => setSelection(event.target.value)}>
-                    <option value="">Bitte auswählen …</option>
-                    {props.sources.map((row) => <option key={row.id} value={row.id}>{row.catalog?.displayName ?? row.name} · {row.catalog ? `installiert (${row.name})` : 'lokaler Bestand'}</option>)}
-                </select>
+                <Select value={selection} onValueChange={setSelection} placeholder="Bitte auswählen …"
+                    options={props.sources.map((row) => ({ value: row.id, label: `${row.catalog?.displayName ?? row.name} · ${row.catalog ? `installiert (${row.name})` : 'lokaler Bestand'}` }))} />
             </label>
             <button type="button" disabled={!selection} className={`${buttonClass('primary')} self-start`} onClick={() => setActive(selection)}>Bestand prüfen</button>
         </section>
@@ -159,10 +158,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                         { key: 'version', label: 'Version *', hint: 'Zum Beispiel 1.0.0.' }, { key: 'domain', label: 'URN-Domain *', hint: 'Zum Beispiel environment, mobility oder general.' }] as const).map(({ key, label, hint }) =>
                         <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required onChange={(event) => editBasics(key, event.target.value)} /><span className="text-xs text-muted-foreground">{hint}</span></label>)}
                     <p className="break-all text-xs text-muted-foreground md:col-span-2">Katalog-ID: urn:{basics.publisher}:usecase:{basics.slug}</p>
-                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><select className={inputClass} value={targetKey} disabled={!targets.length} onChange={(event) => setTargetKey(event.target.value)}>
-                        {!targets.length && <option value="">Nicht konfiguriert — Vorschau verfügbar</option>}
-                        {targets.map((target) => <option key={target.key} value={target.key}>{target.label} · {target.baseBranch}</option>)}
-                    </select></label>
+                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><Select value={targetKey} onValueChange={setTargetKey} disabled={!targets.length} placeholder="Nicht konfiguriert - Vorschau verfügbar"
+                        options={targets.map((target) => ({ value: target.key, label: `${target.label} · ${target.baseBranch}` }))} /></label>
                 </section>
                 <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass('secondary')} onClick={() => setStep(2)}>Zurück zum Bestand</button>
                     <button type="submit" className={buttonClass('primary')}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}Vorschau erstellen</button></div>
