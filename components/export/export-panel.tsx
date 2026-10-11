@@ -16,13 +16,15 @@ const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm tex
 const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
 const FEEDBACK_STYLES: Record<ExportActionResult['status'], string> = {
     ok: 'text-success', 'already-open': 'text-warn', unchanged: 'text-warn', 'not-merged': 'text-warn',
-    unconfigured: 'text-warn', invalid: 'text-error', error: 'text-error',
+    unconfigured: 'text-warn', forbidden: 'text-error', invalid: 'text-error', error: 'text-error',
 }
 interface PanelProps {
     sources: ExportSource[]
     sourceNotice?: string
     targets: ExportTarget[]
     readiness: ExportReadiness
+    /** Whether this person may have the bot open merge requests; previewing is open to all. */
+    mayShare: boolean
     catalogUrl?: string
     defaults: { publisher: string; maintainer: string }
 }
@@ -57,7 +59,7 @@ export function ExportPanel(props: PanelProps) {
         </section>
     </div>
 }
-function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoose }: PanelProps & { source: ExportSource; onChoose: () => void }) {
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, onChoose }: PanelProps & { source: ExportSource; onChoose: () => void }) {
     const [step, setStep] = useState(2)
     const stepHeading = useRef<HTMLHeadingElement>(null)
     useEffect(() => {
@@ -84,7 +86,7 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
     })
     const [metadata, setMetadata] = useState(() => metadataDraft(catalog?.metadata))
     const [targetKey, setTargetKey] = useState(targets[0]?.key ?? '')
-    const forgeReady = readiness === 'ready' && targets.length > 0
+    const forgeReady = readiness === 'ready' && targets.length > 0 && mayShare
     // The catalogue step needs the package on the base branch AND, by tree id, the merged one.
     const bundleReady = result?.bundle?.state === 'on-base' && result.bundle.verification?.state === 'verified'
     useEffect(() => {
@@ -110,6 +112,14 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
         }
     })
     const editBasics = (key: keyof typeof basics, value: string) => setBasics({ ...basics, [key]: value })
+    // The package validator refuses a use case without a data structure of its own, so the
+    // inventory says so before the author fills in the whole form. An empty inventory has
+    // its own line already.
+    const lacksStructure = !!inventory?.artifacts.length && !inventory.artifacts.some((item) => item.type === 'structure')
+    // A refused preview stays on step 3 and never reaches the step-4 view, yet the export's
+    // warnings there usually name the cause (a source without a structure, say), so they
+    // are shown next to the errors.
+    const refused = step === 3 && result?.preview?.errors.length ? result.preview : undefined
     return <div className="flex flex-col gap-6">
         <Steps current={step} />
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -125,6 +135,7 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
                     {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
                         {inventory.artifacts.map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
                     </ul> : <p className="text-sm text-warn">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</p>}
+                    {lacksStructure && <p className="text-sm text-warn">Ohne eigene Datenstruktur kann der Use Case nicht geteilt werden - die Paketprüfung verlangt mindestens eine.</p>}
                     {!!inventory.warnings.length && <List title="Hinweise zum Bestand" items={inventory.warnings} tone="warn" />}
                     <button type="button" className={`${buttonClass('primary')} self-start`} onClick={() => setStep(3)}>Steckbrief ergänzen</button>
                 </>}
@@ -174,10 +185,13 @@ function ExportEditor({ source, targets, readiness, catalogUrl, defaults, onChoo
             <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unten unter „Geteilte Pakete“, ohne dieses Formular.</p>
         </>}
         {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
-        {result && <div role={result.status === 'invalid' || result.status === 'error' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
+        {result && <div role={result.status === 'invalid' || result.status === 'error' || result.status === 'forbidden' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
             {result.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
         </div>}
-        {step === 3 && result?.preview && !!result.preview.errors.length && <List title="Paketprüfung" items={result.preview.errors} tone="error" />}
+        {refused && <div className="flex flex-col gap-3">
+            <List title="Paketprüfung" items={refused.errors} tone="error" />
+            {!!refused.warnings.length && <List title="Hinweise aus dem Export" items={refused.warnings} tone="warn" />}
+        </div>}
         {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.bundle.verification && <Badge label={`Prüfung: ${verificationLabel(result.bundle.verification)}`} url={result.bundle.verification.mergedMrUrl} />}{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
     </div>
 }

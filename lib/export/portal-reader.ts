@@ -55,7 +55,10 @@ export interface SnapshotSink {
     dataSinkType: string
     configuration: Record<string, unknown>
     configurationUrn?: string
-    /** The structure the sink's `element` references, when the output carries the summary. */
+    /**
+     * The structure the sink's `element` references: from the version summary a
+     * PostGIS output embeds, or found by URN for a FROST output, which names only `element`.
+     */
     structureVersionId?: string
 }
 
@@ -169,39 +172,114 @@ async function readStructureVersion(
     }
 }
 
+/** A structure the search should find, and every place that needs it, so a miss is reported where it matters. */
+interface StructureWant {
+    /** The URN as the first referrer names it, versioned or logical. */
+    ref: string
+    where: string[]
+}
+
+/** Version reads one structure search may spend. Far beyond any instance today, and reaching it is reported. */
+const MAX_SEARCH_READS = 300
+
 /**
- * Finds the version pinning a given (logical or versioned) model URN by
- * walking the instance's structures — the fallback for a mapping that names a
- * structure no source or sink of the dataset references. Bounded: the walk
- * stops after 200 structures, which is far beyond any instance today.
+ * Finds the versions pinning model URNs that no connector summary resolved:
+ * the `element` of a FROST sink, whose output carries no version summary, and
+ * mapping sides. The platform has no lookup by URN and refuses the list of a
+ * structure's versions with 405, so this walks the structure list and reads
+ * the versions its rows name one by one, checking each against every wanted
+ * URN at once and stopping when all are found. `attempted` spans the whole
+ * export, so no version is read twice. Read failures become warnings: an
+ * unreadable structure costs the export one member, not the whole inventory.
  */
-async function findStructureByUrn(
+async function searchStructures(
     accessToken: string,
-    urn: string,
-): Promise<SnapshotStructure | undefined> {
-    const wanted = logicalUrn(urn)
-    const page = await getJson<Page<Record<string, unknown>>>(accessToken, '/v1/datastructures?size=200')
-    for (const structure of page?.content ?? []) {
-        const versions = await getJson<Page<Record<string, unknown>>>(
-            accessToken,
-            `/v1/datastructures/${structure.id}/versions?size=100`,
-        )
-        for (const version of versions?.content ?? []) {
-            if (typeof version.modelUrn === 'string' && logicalUrn(version.modelUrn) === wanted) {
-                return readStructureVersion(accessToken, String(structure.id), String(version.id))
+    wanted: Map<string, StructureWant>,
+    attempted: Set<string>,
+    warnings: string[],
+): Promise<Map<string, SnapshotStructure>> {
+    const found = new Map<string, SnapshotStructure>() // logical URN → structure
+    const pending = new Map(wanted)
+    if (!pending.size) return found
+    const report = (reason: string) => {
+        for (const want of pending.values()) {
+            for (const where of want.where) warnings.push(`${where}: Struktur ${want.ref} ${reason}`)
+        }
+    }
+
+    let rows: Record<string, unknown>[]
+    try {
+        rows = await listPages<Record<string, unknown>>(accessToken, '/v1/datastructures')
+    } catch (error) {
+        if (!(error instanceof PortalReadError)) throw error
+        report(`konnte nicht gesucht werden: ${error.message}`)
+        return found
+    }
+
+    // A versioned reference should get the version it pins; another version of its structure is the fallback.
+    const fallback = new Map<string, SnapshotStructure>()
+    const unreadable: string[] = []
+    let reads = 0
+    let bounded = false
+    walk: for (const row of rows) {
+        const versions = Array.isArray(row.dataStructureVersions) ? row.dataStructureVersions : []
+        for (const version of versions) {
+            if (!isRecord(version) || typeof version.id !== 'string' || attempted.has(version.id)) continue
+            if (reads >= MAX_SEARCH_READS) {
+                bounded = true
+                break walk
+            }
+            attempted.add(version.id)
+            reads++
+            let structure: SnapshotStructure | undefined
+            try {
+                structure = await readStructureVersion(accessToken, String(row.id), version.id)
+            } catch (error) {
+                if (!(error instanceof PortalReadError)) throw error
+                unreadable.push(`${version.id} (${error.message})`)
+                continue
+            }
+            if (!structure) continue
+            const logical = logicalUrn(structure.modelUrn)
+            const want = pending.get(logical)
+            if (!want) continue
+            if (structure.modelUrn === want.ref || logicalUrn(want.ref) === want.ref) {
+                found.set(logical, structure)
+                pending.delete(logical)
+                fallback.delete(logical)
+                if (!pending.size) return found
+            } else if (!fallback.has(logical)) {
+                fallback.set(logical, structure)
             }
         }
     }
-    return undefined
+    for (const [logical, structure] of fallback) {
+        found.set(logical, structure)
+        pending.delete(logical)
+    }
+    if (!pending.size) return found
+    // The unreadable versions may have been the wanted ones, so a miss names them.
+    const count = unreadable.length === 1 ? 'eine Strukturversion war' : `${unreadable.length} Strukturversionen waren`
+    const unread = unreadable.length ? ` - ${count} nicht lesbar: ${unreadable.slice(0, 3).join(', ')}` : ''
+    if (bounded) {
+        report(`wurde in den ersten ${MAX_SEARCH_READS} Strukturversionen nicht gefunden - Suche abgebrochen${unread}`)
+    } else if (unread) {
+        report(`wurde nicht gefunden${unread}`)
+    } else {
+        report('ist auf dieser Instanz nicht auffindbar')
+    }
+    return found
 }
 
-/** A DataStructureVersionSummaryDTO as the source and sink outputs embed it: id plus parent id. */
-function versionSummary(value: unknown): { versionId: string; dataStructureId?: string } | undefined {
-    if (!isRecord(value) || typeof value.id !== 'string') return undefined
-    return {
-        versionId: value.id,
-        dataStructureId: typeof value.dataStructureId === 'string' ? value.dataStructureId : undefined,
+/**
+ * A DataStructureVersionSummaryDTO as the source and sink outputs embed it. Usable
+ * only with its parent id, because a version is read under its structure's path.
+ */
+function versionSummary(value: unknown): { versionId: string; dataStructureId: string } | undefined {
+    if (!isRecord(value) || typeof value.id !== 'string' || typeof value.dataStructureId !== 'string') {
+        return undefined
     }
+    return { versionId: value.id, dataStructureId: value.dataStructureId }
 }
 
 const DATASET_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
@@ -245,7 +323,9 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
     }
 
     // Structure versions to read, collected from the summaries the connector outputs embed.
-    const wantedVersions = new Map<string, string | undefined>() // versionId → parent id
+    const wantedVersions = new Map<string, string>() // versionId → parent id
+    // Connectors that name their structure only by URN; they get their version once the search has found it.
+    const byElement: { connector: { structureVersionId?: string }; ref: string; where: string }[] = []
 
     const sinkPage = await getJson<Page<Record<string, unknown>>>(
         accessToken,
@@ -255,7 +335,7 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         const configuration = isRecord(dto.configuration) ? dto.configuration : {}
         const summary = versionSummary(configuration.dataStructureVersion)
         if (summary) wantedVersions.set(summary.versionId, summary.dataStructureId)
-        return {
+        const sink: SnapshotSink = {
             id: String(dto.id),
             name:
                 (typeof dto.name === 'string' && dto.name) ||
@@ -266,6 +346,11 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
             configurationUrn: typeof dto.configurationUrn === 'string' ? dto.configurationUrn : undefined,
             structureVersionId: summary?.versionId,
         }
+        // The FROST output carries only `element`; the platform resolves the version for PostGIS alone.
+        if (!summary && isCoreUrn(configuration.element)) {
+            byElement.push({ connector: sink, ref: configuration.element, where: `Senke ${sink.name}` })
+        }
+        return sink
     })
 
     const sourceIds = new Set(pipelines.flatMap((pipeline) => pipeline.dataSourceIds))
@@ -278,28 +363,54 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         }
         const summary = versionSummary(dto.dataStructureVersion)
         if (summary) wantedVersions.set(summary.versionId, summary.dataStructureId)
-        sources.push({
+        const configuration = isRecord(dto.configuration) ? dto.configuration : {}
+        const source: SnapshotSource = {
             id: String(dto.id),
             name: typeof dto.name === 'string' ? dto.name : `Quelle ${sources.length + 1}`,
             description: typeof dto.description === 'string' ? dto.description : undefined,
             connectorType: typeof dto.connectorType === 'string' ? dto.connectorType : 'MQTT',
-            configuration: isRecord(dto.configuration) ? dto.configuration : {},
+            configuration,
             configurationUrn: typeof dto.configurationUrn === 'string' ? dto.configurationUrn : undefined,
             structureVersionId: summary?.versionId,
-        })
+        }
+        // The output has no `element` field of its own, but an unlinked source may still name one in its document.
+        if (!summary && isCoreUrn(configuration.element)) {
+            byElement.push({ connector: source, ref: configuration.element, where: `Datenquelle ${source.name}` })
+        }
+        sources.push(source)
     }
 
     const structures = new Map<string, SnapshotStructure>()
+    // Every version this export tried to read, so the search below never reads one twice.
+    const attempted = new Set<string>()
     for (const [versionId, dataStructureId] of wantedVersions) {
-        const structure = dataStructureId
-            ? await readStructureVersion(accessToken, dataStructureId, versionId)
-            : undefined
+        attempted.add(versionId)
+        let structure: SnapshotStructure | undefined
+        try {
+            structure = await readStructureVersion(accessToken, dataStructureId, versionId)
+        } catch (error) {
+            if (!(error instanceof PortalReadError)) throw error
+            warnings.push(`Strukturversion ${versionId} konnte nicht gelesen werden: ${error.message}`)
+            continue
+        }
         if (!structure) {
             warnings.push(`Strukturversion ${versionId} konnte nicht gelesen werden`)
             continue
         }
         structures.set(versionId, structure)
     }
+    const knownStructure = (ref: string): SnapshotStructure | undefined =>
+        [...structures.values()].find((s) => logicalUrn(s.modelUrn) === logicalUrn(ref))
+
+    // Whatever is still unknown is searched for in one walk, keyed by logical URN.
+    const wantedStructures = new Map<string, StructureWant>()
+    const wantStructure = (ref: string, where: string) => {
+        if (knownStructure(ref)) return
+        const want = wantedStructures.get(logicalUrn(ref)) ?? { ref, where: [] }
+        want.where.push(where)
+        wantedStructures.set(logicalUrn(ref), want)
+    }
+    for (const { ref, where } of byElement) wantStructure(ref, where)
 
     // Mappings: whatever the pipeline graphs reference by URN.
     const mappingUrns = new Set<string>()
@@ -323,13 +434,14 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         // A mapping may name a structure no source or sink of this dataset references.
         for (const side of ['source', 'target'] as const) {
             const ref = document[side]
-            if (!isCoreUrn(ref)) continue
-            const known = [...structures.values()].some((s) => logicalUrn(s.modelUrn) === logicalUrn(ref))
-            if (known) continue
-            const found = await findStructureByUrn(accessToken, ref)
-            if (found) structures.set(found.versionId, found)
-            else warnings.push(`Mapping ${urn}: Struktur ${ref} ist auf dieser Instanz nicht auffindbar`)
+            if (isCoreUrn(ref)) wantStructure(ref, `Mapping ${urn}`)
         }
+    }
+
+    const searched = await searchStructures(accessToken, wantedStructures, attempted, warnings)
+    for (const structure of searched.values()) structures.set(structure.versionId, structure)
+    for (const { connector, ref } of byElement) {
+        connector.structureVersionId = knownStructure(ref)?.versionId
     }
 
     return {

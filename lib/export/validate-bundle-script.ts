@@ -1,8 +1,11 @@
 /**
- * The package repositories' validator, verbatim (commune-musterbach-kiez-baumkataster/ci/validate-bundle.py
- * as of 2026-09-08). It travels with every exported package so the receiving repository's CI and a
+ * The package repositories' validator. Not a verbatim copy of any one repo: it is
+ * commune-musterbach-kiez-baumkataster/ci/validate-bundle.py as of 2026-09-08 (plus the `dashboards`
+ * member kind), with the $defs and FROST rules of commune-musterbach-jungbaum-bewaesserung/ci/validate-bundle.py
+ * as of 2026-10-04 (d2d4381) added, verbatim but for one more comment on the $defs rule. That repo's
+ * simulation label and cadence checks are not carried over. It travels with every exported package so the receiving repository's CI and a
  * contributor's local check apply the same rules the export pre-checked with (lib/export/package-check.ts
- * mirrors the essential ones). Regenerate from the package repo when the validator changes.
+ * mirrors the essential ones). Update both when a package repo's validator changes.
  *
  * Extended 2026-10-11 by the geo members (apis, styles, layers), ahead of the package repos: the
  * package repos receive this version with the next export.
@@ -19,9 +22,14 @@ package hangs together:
   - every listed member file exists; no unlisted JSON strays in core-ir/
   - per-kind invariants (structure $id/title, connector id/title/connectionType,
     mapping mappingUrn/document, pipeline name/model)
+  - a structure's $defs members do not refer to each other: the install gives
+    every member its own $id, after which such a reference no longer resolves
   - references resolve WITHIN the package: mapping source/target -> bundled
     structure $ids; pipeline sourceRef/sinkRef/mappingRef -> member titles/names
     (or pass through as explicit URNs)
+  - FROST sinks name their port; a dataset does not release without one. A
+    FROST sink fed by a mapping names that mapping's target as its element, as
+    the portal's pipeline editor does; the release needs it for the match keys
   - datastructure entries: exactly one structure member, id == its $id
   - geo members: api slug/standard rules, style name/sldContent, layer
     layerName/sinkRef; layer sinkRef -> datasink title, style refs -> style
@@ -48,6 +56,16 @@ GENERATOR_KINDS = {
     "sequence": (),
     "jitter": ("center", "spread"),
 }
+# The structures the platform publishes for its FROST sink ports, by port. A
+# package cannot reference them yet: the portal creates a sink only for an
+# element in its own structure list, where these are missing, and refuses the
+# install with "Referenced DataStructure is not available". A package bundles a
+# copy of the one it needs instead.
+FROST_PORT_STRUCTURES = {
+    "Things": "urn:core:platform:civitas:datastructure:frost:Things:4eg5hgeyxv",
+    "Observations": "urn:core:platform:civitas:datastructure:frost:Observations:4sntm03fzg",
+    "ThingTree": "urn:core:platform:civitas:datastructure:frost:ThingTree:r32e0hmgn1",
+}
 errors = []
 
 
@@ -62,6 +80,19 @@ def load_json(path):
     except json.JSONDecodeError as exc:
         fail(f"{path}: invalid JSON ({exc})")
         return None
+
+
+def local_refs(node):
+    """Every '#/...' $ref inside node, in document order."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/"):
+            yield ref
+        for value in node.values():
+            yield from local_refs(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from local_refs(value)
 
 
 manifest_path = os.path.join(CORE, "manifest.json")
@@ -122,6 +153,19 @@ for (kind, name), document in documents.items():
             structure_ids.add(declared)
         if not isinstance(document.get("title"), str) or not document["title"]:
             fail(f"{where}: structure needs a title (it is the shell's display name)")
+        # The install gives every $defs member its own $id, and a '#/...' reference
+        # resolves against the nearest $id: inside a member it then searches only
+        # that member. The portal refuses the import with "Invalid JSON Schema".
+        # Only the root's $ref may point into $defs.
+        # This is a limitation of the install, not of the platform: the portal's own
+        # import accepts such a structure, so a structure exported from an instance
+        # can carry one. It still fails here, because the install would refuse it.
+        defs = document.get("$defs")
+        for member, definition in (defs.items() if isinstance(defs, dict) else ()):
+            for ref in local_refs(definition):
+                fail(f"{where}: $defs member '{member}' refers to '{ref}'; the install gives "
+                     f"every member its own $id, so this no longer resolves. Write the "
+                     f"definition out inside '{member}'")
     elif kind in ("dataSources", "dataSinks"):
         for field in ("$schema", "id", "title", "connectionType"):
             if not isinstance(document.get(field), str) or not document[field]:
@@ -130,6 +174,10 @@ for (kind, name), document in documents.items():
             (source_titles if kind == "dataSources" else sink_titles).add(document["title"])
         if kind == "dataSinks" and isinstance(document.get("connectionType"), str):
             sink_types.add(document["connectionType"].lower())
+        if kind == "dataSinks" and document.get("connectionType") == "frost":
+            port = document.get("port")
+            if port not in FROST_PORT_STRUCTURES:
+                fail(f"{where}: a FROST sink needs a port, one of {', '.join(FROST_PORT_STRUCTURES)}")
     elif kind == "mappings":
         for field in ("mappingUrn", "name"):
             if not isinstance(document.get(field), str) or not document[field]:
@@ -309,6 +357,14 @@ for (kind, name), document in documents.items():
     if kind == "simulations":
         validate_simulation(document, f"{CORE}/{name}")
 
+# Pipelines name their sink by title or id, their mapping by name or URN.
+sinks_by_ref, mappings_by_ref = {}, {}
+for (kind, name), document in documents.items():
+    keys = ("title", "id") if kind == "dataSinks" else ("name", "mappingUrn") if kind == "mappings" else ()
+    for key in keys:
+        if isinstance(document.get(key), str):
+            (sinks_by_ref if kind == "dataSinks" else mappings_by_ref)[document[key]] = document
+
 # Cross-references must resolve within the package (URNs pass through: they
 # reference something already installed on the target instance).
 for (kind, name), document in documents.items():
@@ -316,8 +372,16 @@ for (kind, name), document in documents.items():
     if kind == "mappings" and isinstance(document.get("document"), dict):
         for side in ("source", "target"):
             ref = document["document"].get(side)
-            if isinstance(ref, str) and ref not in structure_ids:
+            if ref in FROST_PORT_STRUCTURES.values():
+                fail(f"{where}: mapping {side} '{ref}' is a platform FROST structure; bundle a copy of it (see FROST_PORT_STRUCTURES)")
+            elif isinstance(ref, str) and ref not in structure_ids:
                 fail(f"{where}: mapping {side} '{ref}' is not a bundled structure $id")
+    if kind == "dataSinks" and document.get("connectionType") == "frost":
+        element = document.get("element")
+        if element in FROST_PORT_STRUCTURES.values():
+            fail(f"{where}: element '{element}' is a platform FROST structure; the portal refuses it, bundle a copy")
+        elif element is not None and element not in structure_ids:
+            fail(f"{where}: element '{element}' is not a bundled structure $id")
     if kind == "pipelines" and isinstance(document.get("model"), dict):
         for node in document["model"].get("nodes") or []:
             if not isinstance(node, dict):
@@ -330,6 +394,19 @@ for (kind, name), document in documents.items():
                 ref = node.get(ref_field)
                 if isinstance(ref, str) and not ref.startswith("urn:") and ref not in known:
                     fail(f"{where}: node '{node.get('id')}' {ref_field} '{ref}' matches no bundled {label}")
+        # A mapped FROST flow takes its match keys from the sink's element, so it
+        # must be the structure the last mapping writes (pipelines are linear).
+        nodes = [node for node in document["model"].get("nodes") or [] if isinstance(node, dict)]
+        sink = next((sinks_by_ref.get(node.get("sinkRef")) for node in nodes if node.get("kind") == "sink"), None)
+        mapping_refs = [node.get("mappingRef") for node in nodes if node.get("kind") == "mapping"]
+        if sink is not None and sink.get("connectionType") == "frost" and mapping_refs:
+            mapping = mappings_by_ref.get(mapping_refs[-1])
+            target = (mapping or {}).get("document", {}).get("target")
+            if target and sink.get("element") != target:
+                fail(
+                    f"{where}: FROST sink '{sink.get('title')}' must name the last mapping's target "
+                    f"'{target}' as its element, or the release cannot find the match keys"
+                )
     if kind == "layers":
         ref = document.get("sinkRef")
         if isinstance(ref, str) and not ref.startswith("urn:") and ref not in sink_titles:
