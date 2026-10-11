@@ -226,6 +226,18 @@ describe('checkPackage', () => {
         })
     })
 
+    describe('FROST sink settings', () => {
+        it('reports a setting the platform refuses on a FROST sink, such as the read API\'s type tag', () => {
+            const files = frostPackage()
+            edit(files, 'frost.datasink.json', (sink) => {
+                sink.type = 'FROST'
+            })
+            expect(checkPackage(files)).toEqual([
+                'core-ir/frost.datasink.json: a FROST sink takes only a port and an element, not type',
+            ])
+        })
+    })
+
     describe('FROST sink port', () => {
         it('accepts each of the three ports', () => {
             for (const port of ['Things', 'Observations', 'ThingTree']) {

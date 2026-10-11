@@ -76,6 +76,13 @@ const URL_CREDENTIAL = /^([a-z][a-z0-9+.-]*:\/\/[^/@:]+):([^/@]*)@/i
 
 /** Connector meta fields the package carries at the top level of the document, never inside the configuration. */
 const CONNECTOR_META = new Set(['$schema', 'id', 'title', 'description', 'connectionType', 'element', 'dataStructureVersion'])
+/**
+ * The platform's sink output labels its configuration with the sink kind (`type`: FROST or
+ * POSTGIS, a JSON subtype tag of the read API, not a setting). The package says the kind as
+ * `connectionType`, and a FROST sink carrying `type` is refused at install: "FROST sinks
+ * accept only a port and an optional element URN".
+ */
+const SINK_OUTPUT_ONLY = new Set(['type'])
 
 const PARAMETER_LABELS: Record<string, InstallParameter> = {
     urls: { field: 'urls', label: 'Broker-URL(s)', description: 'Der Broker, den diese Instanz erreicht.' },
@@ -287,7 +294,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         const connectionType = sink.dataSinkType.toLowerCase()
         const id = catalogUrn(publisher, 'datasink', domain, sink.name)
         const configuration = stripSecrets(
-            Object.fromEntries(Object.entries(sink.configuration).filter(([key]) => !CONNECTOR_META.has(key))),
+            Object.fromEntries(Object.entries(sink.configuration).filter(([key]) => !CONNECTOR_META.has(key) && !SINK_OUTPUT_ONLY.has(key))),
             file,
             stripped,
         )

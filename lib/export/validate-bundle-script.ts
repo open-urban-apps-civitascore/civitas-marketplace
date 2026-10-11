@@ -66,6 +66,9 @@ FROST_PORT_STRUCTURES = {
     "Observations": "urn:core:platform:civitas:datastructure:frost:Observations:4sntm03fzg",
     "ThingTree": "urn:core:platform:civitas:datastructure:frost:ThingTree:r32e0hmgn1",
 }
+# A FROST sink's document: the connector envelope plus the only two settings
+# the platform accepts.
+FROST_SINK_KEYS = {"$schema", "id", "title", "description", "connectionType", "port", "element"}
 errors = []
 
 
@@ -178,6 +181,10 @@ for (kind, name), document in documents.items():
             port = document.get("port")
             if port not in FROST_PORT_STRUCTURES:
                 fail(f"{where}: a FROST sink needs a port, one of {', '.join(FROST_PORT_STRUCTURES)}")
+            # The platform refuses any other setting on a FROST sink at install.
+            extra = sorted(set(document) - FROST_SINK_KEYS)
+            if extra:
+                fail(f"{where}: a FROST sink takes only a port and an element, not {', '.join(extra)}")
     elif kind == "mappings":
         for field in ("mappingUrn", "name"):
             if not isinstance(document.get(field), str) or not document[field]:

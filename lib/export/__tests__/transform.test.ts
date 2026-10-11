@@ -82,6 +82,8 @@ function snapshot(): InstanceSnapshot {
                 name: 'Kiez-Bäume-Tabelle',
                 dataSinkType: 'POSTGIS',
                 configuration: {
+                    // The read API tags every sink configuration with its kind.
+                    type: 'POSTGIS',
                     tableName: 'kiez_baeume',
                     element: `${KIEZBAUM_CATALOG}:1.0.0`,
                     dataStructureVersion: { id: 'v-kiez', dataStructureId: 's-kiez' },
@@ -150,6 +152,18 @@ describe('transformSnapshot', () => {
 
     it('passes the package validator — the round trip is installable', () => {
         expect(checkPackage(pkg.files)).toEqual([])
+    })
+
+    it('drops the read API\'s kind tag from sinks, which a FROST install refuses', () => {
+        const postgis = JSON.parse(pkg.files['core-ir/kiez-baeume-tabelle.datasink.json'])
+        expect(postgis).not.toHaveProperty('type')
+
+        const frost = snapshot()
+        frost.sinks[0] = { ...frost.sinks[0], dataSinkType: 'FROST', configuration: { type: 'FROST', port: 'Things', element: `${KIEZBAUM_CATALOG}:1.0.0` } }
+        const files = transformSnapshot(frost, options).files
+        expect(Object.keys(JSON.parse(files['core-ir/kiez-baeume-tabelle.datasink.json'])).sort())
+            .toEqual(['$schema', 'connectionType', 'element', 'id', 'port', 'title'])
+        expect(checkPackage(files)).toEqual([])
     })
 
     it('keeps catalogue identities and derives instance-minted ones to the published values', () => {
