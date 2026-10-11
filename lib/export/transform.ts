@@ -1,5 +1,5 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
-import type { InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
+import type { BundledSimulation, InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
@@ -17,6 +17,9 @@ import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
  *     references become bundle-local titles, as the package format demands
  *   - secrets: never leave the instance — stripped and declared as install
  *     parameters instead, so the receiving instance asks for its own
+ *   - addresses: the instance's broker and database hosts give way to the
+ *     neutral defaults the catalogue's packages carry; the receiving
+ *     instance sets its own through the same install parameters
  */
 
 export interface ExportOptions {
@@ -32,6 +35,8 @@ export interface ExportOptions {
     keywords: string[]
     /** URN domain segment for re-identified artifacts. */
     domain: string
+    /** Demo data chosen for the package, already in package form (lib/export/simulations.ts). */
+    simulations?: BundledSimulation[]
     provenance: {
         datasetId: string
         datasetName: string
@@ -73,6 +78,25 @@ const SECRET_KEY = /(password|passwd|secret|token|api[-_]?key|credential|private
 const MASKED_VALUE = /^\*{3,}$/
 /** `scheme://user:password@host` — the password part is a credential in a URL-shaped value. */
 const URL_CREDENTIAL = /^([a-z][a-z0-9+.-]*:\/\/[^/@:]+):([^/@]*)@/i
+
+/**
+ * Where a package's sources point until an instance says otherwise: the broker
+ * and database names the catalogue's packages use for a local stack. The values
+ * the instance read from are its own (cluster-internal hosts, its user), and an
+ * install replaces them through the declared parameters anyway.
+ */
+const NEUTRAL_BROKER = 'tcp://civitas-mosquitto:1883'
+const NEUTRAL_DB_HOST = 'localhost:5432'
+
+/** The connector's address fields with the instance's hosts replaced; the database name stays (D14 compares it). */
+function neutralAddresses(connectionType: string, configuration: Record<string, unknown>): Record<string, unknown> {
+    const out = { ...configuration }
+    if (connectionType === 'mqtt' && Array.isArray(out.urls)) out.urls = [NEUTRAL_BROKER]
+    if (connectionType === 'sql' && typeof out.dsn === 'string') {
+        out.dsn = out.dsn.replace(/^([a-z][a-z0-9+.-]*:\/\/)(?:[^@/]*@)?[^/]*/i, `$1${NEUTRAL_DB_HOST}`)
+    }
+    return out
+}
 
 /** Connector meta fields the package carries at the top level of the document, never inside the configuration. */
 const CONNECTOR_META = new Set(['$schema', 'id', 'title', 'description', 'connectionType', 'element', 'dataStructureVersion'])
@@ -233,11 +257,11 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         const file = nameFile(source.name, 'datasource')
         const connectionType = source.connectorType.toLowerCase()
         const id = catalogUrn(publisher, 'datasource', domain, source.name)
-        const configuration = stripSecrets(
+        const configuration = neutralAddresses(connectionType, stripSecrets(
             Object.fromEntries(Object.entries(source.configuration).filter(([key]) => !CONNECTOR_META.has(key))),
             file,
             stripped,
-        )
+        ))
         const element = structureOfVersion(source.structureVersionId) ?? resolveStructure(source.configuration.element, file)
         if (!element) warnings.push(`${file}: die Quelle nennt keine Struktur — element fehlt`)
         const document: Record<string, unknown> = {
@@ -353,6 +377,14 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         pipelineMembers.push({ file })
     }
 
+    // ── Demo data: one member per scenario, named after the source it feeds ──
+    const simulationMembers: PackageMember[] = []
+    for (const simulation of options.simulations ?? []) {
+        const file = nameFile(simulation.sourceRef, 'simulation')
+        files[`core-ir/${file}`] = json(simulation)
+        simulationMembers.push({ file })
+    }
+
     const manifest: PackageManifest = {
         ...exportMetadataSchema.parse(options.metadata ?? {}),
         id: `urn:${publisher}:usecase:${options.slug}`,
@@ -369,7 +401,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             mappings: mappingMembers,
             dataSinks: sinkMembers,
             pipelines: pipelineMembers,
-            simulations: [],
+            simulations: simulationMembers,
             dashboards: [],
         },
         dependencies: [],

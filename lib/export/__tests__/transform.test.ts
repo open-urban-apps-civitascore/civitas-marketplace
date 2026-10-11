@@ -194,7 +194,8 @@ describe('transformSnapshot', () => {
         const source = parse(pkg.files, 'core-ir/baumkataster-db.datasource.json')
         expect(source).not.toHaveProperty('password')
         expect(source).not.toHaveProperty('zugang')
-        expect(source.dsn).toBe('postgres://kataster@baumkataster-db:5432/fachverfahren')
+        // The instance's host gives way to the neutral default; the database name stays.
+        expect(source.dsn).toBe('postgres://localhost:5432/fachverfahren')
         expect(source.connectionType).toBe('sql')
         expect(source.element).toBe('urn:core:standard:openurbanapps:datastructure:environment:baumkatasterzeile:ny4qd9zowt')
         expect(JSON.stringify(pkg.files)).not.toContain('geheim')

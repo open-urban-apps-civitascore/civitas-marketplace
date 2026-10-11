@@ -20,3 +20,12 @@ export function simulatorUiUrl(): string | undefined {
 export function simulationUiHref(base: string, simulationId: string): string {
     return `${base}/simulations/${encodeURIComponent(simulationId)}`
 }
+
+/**
+ * The simulator UI's form for a new stream, started from a source's structure.
+ * `source` names the data source the stream is meant for, so the form can take
+ * its topic or table and record where the stream belongs.
+ */
+export function newSimulationUiHref(base: string, structureUrn: string, sourceId: string): string {
+    return `${base}/simulations/new?from=${encodeURIComponent(structureUrn)}&source=${encodeURIComponent(sourceId)}`
+}
