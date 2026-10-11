@@ -5,6 +5,7 @@ import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
 import { SubmitButton } from '@/components/catalog/submit-button'
+import { Select } from '@/components/ui/select'
 import { DATAPOOL_NAME_MAX, DATAPOOL_NAME_MIN, suggestDatapoolName } from '@/lib/datapool-name'
 import type { DatapoolOption } from '@/lib/datapools'
 import { installEntry } from '@/lib/install-actions'
@@ -464,20 +465,13 @@ function TargetStep({
                 >
                     <label className="flex flex-col gap-1 text-xs font-medium">
                         Datenpool
-                        <select
+                        <Select
                             value={datapoolId}
-                            onChange={(event) => onDatapool(event.target.value)}
-                            className="rounded-md border bg-background px-2 py-1.5 text-sm font-normal"
-                        >
-                            <option value="" disabled>
-                                Bitte wählen …
-                            </option>
-                            {datapools.map((pool) => (
-                                <option key={pool.id} value={pool.id}>
-                                    {pool.name}
-                                </option>
-                            ))}
-                        </select>
+                            onValueChange={onDatapool}
+                            placeholder="Bitte wählen …"
+                            className="px-2 py-1.5 font-normal"
+                            options={datapools.map((pool) => ({ value: pool.id, label: pool.name }))}
+                        />
                         {selected?.description && (
                             <span className="font-normal text-muted-foreground">
                                 {selected.description}
