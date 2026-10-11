@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 'lucide-react'
-import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
+import { exportAction, inspectExportSource, type DemoInventory, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { verificationLabel } from '@/lib/export/labels'
@@ -12,6 +12,7 @@ import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { MetadataForm } from '@/components/export/metadata-form'
 import { Select } from '@/components/ui/select'
+import { newSimulationUiHref } from '@/lib/simulator/ui-links'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
@@ -67,6 +68,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     }, [step])
     const [inventory, setInventory] = useState<Awaited<ReturnType<typeof inspectExportSource>> | null>(null)
     const [inventoryAttempt, setInventoryAttempt] = useState(0)
+    // Demo streams are taken along unless unticked, so a stream made in the meantime arrives ticked.
+    const [demoExcluded, setDemoExcluded] = useState<ReadonlySet<string>>(new Set())
     const [pending, startTransition] = useTransition()
     const [result, setResult] = useState<ExportActionResult | null>(null)
     const [preview, setPreview] = useState<ExportActionResult['preview']>()
@@ -100,6 +103,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         data.set('datasetId', source.id)
         data.set('targetKey', targetKey)
         data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
+        data.set('demoStreams', JSON.stringify(demoChosen))
         data.set('intent', intent)
         try {
             const next = await exportAction(null, data)
@@ -111,6 +115,14 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         }
     })
     const editBasics = (key: keyof typeof basics, value: string) => setBasics({ ...basics, [key]: value })
+    const reloadInventory = () => { setInventory(null); setInventoryAttempt((n) => n + 1) }
+    const demoChosen = (inventory?.demo?.sources ?? []).flatMap((demoSource) => demoSource.streams.map((stream) => stream.id)).filter((id) => !demoExcluded.has(id))
+    const toggleDemo = (id: string) => setDemoExcluded((excluded) => {
+        const next = new Set(excluded)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+    })
     // The package validator refuses a use case without a data structure of its own, so the
     // inventory says so before the author fills in the whole form. An empty inventory has
     // its own line already.
@@ -129,13 +141,14 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             <h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Was wird geteilt?</h2>
             <p className="text-sm text-muted-foreground">Diese Artefakte sind aktuell mit dem Use Case verbunden. Die Vorschau liest den Bestand erneut und zeigt, welche Zugangsdaten entfernt werden.</p>
             {!inventory ? <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Bestand wird geladen …</p>
-                : inventory.error ? <><p role="alert" className="text-sm text-error">{inventory.error}</p><button type="button" className={buttonClass('secondary')} onClick={() => { setInventory(null); setInventoryAttempt((n) => n + 1) }}>Erneut laden</button></>
+                : inventory.error ? <><p role="alert" className="text-sm text-error">{inventory.error}</p><button type="button" className={buttonClass('secondary')} onClick={reloadInventory}>Erneut laden</button></>
                 : <>
                     {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
                         {inventory.artifacts.map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
                     </ul> : <p className="text-sm text-warn">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</p>}
                     {lacksStructure && <p className="text-sm text-warn">Ohne eigene Datenstruktur kann der Use Case nicht geteilt werden - die Paketprüfung verlangt mindestens eine.</p>}
                     {!!inventory.warnings.length && <List title="Hinweise zum Bestand" items={inventory.warnings} tone="warn" />}
+                    {inventory.demo && <DemoData demo={inventory.demo} excluded={demoExcluded} onToggle={toggleDemo} onReload={reloadInventory} />}
                     <button type="button" className={`${buttonClass('primary')} self-start`} onClick={() => setStep(3)}>Steckbrief ergänzen</button>
                 </>}
         </section>}
@@ -237,6 +250,12 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                 </span>
             </div>
 
+            <p className="text-sm">
+                {preview.demo.streams
+                    ? `Demo-Daten: ${preview.demo.streams === 1 ? 'ein Datenstrom' : `${preview.demo.streams} Datenströme`} aus dem Simulator. Eine Installation startet sie für ihre eigenen Datenquellen.`
+                    : 'Das Paket bringt keine Demo-Daten mit. Nach der Installation fließen erst Daten, wenn eine echte Quelle angebunden ist.'}
+            </p>
+
             {preview.errors.length > 0 && (
                 <List title="Validierung schlägt fehl" items={preview.errors} tone="error" />
             )}
@@ -331,4 +350,31 @@ function MetadataReview({ metadata }: { metadata: MetadataDraft }) {
             <div key={field.path}><dt className="text-muted-foreground">{field.label}</dt><dd className="whitespace-pre-wrap break-words">{field.options?.[metadata.fields[field.path]] ?? metadata.fields[field.path]}</dd></div>)}
         {metadata.media.map((item, index) => <div key={index} className="sm:col-span-2"><dt className="text-muted-foreground">Bild {index + 1}</dt><dd className="break-all">{item.src}</dd><dd>{item.alt}</dd>{item.caption && <dd className="text-muted-foreground">{item.caption}</dd>}</div>)}
     </dl>
+}
+
+/**
+ * Optional demo data: the simulator's streams that feed this use case's sources.
+ * Demo data is written in the simulator, not here; a source without streams
+ * links to the simulator's form, and "Erneut prüfen" picks up what was made.
+ */
+function DemoData({ demo, excluded, onToggle, onReload }: { demo: DemoInventory; excluded: ReadonlySet<string>; onToggle: (id: string) => void; onReload: () => void }) {
+    return <div className="flex flex-col gap-3 border-t pt-4">
+        <h3 className="font-semibold">Demo-Daten</h3>
+        <p className="text-sm text-muted-foreground">Freiwillig. Angehakte Datenströme des Simulators kommen ins Paket, und eine Installation startet sie für ihre eigenen Datenquellen. Ohne Demo-Daten fließen nach der Installation erst Daten, wenn eine echte Quelle angebunden ist.</p>
+        {demo.problem ? <p className="text-sm text-muted-foreground">{demo.problem}</p>
+            : !demo.sources.length ? <p className="text-sm text-muted-foreground">Dieser Use Case hat keine MQTT- oder SQL-Quelle, für die der Simulator Daten erzeugen könnte.</p>
+            : demo.sources.map((demoSource) => <div key={demoSource.id} className="rounded-lg border p-3 text-sm">
+                <p className="font-medium">{demoSource.name} <span className="font-normal text-muted-foreground">· {demoSource.transport === 'mqtt' ? 'MQTT' : 'SQL'}</span></p>
+                {demoSource.streams.length ? <ul className="mt-2 flex flex-col gap-1.5">
+                    {demoSource.streams.map((stream) => <li key={stream.id}><label className="flex items-center gap-2">
+                        <input type="checkbox" checked={!excluded.has(stream.id)} onChange={() => onToggle(stream.id)} />
+                        <span>{stream.label}</span>
+                        {stream.matchedBy === 'address' && <span className="text-xs text-muted-foreground">über Topic oder Tabelle gefunden</span>}
+                    </label></li>)}
+                </ul> : <p className="mt-1 text-muted-foreground">Für diese Quelle gibt es keine Demo-Daten.{' '}
+                    {demo.simulatorUi && demoSource.structureUrn && <a href={newSimulationUiHref(demo.simulatorUi, demoSource.structureUrn, demoSource.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">Im Simulator anlegen<ExternalLink className="size-3" /></a>}
+                </p>}
+            </div>)}
+        <button type="button" className="self-start text-sm underline" onClick={onReload}>Erneut prüfen</button>
+    </div>
 }

@@ -177,6 +177,19 @@ export interface SimulationStatus {
     lastError: string | null
 }
 
+/** One registration with the configuration it was built from (`GET /simulations/:id`). */
+export interface SimulationDetail extends SimulationStatus {
+    input?: SimulationInput | null
+}
+
+/** Undefined for an id the simulator does not know (any longer). */
+export async function getSimulation(id: string): Promise<SimulationDetail | undefined> {
+    const response = await simulatorRequest(`/simulations/${encodeURIComponent(id)}`, { method: 'GET' })
+    if (response.status === 404) return undefined
+    if (!response.ok) throw await rejectionOf(response)
+    return (await response.json()) as SimulationDetail
+}
+
 /** Every registered simulation with its live publish state. */
 export async function listSimulations(): Promise<SimulationStatus[]> {
     const response = await simulatorRequest('/simulations', { method: 'GET' })

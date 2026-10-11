@@ -3,7 +3,13 @@
  * TypeScript, so an export can refuse to open a merge request for a package
  * the repository's own CI would reject. Mirrors the script; the script stays
  * the authority and travels with every exported package.
+ *
+ * Demo data is checked by the install's own assembly instead: its rules (field
+ * paths against the message class, topic against the subscription) live there,
+ * and a second copy here would drift from what an install actually refuses.
  */
+
+import { assembleCatalogEntry, CatalogIntegrityError, parsePackageManifest } from '@/lib/catalog/assemble'
 
 const CORE = 'core-ir'
 const MEMBER_KINDS = [
@@ -289,6 +295,18 @@ export function checkPackage(files: Record<string, string>): string[] {
     const structureMembers = Array.isArray(members.dataStructures) ? members.dataStructures : []
     if (manifest.type === 'usecase' && structureMembers.length === 0) {
         fail('usecase entry needs at least one dataStructures member')
+    }
+    const simulationMembers = Array.isArray(members.simulations) ? members.simulations : []
+    if (!errors.length && simulationMembers.length) {
+        try {
+            assembleCatalogEntry(parsePackageManifest(manifest, manifestPath), (file) => load(`${CORE}/${file}`) as Record<string, unknown>)
+        } catch (error) {
+            if (!(error instanceof CatalogIntegrityError)) throw error
+            // The assembly checks the whole package; only a scenario's error is the demo data's.
+            fail(/: simulation '/.test(error.message)
+                ? `Die Installation würde die Demo-Daten ablehnen (abwählen hilft): ${error.message}`
+                : `Die Installation würde das Paket ablehnen: ${error.message}`)
+        }
     }
     return errors
 }

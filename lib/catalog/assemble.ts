@@ -411,6 +411,21 @@ function validateGeoMembers(bundle: UseCaseEntry['bundle'], id: string): void {
     }
 }
 
+/**
+ * The same check for a scenario that is not bundled yet: why the install would
+ * refuse it against this structure, or undefined when it would not. The export
+ * uses it to pick the message class and to refuse what no install accepts.
+ */
+export function simulationProblem(simulation: BundledSimulation, structureModel: Record<string, unknown>): string | undefined {
+    try {
+        validateSimulation(simulation, structureModel, `Demo-Daten für '${simulation.sourceRef}'`)
+        return undefined
+    } catch (error) {
+        if (error instanceof CatalogIntegrityError) return error.message
+        throw error
+    }
+}
+
 /** Reader for one member file; the two sources differ only in this function. */
 export type MemberReader = (file: string) => Record<string, unknown>
 

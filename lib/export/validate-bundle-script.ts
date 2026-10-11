@@ -2,8 +2,8 @@
  * The package repositories' validator. Not a verbatim copy of any one repo: it is
  * commune-musterbach-kiez-baumkataster/ci/validate-bundle.py as of 2026-09-08 (plus the `dashboards`
  * member kind), with the $defs and FROST rules of commune-musterbach-jungbaum-bewaesserung/ci/validate-bundle.py
- * as of 2026-10-04 (d2d4381) added, verbatim but for one more comment on the $defs rule. That repo's
- * simulation label and cadence checks are not carried over. It travels with every exported package so the receiving repository's CI and a
+ * as of 2026-10-04 (d2d4381) added, verbatim but for one more comment on the $defs rule, and its
+ * simulation label and cadence checks, now that an export can carry demo data. It travels with every exported package so the receiving repository's CI and a
  * contributor's local check apply the same rules the export pre-checked with (lib/export/package-check.ts
  * mirrors the essential ones). Update both when a package repo's validator changes.
  *
@@ -211,6 +211,21 @@ for (kind, name), document in documents.items():
         for field in required:
             if not isinstance(document.get(field), str) or not document[field]:
                 fail(f"{where}: simulation needs field '{field}'")
+        # A label is what a person reads in the simulator; it ends up in a
+        # name of at most 200 characters, together with the dataset's name.
+        labelled = [(where, document.get("label", None))] + [
+            (f"{where}, stream '{stream.get('name')}'", stream.get("label", None))
+            for stream in (document.get("streams") or [])
+            if isinstance(stream, dict)
+        ]
+        for label_where, label in labelled:
+            if label is not None and (not isinstance(label, str) or not label.strip() or len(label) > 80):
+                fail(f"{label_where}: label must be text of 1 to 80 characters")
+        cadence = document.get("cadence", "interval")
+        if cadence not in ("interval", "fillToLimit"):
+            fail(f"{where}: cadence must be 'interval' or 'fillToLimit', got {cadence!r}")
+        elif cadence == "fillToLimit" and document.get("transport") != "sql":
+            fail(f"{where}: cadence 'fillToLimit' is SQL only - a broker keeps no rows to fill")
         if document.get("transport") == "sql":
             # A table, not a topic: the generator owns the table's lifetime.
             if not isinstance(document.get("table"), dict):

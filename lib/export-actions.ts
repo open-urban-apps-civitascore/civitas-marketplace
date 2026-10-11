@@ -39,6 +39,9 @@ import {
     type CatalogStatus,
 } from '@/lib/export/status'
 import { transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
+import { demoSources, simulationMembers, type DemoSource } from '@/lib/export/simulations'
+import { getSimulation, isSimulatorConfigured, listSimulations, SimulatorError, type SimulationDetail } from '@/lib/simulator/client'
+import { simulatorUiUrl } from '@/lib/simulator/ui-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import { fetchShareRight, proposerName, shareRefusal } from '@/lib/export/share-permission'
 
@@ -55,6 +58,8 @@ export interface PreviewSummary {
     warnings: string[]
     /** Rules of the package validator the export would fail — a merge request is refused while any exist. */
     errors: string[]
+    /** Demo data in the package: scenarios (one per source) and the streams they run. */
+    demo: { scenarios: number; streams: number }
 }
 
 export interface ExportActionResult {
@@ -71,7 +76,9 @@ interface ExportForm {
     intent: ExportIntent
     datasetId: string
     targetKey: string
-    options: Omit<ExportOptions, 'provenance'>
+    /** Simulator ids chosen as demo data; checked again against the dataset on the server. */
+    demoStreams: string[]
+    options: Omit<ExportOptions, 'provenance' | 'simulations'>
 }
 
 const SLUG = useCaseSlugPattern
@@ -112,11 +119,43 @@ function parseForm(formData: FormData): ExportForm | string {
         .filter(Boolean)
     const metadata = parseExportMetadata(field(formData, 'catalogMetadata'))
     if (metadata.error) return metadata.error
+    const demoStreams = parseDemoStreams(field(formData, 'demoStreams'))
+    if (!demoStreams) return 'Demo-Daten: ungültige Auswahl.'
     return {
         intent,
         datasetId,
         targetKey,
+        demoStreams,
         options: { publisher, slug, version, domain, displayName, description, maintainer, license, keywords, metadata: metadata.data },
+    }
+}
+
+/** A JSON list of simulator ids, or undefined when it is not one. Empty input means no demo data. */
+function parseDemoStreams(raw: string): string[] | undefined {
+    if (!raw) return []
+    try {
+        const parsed: unknown = JSON.parse(raw)
+        if (!Array.isArray(parsed) || parsed.length > 200) return undefined
+        return parsed.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 300) ? parsed : undefined
+    } catch {
+        return undefined
+    }
+}
+
+/**
+ * Every simulation of the simulator with the configuration it was built from.
+ * The list carries no scenarios, so each is read once; the simulator caps its
+ * registrations (50), which bounds the reads.
+ */
+async function readSimulations(): Promise<{ details: SimulationDetail[]; problem?: string }> {
+    if (!isSimulatorConfigured()) return { details: [], problem: 'Der Simulator ist an diese Instanz nicht angebunden.' }
+    try {
+        const listed = await listSimulations()
+        const details = await Promise.all(listed.map((simulation) => getSimulation(simulation.id)))
+        return { details: details.filter((detail): detail is SimulationDetail => !!detail) }
+    } catch (error) {
+        if (!(error instanceof SimulatorError)) throw error
+        return { details: [], problem: `Der Simulator antwortet nicht: ${error.message}` }
     }
 }
 
@@ -130,8 +169,11 @@ async function buildPackage(
     exportedBy: string | undefined,
 ): Promise<ExportedPackage> {
     const snapshot = await readUseCase(accessToken, form.datasetId)
-    return transformSnapshot(snapshot, {
+    const demo = form.demoStreams.length ? await readSimulations() : { details: [] }
+    const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
+    const pkg = transformSnapshot(snapshot, {
         ...form.options,
+        simulations,
         provenance: {
             datasetId: snapshot.dataset.id,
             datasetName: snapshot.dataset.name,
@@ -140,6 +182,9 @@ async function buildPackage(
             exportedAt: new Date().toISOString().slice(0, 10),
         },
     })
+    // A chosen stream that could not be read is named, never silently dropped.
+    const problems = demo.problem ? [`Demo-Daten fehlen im Paket: ${demo.problem}`] : []
+    return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings] }
 }
 
 function summarise(pkg: ExportedPackage, target: ExportTarget | undefined, form: ExportForm): PreviewSummary {
@@ -156,6 +201,13 @@ function summarise(pkg: ExportedPackage, target: ExportTarget | undefined, form:
         parameters: pkg.parameters,
         warnings: pkg.warnings,
         errors: checkPackage(pkg.files),
+        demo: {
+            scenarios: pkg.manifest.members.simulations?.length ?? 0,
+            streams: (pkg.manifest.members.simulations ?? []).reduce((count, member) => {
+                const document = JSON.parse(pkg.files[`core-ir/${member.file}`]) as { streams?: unknown[] }
+                return count + (Array.isArray(document.streams) ? document.streams.length : 1)
+            }, 0),
+        },
     }
 }
 
@@ -653,8 +705,16 @@ export interface InventoryArtifact {
     name: string
 }
 
+/** Demo data the share can take along: the streams per source, or why none could be read. */
+export interface DemoInventory {
+    sources: DemoSource[]
+    problem?: string
+    /** Base address of the simulator's own interface, where a stream can be made; absent when unknown. */
+    simulatorUi?: string
+}
+
 export async function inspectExportSource(datasetId: string): Promise<{
-    artifacts: InventoryArtifact[]; warnings: string[]; error?: string
+    artifacts: InventoryArtifact[]; warnings: string[]; error?: string; demo?: DemoInventory
 }> {
     await requireSession()
     if (!datasetId) return { artifacts: [], warnings: [], error: 'Ungültige Auswahl.' }
@@ -669,9 +729,16 @@ export async function inspectExportSource(datasetId: string): Promise<{
                 ...snapshot.pipelines.map((row) => ({ type: 'pipeline' as const, kind: 'Pipeline', name: row.name })),
             ],
             warnings: snapshot.warnings,
+            demo: await demoInventory(snapshot),
         }
     } catch (error) {
         if (error instanceof PortalReadError) return { artifacts: [], warnings: [], error: error.message }
         throw error
     }
+}
+
+async function demoInventory(snapshot: Awaited<ReturnType<typeof readUseCase>>): Promise<DemoInventory> {
+    const { details, problem } = await readSimulations()
+    const ui = simulatorUiUrl()
+    return { sources: demoSources(snapshot, details), ...(problem ? { problem } : {}), ...(ui ? { simulatorUi: ui } : {}) }
 }
