@@ -26,6 +26,10 @@ import treesSourceDb from './kiez-baumkataster/baumkataster-db.datasource.json'
 import treesMapping from './kiez-baumkataster/kataster-import.mapping.json'
 import treesSinkTable from './kiez-baumkataster/kiez-baeume-tabelle.datasink.json'
 import treesPipeline from './kiez-baumkataster/kataster-import.pipeline.json'
+import treesMapApi from './kiez-baumkataster/kiez-karte.api.json'
+import treesGreenStyle from './kiez-baumkataster/baeume-gruen.style.json'
+import treesOrangeStyle from './kiez-baumkataster/baeume-orange.style.json'
+import treesLayer from './kiez-baumkataster/baeume.layer.json'
 import wateringManifest from './jungbaum-bewaesserung/manifest.json'
 import wateringRowStructure from './jungbaum-bewaesserung/jungbaum-zeile.datastructure.json'
 import wateringTreeStructure from './jungbaum-bewaesserung/jungbaum.datastructure.json'
@@ -93,6 +97,8 @@ export const mockPackages: MockPackage[] = [
     // SQL-sourced, simulation-less package: the seed SQL under
     // kiez-baumkataster/seed/ is deliberately NOT a member — the source table
     // belongs to the (demo) Fachverfahren, not to the platform install.
+    // Since 1.1.0 it also ships its map: an OWS api, two styles and a layer.
+    // Those four files are not in the package repository yet.
     {
         manifest: treesManifest as unknown as PackageManifest,
         files: {
@@ -102,6 +108,10 @@ export const mockPackages: MockPackage[] = [
             'kataster-import.mapping.json': treesMapping,
             'kiez-baeume-tabelle.datasink.json': treesSinkTable,
             'kataster-import.pipeline.json': treesPipeline,
+            'kiez-karte.api.json': treesMapApi,
+            'baeume-gruen.style.json': treesGreenStyle,
+            'baeume-orange.style.json': treesOrangeStyle,
+            'baeume.layer.json': treesLayer,
         },
     },
     // Both transports in one package: the register arrives over SQL (the
