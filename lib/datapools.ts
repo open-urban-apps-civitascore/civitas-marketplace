@@ -1,4 +1,5 @@
 import { describeDatapoolCreateFailure, type FailureDescription } from '@/lib/install-payload'
+import { fetchMe } from '@/lib/me'
 import { hasTenantPermission } from '@/lib/permissions'
 import { getAccessToken } from '@/lib/session'
 
@@ -79,18 +80,8 @@ export async function fetchDatapools(): Promise<DatapoolListing> {
  * offers existing pools only.
  */
 export async function fetchCanCreateDatapool(): Promise<boolean> {
-    // Outside the try block, for the same reason as above.
-    const accessToken = await getAccessToken()
-    try {
-        const res = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/users/me`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            cache: 'no-store',
-        })
-        if (!res.ok) return false
-        return hasTenantPermission(await res.json(), 'DATAPOOL_CREATE')
-    } catch {
-        return false
-    }
+    const me = await fetchMe()
+    return me !== undefined && hasTenantPermission(me, 'DATAPOOL_CREATE')
 }
 
 export type DatapoolCreation =

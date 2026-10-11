@@ -4,6 +4,7 @@ import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { exportSources } from '@/lib/export/sources'
+import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
 import { getAccessToken, requireSession } from '@/lib/session'
 
 /**
@@ -18,6 +19,8 @@ export default async function ExportPage() {
     const accessToken = await getAccessToken()
     const config = exportConfig()
     const readiness = exportReadiness(config)
+    const refusal = shareRefusal(await fetchShareRight())
+    const mayShare = !refusal
 
     let datasets: DatasetListing[] = []
     let datasetsError: string | undefined
@@ -52,6 +55,11 @@ export default async function ExportPage() {
                 </p>
             )}
 
+            {/* Neutral, not amber: amber asks for something the person can still supply, a right is not. */}
+            {readiness === 'ready' && refusal && (
+                <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{refusal}</p>
+            )}
+
             {datasetsError ? (
                 <p className="rounded-lg border border-error/40 bg-error/5 px-4 py-3 text-sm text-error dark:bg-error/15">
                     Datasets konnten nicht gelesen werden: {datasetsError}
@@ -62,16 +70,18 @@ export default async function ExportPage() {
                     sourceNotice={installations.status === 'rejected' || catalog.status === 'rejected' ? 'Katalogzuordnungen konnten nicht vollständig geladen werden. Du kannst lokale Use Cases trotzdem teilen.' : undefined}
                     targets={config.targets}
                     readiness={readiness}
+                    mayShare={mayShare}
                     catalogUrl={config.catalog?.url}
                     defaults={{
                         publisher: 'openurbanapps',
-                        maintainer: session.user?.name ?? session.user?.email ?? '',
+                        // The name only: the maintainer goes into the public package.
+                        maintainer: session.user?.name ?? '',
                     }}
                 />
             )}
 
             {/* The way back after a merge: the catalogue step from here needs no form. */}
-            {readiness === 'ready' && <SharedPackages />}
+            {readiness === 'ready' && mayShare && <SharedPackages />}
         </div>
     )
 }

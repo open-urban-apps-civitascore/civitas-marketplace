@@ -40,6 +40,7 @@ import {
 } from '@/lib/export/status'
 import { transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import { getAccessToken, requireSession } from '@/lib/session'
+import { fetchShareRight, proposerName, shareRefusal } from '@/lib/export/share-permission'
 
 export type ExportIntent = 'preview' | 'bundle' | 'catalog' | 'status'
 
@@ -58,7 +59,7 @@ export interface PreviewSummary {
 
 export interface ExportActionResult {
     intent: ExportIntent
-    status: 'ok' | 'error' | 'invalid' | 'unconfigured' | 'already-open' | 'not-merged' | 'unchanged'
+    status: 'ok' | 'error' | 'invalid' | 'unconfigured' | 'forbidden' | 'already-open' | 'not-merged' | 'unchanged'
     detail: string
     preview?: PreviewSummary
     mrUrl?: string
@@ -245,7 +246,7 @@ export async function exportAction(
     formData: FormData,
 ): Promise<ExportActionResult> {
     const session = await requireSession()
-    const requestedBy = session.user?.name ?? session.user?.email ?? 'unbekannt'
+    const requestedBy = proposerName(session.user)
     const parsed = parseForm(formData)
     const intent: ExportIntent = typeof parsed === 'string' ? 'preview' : parsed.intent
     if (typeof parsed === 'string') {
@@ -272,7 +273,11 @@ export async function exportAction(
             }
         }
 
-        // Everything below talks to GitLab.
+        // Everything below talks to GitLab; opening a merge request needs the right to share.
+        if (form.intent === 'bundle' || form.intent === 'catalog') {
+            const refusal = shareRefusal(await fetchShareRight())
+            if (refusal) return { intent: form.intent, status: 'forbidden', detail: refusal }
+        }
         const readiness = exportReadiness(config)
         if (readiness !== 'ready' || !target) {
             return {
@@ -589,7 +594,9 @@ export async function proposeSharedCatalogEntry(
     version: string,
 ): Promise<ExportActionResult> {
     const session = await requireSession()
-    const requestedBy = session.user?.name ?? session.user?.email ?? 'unbekannt'
+    const requestedBy = proposerName(session.user)
+    const refusal = shareRefusal(await fetchShareRight())
+    if (refusal) return { intent: 'catalog', status: 'forbidden', detail: refusal }
     const config = exportConfig()
     const target = config.targets.find((candidate) => candidate.key === targetKey)
     if (exportReadiness(config) !== 'ready' || !target) {
@@ -639,8 +646,15 @@ function gitlabMessage(error: GitLabError): string {
     }
 }
 
+/** One row of the inventory: `type` for the code to decide on, `kind` as the page shows it. */
+export interface InventoryArtifact {
+    type: 'structure' | 'source' | 'mapping' | 'sink' | 'pipeline'
+    kind: string
+    name: string
+}
+
 export async function inspectExportSource(datasetId: string): Promise<{
-    artifacts: { kind: string; name: string }[]; warnings: string[]; error?: string
+    artifacts: InventoryArtifact[]; warnings: string[]; error?: string
 }> {
     await requireSession()
     if (!datasetId) return { artifacts: [], warnings: [], error: 'Ungültige Auswahl.' }
@@ -648,11 +662,11 @@ export async function inspectExportSource(datasetId: string): Promise<{
         const snapshot = await readUseCase(await getAccessToken(), datasetId)
         return {
             artifacts: [
-                ...snapshot.structures.map((row) => ({ kind: 'Datenstruktur', name: row.name })),
-                ...snapshot.sources.map((row) => ({ kind: 'Datenquelle', name: row.name })),
-                ...snapshot.mappings.map((row) => ({ kind: 'Mapping', name: row.urn })),
-                ...snapshot.sinks.map((row) => ({ kind: 'Datensenke', name: row.name })),
-                ...snapshot.pipelines.map((row) => ({ kind: 'Pipeline', name: row.name })),
+                ...snapshot.structures.map((row) => ({ type: 'structure' as const, kind: 'Datenstruktur', name: row.name })),
+                ...snapshot.sources.map((row) => ({ type: 'source' as const, kind: 'Datenquelle', name: row.name })),
+                ...snapshot.mappings.map((row) => ({ type: 'mapping' as const, kind: 'Mapping', name: row.urn })),
+                ...snapshot.sinks.map((row) => ({ type: 'sink' as const, kind: 'Datensenke', name: row.name })),
+                ...snapshot.pipelines.map((row) => ({ type: 'pipeline' as const, kind: 'Pipeline', name: row.name })),
             ],
             warnings: snapshot.warnings,
         }

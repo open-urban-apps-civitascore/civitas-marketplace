@@ -17,6 +17,7 @@ const OUTCOME_STYLES: Record<ExportActionResult['status'], string> = {
     unchanged: 'text-warn',
     'not-merged': 'text-warn',
     unconfigured: 'text-warn',
+    forbidden: 'text-error',
     invalid: 'text-error',
     error: 'text-error',
 }
