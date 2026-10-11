@@ -21,6 +21,8 @@ const FROST_PORT_STRUCTURES: Record<string, string> = {
     ThingTree: 'urn:core:platform:civitas:datastructure:frost:ThingTree:r32e0hmgn1',
 }
 const FROST_PORTS = Object.keys(FROST_PORT_STRUCTURES)
+/** A FROST sink's document: the connector envelope plus the only two settings the platform accepts. */
+const FROST_SINK_KEYS = new Set(['$schema', 'id', 'title', 'description', 'connectionType', 'port', 'element'])
 const PLATFORM_FROST_STRUCTURES = new Set(Object.values(FROST_PORT_STRUCTURES))
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -152,6 +154,13 @@ export function checkPackage(files: Record<string, string>): string[] {
                 const port = document.port
                 if (document.connectionType === 'frost' && (typeof port !== 'string' || !FROST_PORTS.includes(port))) {
                     fail(`${where}: a FROST sink needs a port, one of ${FROST_PORTS.join(', ')}`)
+                }
+                // The platform refuses any other setting on a FROST sink at install.
+                if (document.connectionType === 'frost') {
+                    const extra = Object.keys(document).filter((key) => !FROST_SINK_KEYS.has(key))
+                    if (extra.length) {
+                        fail(`${where}: a FROST sink takes only a port and an element, not ${extra.join(', ')}`)
+                    }
                 }
             }
         } else if (kind === 'mappings') {
