@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { buildStarterDashboard } from '@/lib/assistant/dashboard'
+import { describeGenerator } from '@/lib/assistant/describe'
 import { ASSISTANT_PACKAGE_PREFIX } from '@/lib/assistant/store'
 import { compactName, deriveDisambiguator, slugify, urnSegment } from '@/lib/export/urn'
 
@@ -43,6 +44,7 @@ export const useCaseProposalSchema = z.object({
                 dateTime: z.boolean().optional(),
                 description: z.string().max(300),
                 required: z.boolean().optional(),
+                aggregate: z.enum(['sum', 'average']).optional(),
                 generator: z.object({
                     kind: z.enum(GENERATOR_KINDS),
                     min: z.number().optional(),
@@ -96,10 +98,16 @@ export const USE_CASE_TOOL_SCHEMA: Record<string, unknown> = {
                     dateTime: { type: 'boolean', description: 'true für Zeitpunkte (type ist dann string).' },
                     description: { type: 'string', description: 'Deutsch, mit Einheit.' },
                     required: { type: 'boolean' },
+                    aggregate: {
+                        type: 'string',
+                        enum: ['sum', 'average'],
+                        description:
+                            'Nur für Messwerte (randomWalk, dailyProfile): wie das Dashboard sie pro Minute zusammenfasst. "sum" für Mengen, die im Sendetakt anfallen (Niederschlag im Intervall, Anzahl Fahrzeuge), "average" für Zustände zu einem Zeitpunkt (Temperatur, Pegelstand, Feinstaub).',
+                    },
                     generator: {
                         type: 'object',
                         description:
-                            'Wie die Demodaten das Feld erzeugen. randomWalk: Messwert, der langsam schwankt (min, max, step). dailyProfile: Werte mit Tagesspitzen, z. B. Zählungen (min, max, peakHours). enum: einer aus values. constant: immer value. sequence: fortlaufende Nummer.',
+                            'Wie die Demodaten das Feld erzeugen. randomWalk: Messwert, der langsam schwankt (min, max, step). dailyProfile: Werte mit Tagesspitzen, z. B. Zählungen (min, max, peakHours). enum: einer aus values. constant: immer value. sequence: fortlaufende Nummer. Bei Mengen gelten min und max pro Sendetakt (intervalSeconds): wähle Werte, die in diesem Zeitraum realistisch sind, z. B. Niederschlag in 10 Sekunden eher 0 bis 0,2 mm.',
                         properties: {
                             kind: { type: 'string', enum: [...GENERATOR_KINDS] },
                             min: { type: 'number' },
@@ -217,28 +225,6 @@ function generatorFor(field: Field, station: Station, index: number): Record<str
 function tableNameOf(title: string): string {
     const name = slugify(title).replace(/-/g, '_').slice(0, 40)
     return /^[a-z]/.test(name) ? name : `t_${name}`
-}
-
-function describeGenerator(field: Field): string {
-    const g = field.generator
-    if (field.dateTime || g.kind === 'now') return 'Zeitpunkt des Sendens'
-    switch (g.kind) {
-        case 'station':
-            return 'Kennung der Station'
-        case 'stationLat':
-        case 'stationLon':
-            return 'Koordinate der Station'
-        case 'enum':
-            return `einer aus ${(g.values ?? []).join(', ')}`
-        case 'constant':
-            return `immer ${String(g.value)}`
-        case 'sequence':
-            return 'fortlaufend'
-        case 'dailyProfile':
-            return `${g.min ?? 0}-${g.max ?? '?'} mit Tagesspitzen`
-        default:
-            return `${g.min ?? 0}-${g.max ?? '?'}, schwankend`
-    }
 }
 
 /**

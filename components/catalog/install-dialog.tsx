@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
@@ -8,7 +8,7 @@ import { SubmitButton } from '@/components/catalog/submit-button'
 import { Select } from '@/components/ui/select'
 import { DATAPOOL_NAME_MAX, DATAPOOL_NAME_MIN, suggestDatapoolName } from '@/lib/datapool-name'
 import type { DatapoolOption } from '@/lib/datapools'
-import { installEntry } from '@/lib/install-actions'
+import { installEntry, type InstallResult } from '@/lib/install-actions'
 
 /**
  * The use-case install wizard: data source → target and release → review.
@@ -56,6 +56,7 @@ export function InstallDialog({
     triggerLabel = 'Installieren',
     datapoolNamePrefix = '',
     installationHref,
+    onInstalled,
 }: {
     entryId: string
     displayName: string
@@ -76,6 +77,8 @@ export function InstallDialog({
     datapoolNamePrefix?: string
     /** Where the new installation can be looked at; set, the success message links there in a new tab. */
     installationHref?: (installationId: string) => string
+    /** Called once when the install succeeded, e.g. for the assistant to report it in the chat. */
+    onInstalled?: (result: InstallResult) => void
 }) {
     const [open, setOpen] = useState(false)
     const [step, setStep] = useState(0)
@@ -92,6 +95,15 @@ export function InstallDialog({
     const [datapoolId, setDatapoolId] = useState(() => initialDatapoolId(datapools))
     const [releaseMode, setReleaseMode] = useState<ReleaseMode>('draft')
     const [result, formAction, pending] = useActionState(installEntry, null)
+
+    // The action's result is the same object on every render after the install,
+    // so the ref keeps the success from being reported twice.
+    const reported = useRef<InstallResult | null>(null)
+    useEffect(() => {
+        if (result?.status !== 'created' || reported.current === result) return
+        reported.current = result
+        onInstalled?.(result)
+    }, [result, onInstalled])
 
     const done = installed || result?.status === 'created'
     const datapool = datapools.find((pool) => pool.id === datapoolId)

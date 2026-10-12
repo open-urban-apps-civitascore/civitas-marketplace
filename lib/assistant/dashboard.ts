@@ -21,6 +21,8 @@ export interface DashboardField {
     dateTime?: boolean
     description: string
     generator: { kind: string }
+    /** What the model says the value is: an amount per send interval (sum) or a state (average). */
+    aggregate?: 'sum' | 'average'
 }
 
 export interface StarterDashboardInput {
@@ -47,12 +49,19 @@ const STARTER_NOTE = '_Automatisch erzeugtes Start-Dashboard: ein erster Blick a
 
 type Aggregate = 'SUM' | 'AVG'
 
-/** How a field is charted, or undefined when it is no measured value (time, station, coordinates, labels). */
+/**
+ * How a field is charted, or undefined when it is no measured value (time,
+ * station, coordinates, labels). Which fields are measured values follows the
+ * demo-data generator, which the model chooses reliably. Whether a value is
+ * summed or averaged follows its meaning, which the generator does not carry:
+ * rainfall per interval fluctuates like a reading but has to be summed. So the
+ * model's `aggregate` decides, and the generator is only the fallback.
+ */
 function aggregateOf(field: DashboardField): Aggregate | undefined {
     if (field.dateTime || (field.type !== 'number' && field.type !== 'integer')) return undefined
-    if (field.generator.kind === 'dailyProfile') return 'SUM'
-    if (field.generator.kind === 'randomWalk') return 'AVG'
-    return undefined
+    if (field.generator.kind !== 'dailyProfile' && field.generator.kind !== 'randomWalk') return undefined
+    if (field.aggregate) return field.aggregate === 'sum' ? 'SUM' : 'AVG'
+    return field.generator.kind === 'dailyProfile' ? 'SUM' : 'AVG'
 }
 
 /** The column type the PostGIS sink gives the field, as Superset names it. */
