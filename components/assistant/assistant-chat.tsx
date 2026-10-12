@@ -10,6 +10,7 @@ import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-butt
 import { InstallDialog } from '@/components/catalog/install-dialog'
 import { SamplePreview } from '@/components/catalog/sample-preview'
 import { installProposal, loadInstallOptions, type InstallOptions } from '@/lib/assistant/actions'
+import { describeGenerator } from '@/lib/assistant/describe'
 import type { StructureProposal } from '@/lib/assistant/proposal'
 import {
     READ_TOOL_LABELS,
@@ -39,8 +40,33 @@ function toolNameOf(part: { type: string; toolName?: string }): string {
     return part.type === 'dynamic-tool' ? (part.toolName ?? '') : part.type.replace(/^tool-/, '')
 }
 
+/**
+ * The assistant's answer once an install went through: a link to the
+ * installation's overview, and what did not work, which in the install's
+ * summary is easy to miss between the green lines (a dashboard while Superset
+ * was down, demo data while the simulator was). Written here, not by the model:
+ * it has to arrive at once and carry the exact id, and it still lands in the
+ * history, so the model knows about the install in the next turn.
+ */
+function installReport(title: string, result: InstallResult): string {
+    const lines = [
+        `**Installiert:** „${title}“. [Übersicht der Installation öffnen ↗](${installationHref(result.installationId ?? '')}): Datensatz, Demo-Ströme und Dashboard auf einen Blick.`,
+    ]
+    const problems = result.detail
+        .split(' · ')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.includes('NICHT'))
+    if (problems.length > 0) {
+        lines.push('', 'Dabei hat nicht alles geklappt:', ...problems.map((problem) => `- ${problem}`))
+        if (problems.some((problem) => problem.startsWith('Dashboard'))) {
+            lines.push('', 'Ein fehlendes Dashboard lässt sich in der Übersicht erneut einspielen.')
+        }
+    }
+    return lines.join('\n')
+}
+
 export function AssistantChat() {
-    const { messages, sendMessage, status, error } = useChat({ transport })
+    const { messages, sendMessage, setMessages, status, error } = useChat({ transport })
     const [input, setInput] = useState('')
     const endRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -62,6 +88,16 @@ export function AssistantChat() {
     function adjust() {
         setInput('Ändere den Plan: ')
         inputRef.current?.focus()
+    }
+
+    function reportInstall(title: string, result: InstallResult) {
+        if (!result.installationId) return
+        const id = `installed-${result.installationId}`
+        setMessages((current) =>
+            current.some((message) => message.id === id)
+                ? current
+                : [...current, { id, role: 'assistant', parts: [{ type: 'text', text: installReport(title, result) }] }],
+        )
     }
 
     return (
@@ -97,6 +133,7 @@ export function AssistantChat() {
                                     part={part}
                                     onSend={send}
                                     onAdjust={adjust}
+                                    onInstalled={reportInstall}
                                     onChoose={message.id === lastAssistantId && !busy ? send : undefined}
                                 />
                             ))}
@@ -153,11 +190,14 @@ function AssistantPart({
     part,
     onSend,
     onAdjust,
+    onInstalled,
     onChoose,
 }: {
     part: Part
     onSend: (text: string) => void
     onAdjust: () => void
+    /** A plan was installed: the chat answers with a link to the installation. */
+    onInstalled: (title: string, result: InstallResult) => void
     /** Set on the latest answer: its numbered options become clickable. */
     onChoose?: (choice: string) => void
 }) {
@@ -192,8 +232,10 @@ function AssistantPart({
     return (
         <div className="flex flex-col gap-3">
             {output.reply && <ChatMarkdown text={output.reply} onChoose={onChoose} />}
-            {'plan' in output && <UseCaseCard plan={output.plan} onAdjust={onAdjust} />}
-            {'proposal' in output && <StructureCard proposal={output.proposal} onAdjust={onAdjust} />}
+            {'plan' in output && <UseCaseCard plan={output.plan} onAdjust={onAdjust} onInstalled={onInstalled} />}
+            {'proposal' in output && (
+                <StructureCard proposal={output.proposal} onAdjust={onAdjust} onInstalled={onInstalled} />
+            )}
             {'recommendation' in output && <RecommendationCard recommendation={output.recommendation} onSend={onSend} />}
         </div>
     )
@@ -264,7 +306,15 @@ function RecommendationCard({
 }
 
 /** A whole use case: the steps the install will take, then the marketplace's own install dialog. */
-function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => void }) {
+function UseCaseCard({
+    plan,
+    onAdjust,
+    onInstalled,
+}: {
+    plan: UseCasePlan
+    onAdjust: () => void
+    onInstalled: (title: string, result: InstallResult) => void
+}) {
     const [options, setOptions] = useState<InstallOptions | null>(null)
     const [optionsError, setOptionsError] = useState<string | null>(null)
     const [showFields, setShowFields] = useState(false)
@@ -312,6 +362,14 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
                 </button>
                 {showFields && (
                     <table className="mt-2 w-full text-xs">
+                        <thead>
+                            <tr className="text-left text-muted-foreground">
+                                <th className="py-1 pr-3 font-medium">Feld</th>
+                                <th className="py-1 pr-3 font-medium">Typ</th>
+                                <th className="py-1 pr-3 font-medium">Bedeutung</th>
+                                <th className="py-1 font-medium">Demodaten</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {proposal.fields.map((field) => (
                                 <tr key={field.name} className="border-t">
@@ -321,7 +379,7 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
                                         {field.required ? ' · Pflicht' : ''}
                                     </td>
                                     <td className="py-1 pr-3">{field.description}</td>
-                                    <td className="py-1 text-muted-foreground">{field.generator.kind}</td>
+                                    <td className="py-1 text-muted-foreground">{describeGenerator(field)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -342,6 +400,7 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
                         triggerLabel="Plan bestätigen …"
                         datapoolNamePrefix="[AI-Assistant] "
                         installationHref={installationHref}
+                        onInstalled={(result) => onInstalled(plan.title, result)}
                     />
                 ) : (
                     <span className="inline-flex items-center gap-1.5 px-1 py-1.5 text-xs text-muted-foreground">
@@ -362,7 +421,15 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
 }
 
 /** A data structure on its own: installed directly, it needs no datapool. */
-function StructureCard({ proposal, onAdjust }: { proposal: StructureProposal; onAdjust: () => void }) {
+function StructureCard({
+    proposal,
+    onAdjust,
+    onInstalled,
+}: {
+    proposal: StructureProposal
+    onAdjust: () => void
+    onInstalled: (title: string, result: InstallResult) => void
+}) {
     const [result, setResult] = useState<InstallResult | null>(null)
     const [installing, startInstall] = useTransition()
     const done = result?.status === 'created'
@@ -407,7 +474,13 @@ function StructureCard({ proposal, onAdjust }: { proposal: StructureProposal; on
                 <button
                     type="button"
                     disabled={installing || done}
-                    onClick={() => startInstall(async () => setResult(await installProposal(proposal)))}
+                    onClick={() =>
+                        startInstall(async () => {
+                            const outcome = await installProposal(proposal)
+                            setResult(outcome)
+                            if (outcome.status === 'created') onInstalled(proposal.title, outcome)
+                        })
+                    }
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                     {installing ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}

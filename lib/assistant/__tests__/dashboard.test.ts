@@ -55,6 +55,20 @@ describe('buildStarterDashboard', () => {
         expect(metrics.find((metric) => metric.label === 'Summe passanten')?.aggregate).toBe('SUM')
     })
 
+    it("follows the model's aggregate over the generator", () => {
+        const rain: DashboardField = {
+            key: 'niederschlag',
+            type: 'number',
+            description: 'Niederschlag im Intervall in mm',
+            generator: { kind: 'randomWalk' },
+            aggregate: 'sum',
+        }
+        const metrics = chartsOf(buildStarterDashboard({ ...INPUT, fields: [FIELDS[1], rain] })!.document.files).map(
+            (chart) => chart.params.metrics[0],
+        )
+        expect(metrics.find((metric) => metric.label === 'Summe niederschlag')?.aggregate).toBe('SUM')
+    })
+
     it('charts at most four measured values', () => {
         const many: DashboardField[] = [
             FIELDS[1],
