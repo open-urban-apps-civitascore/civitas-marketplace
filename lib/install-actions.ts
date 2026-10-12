@@ -216,7 +216,6 @@ export async function installEntry(
     revalidatePath('/(authenticated)/use-cases/[publisher]/[slug]', 'page')
     revalidatePath('/datastructures')
     revalidatePath('/installed')
-    revalidatePath('/instance')
     return {
         status: 'created',
         detail: `${summary}${poolSegment}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
@@ -627,7 +626,6 @@ export async function uninstallInstallation(
         revalidatePath('/datastructures')
         revalidatePath('/use-cases')
         revalidatePath('/(authenticated)/use-cases/[publisher]/[slug]', 'page')
-        revalidatePath('/instance')
         return { status: 'uninstalled', detail: `Deinstalliert${cleanup}${supersetCleanup}`, httpStatus: 204 }
     }
 

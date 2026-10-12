@@ -83,7 +83,6 @@ export async function installProposal(raw: unknown): Promise<InstallResult> {
     const receipt = (await response.json()) as InstallationReceipt
     revalidatePath('/datastructures')
     revalidatePath('/installed')
-    revalidatePath('/instance')
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
     return {
         status: 'created',
