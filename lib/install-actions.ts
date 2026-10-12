@@ -11,16 +11,20 @@ import {
     InstallPayloadError,
     applyDeclaredDsnOverride,
     applyDeclaredUrlOverride,
+    artifactCounts,
     buildInstallationRequest,
     clampDescription,
     describeInstallFailure,
     describeReleaseFailure,
     describeUninstallFailure,
+    installSteps,
     resolveBrokerOverride,
     resolveDsnOverride,
     summarizeInstallation,
+    type ArtifactCount,
     type InstallationReceipt,
     type InstallationRequest,
+    type InstallStep,
 } from '@/lib/install-payload'
 import { fetchInstalledDashboards } from '@/lib/installed-dashboards'
 import { fetchInstallationFacts, type InstallationFacts } from '@/lib/installations'
@@ -48,6 +52,15 @@ export interface InstallResult {
     httpStatus: number
     /** The platform's id for the new installation, on success. */
     installationId?: string
+    /** The same success as data, for a view that lists it instead of one line of text. */
+    outcome?: InstallOutcome
+}
+
+export interface InstallOutcome {
+    title: string
+    version: string
+    counts: ArtifactCount[]
+    steps: InstallStep[]
 }
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
@@ -209,6 +222,18 @@ export async function installEntry(
         detail: `${summary}${poolSegment}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
         httpStatus: 201,
         installationId: receipt.id,
+        outcome: {
+            title: receipt.dataSetName ?? entry.manifest.displayName,
+            version: entry.manifest.version,
+            counts: artifactCounts(receipt),
+            steps: [
+                ...installSteps(poolSegment, true),
+                // The release says itself whether it started; its text need not be read for that.
+                ...installSteps(release.segment, release.started),
+                ...installSteps(demoSegment),
+                ...installSteps(dashboardSegment),
+            ],
+        },
     }
 }
 

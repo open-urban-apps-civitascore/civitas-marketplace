@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from 'react'
 import { Check, Download, PlayCircle, X } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
+import { InstallOutcomeView } from '@/components/catalog/install-outcome'
 import { SubmitButton } from '@/components/catalog/submit-button'
 import { Select } from '@/components/ui/select'
 import { DATAPOOL_NAME_MAX, DATAPOOL_NAME_MIN, suggestDatapoolName } from '@/lib/datapool-name'
@@ -230,7 +231,17 @@ export function InstallDialog({
                                 />
                             )}
 
-                            {step === 2 && result && (
+                            {step === 2 && result?.status === 'created' && result.outcome && (
+                                <InstallOutcomeView
+                                    outcome={result.outcome}
+                                    installationHref={
+                                        result.installationId && installationHref
+                                            ? installationHref(result.installationId)
+                                            : undefined
+                                    }
+                                />
+                            )}
+                            {step === 2 && result && !(result.status === 'created' && result.outcome) && (
                                 <p className={`mt-3 text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
                                     {feedbackText(result)}
                                     {result.status === 'created' && result.installationId && installationHref && (

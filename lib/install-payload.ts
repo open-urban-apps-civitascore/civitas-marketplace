@@ -695,6 +695,63 @@ export function summarizeInstallation(receipt: InstallationReceipt, fallbackName
     return `Dataset „${receipt.dataSetName ?? fallbackName}“ als Entwurf angelegt · ${counts}${geo}`
 }
 
+/** What an install made, one entry per kind, for the success view. */
+export interface ArtifactCount {
+    count: number
+    label: string
+}
+
+const COUNTED_KINDS: [artifactType: string, singular: string, plural: string, always: boolean][] = [
+    ['DATA_STRUCTURE', 'Struktur', 'Strukturen', true],
+    ['DATA_SOURCE', 'Quelle', 'Quellen', true],
+    ['MAPPING', 'Mapping', 'Mappings', true],
+    ['DATA_SINK', 'Senke', 'Senken', true],
+    ['PIPELINE', 'Pipeline', 'Pipelines', true],
+    ['NAMED_API', 'API', 'APIs', false],
+    ['STYLE', 'Stil', 'Stile', false],
+    ['LAYER', 'Kartenebene', 'Kartenebenen', false],
+]
+
+/**
+ * The same counting as summarizeInstallation, as data: the core kinds always
+ * (a zero there is news), the geo kinds only where the package has them.
+ */
+export function artifactCounts(receipt: InstallationReceipt): ArtifactCount[] {
+    const lines = receipt.artifacts ?? []
+    return COUNTED_KINDS.flatMap(([type, singular, plural, always]) => {
+        const count = lines.filter((line) => line.artifactType === type).length
+        return always || count > 0 ? [{ count, label: count === 1 ? singular : plural }] : []
+    })
+}
+
+/** One follow-up of an install, as the success view shows it. */
+export interface InstallStep {
+    ok: boolean
+    text: string
+    link?: { label: string; href: string }
+}
+
+/**
+ * The follow-up remarks of an install (datapool, release, demo data,
+ * dashboards) as steps. Each is written as ` · ` + text, a dashboard step
+ * carries its address; a remark that says NICHT or fehlgeschlagen is a warning
+ * unless the caller knows better (`ok`).
+ */
+export function installSteps(segment: string, ok?: boolean): InstallStep[] {
+    return segment
+        .split(' · ')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((text) => {
+            const url = text.match(/https?:\/\/\S+/)?.[0]
+            return {
+                ok: ok ?? !/NICHT|fehlgeschlagen/.test(text),
+                text: url ? text.replace(`: ${url}`, '').replace(url, '').replace(/\s+/g, ' ').trim() : text,
+                ...(url ? { link: { label: 'Öffnen', href: url } } : {}),
+            }
+        })
+}
+
 /**
  * What a failed response says. The backend answers with an RFC 9457 problem whose `detail` is the
  * actionable sentence. The gateway policy answers a denied request with its bare reason
