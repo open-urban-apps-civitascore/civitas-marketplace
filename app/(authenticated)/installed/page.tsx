@@ -118,6 +118,12 @@ function InstallationCard({
                     <span className="font-medium text-foreground">
                         {installation.dataSetName ?? installation.packageId ?? NO_VALUE}
                     </span>
+                    {/* Packages the assistant generated carry their own id prefix (lib/assistant/usecase). */}
+                    {installation.packageId?.startsWith('urn:openurbanapps:usecase:assistent-') && (
+                        <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-400">
+                            AI-generiert
+                        </span>
+                    )}
                     {installation.packageVersion && (
                         <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">
                             v{installation.packageVersion}

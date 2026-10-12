@@ -55,6 +55,7 @@ export function InstallDialog({
     canCreateDatapool = false,
     triggerLabel = 'Installieren',
     datapoolNamePrefix = '',
+    installationHref,
 }: {
     entryId: string
     displayName: string
@@ -73,6 +74,8 @@ export function InstallDialog({
     triggerLabel?: string
     /** Put in front of the proposed name of a new datapool, e.g. "[AI-Assistant] " for generated use cases. */
     datapoolNamePrefix?: string
+    /** Where the new installation can be looked at; set, the success message links there in a new tab. */
+    installationHref?: (installationId: string) => string
 }) {
     const [open, setOpen] = useState(false)
     const [step, setStep] = useState(0)
@@ -218,6 +221,19 @@ export function InstallDialog({
                             {step === 2 && result && (
                                 <p className={`mt-3 text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
                                     {feedbackText(result)}
+                                    {result.status === 'created' && result.installationId && installationHref && (
+                                        <>
+                                            {' '}
+                                            <a
+                                                href={installationHref(result.installationId)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="font-medium underline"
+                                            >
+                                                Installation ansehen ↗
+                                            </a>
+                                        </>
+                                    )}
                                 </p>
                             )}
                         </div>
