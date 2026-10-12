@@ -1,3 +1,4 @@
+import { isAssistantEntryId, loadAssistantEntry } from '@/lib/assistant/store'
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import { fetchCatalogEntry } from '@/lib/catalog/bundle'
 import {
@@ -93,6 +94,8 @@ export async function findUseCaseByPath(
  * undefined for unknown ids; integrity failures throw (see bundle.ts).
  */
 export async function resolveCatalogEntry(id: string): Promise<CatalogEntry | undefined> {
+    // Packages the assistant generated are in no catalogue; they wait in its store.
+    if (isAssistantEntryId(id)) return loadAssistantEntry(id)
     if (isMockCatalog()) {
         const pkg = mockPackages.find((candidate) => candidate.manifest.id === id)
         if (!pkg) return undefined

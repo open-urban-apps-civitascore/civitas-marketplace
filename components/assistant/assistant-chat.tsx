@@ -1,11 +1,19 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { Check, Loader2, Pencil, Send, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Pencil, Send, Sparkles } from 'lucide-react'
 
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
-import { askAssistant, installProposal } from '@/lib/assistant/actions'
+import { InstallDialog } from '@/components/catalog/install-dialog'
+import { SamplePreview } from '@/components/catalog/sample-preview'
+import {
+    askAssistant,
+    installProposal,
+    loadInstallOptions,
+    type InstallOptions,
+    type UseCasePlan,
+} from '@/lib/assistant/actions'
 import type { ChatTurn } from '@/lib/assistant/llm'
 import type { StructureProposal } from '@/lib/assistant/proposal'
 import type { InstallResult } from '@/lib/install-actions'
@@ -13,20 +21,27 @@ import type { InstallResult } from '@/lib/install-actions'
 interface Message {
     role: 'user' | 'assistant'
     text: string
-    proposal?: StructureProposal
+    structure?: StructureProposal
+    useCase?: UseCasePlan
+    /** What the assistant looked up before answering. */
+    lookups?: string[]
     error?: string
 }
 
 const EXAMPLES = [
     'Welche Use Cases gibt es zum Thema Verkehr?',
-    'Wir messen an 40 Standorten Temperatur und Feinstaub, alle zehn Minuten per MQTT. Lege dafür eine eigene Datenstruktur an.',
+    'Was ist in unserer Instanz schon installiert, und in welchen Datenpools?',
+    'Bau etwas wie die Verkehrszählung, aber für Lärmmessung an Schulen.',
+    'Wir messen an 40 Standorten Temperatur und Feinstaub, alle zehn Minuten per MQTT. Setz das als eigenen Anwendungsfall um.',
+    'Wir wollen die Füllstände unserer Altglascontainer erfassen, die Sensoren melden stündlich per MQTT.',
 ]
 
-/** The conversation as the model reads it; a proposal travels along so a follow-up can change it. */
+/** The conversation as the model reads it; a plan travels along so a follow-up can change it. */
 function asTurns(messages: Message[]): ChatTurn[] {
     return messages.map((message) => {
         const parts = [message.text]
-        if (message.proposal) parts.push(`[Vorschlag: ${JSON.stringify(message.proposal)}]`)
+        if (message.structure) parts.push(`[Vorschlag Datenstruktur: ${JSON.stringify(message.structure)}]`)
+        if (message.useCase) parts.push(`[Vorschlag Anwendungsfall: ${JSON.stringify(message.useCase.proposal)}]`)
         if (message.error) parts.push(`[Fehler: ${message.error}]`)
         const content = parts.filter(Boolean).join('\n\n')
         return { role: message.role, content: content || '(leer)' }
@@ -48,10 +63,19 @@ export function AssistantChat() {
             const reply = await askAssistant(asTurns(next))
             setMessages((current) => [
                 ...current,
-                { role: 'assistant', text: reply.text, proposal: reply.proposal, error: reply.error },
+                {
+                    role: 'assistant',
+                    text: reply.text,
+                    structure: reply.structure,
+                    useCase: reply.useCase,
+                    lookups: reply.lookups,
+                    error: reply.error,
+                },
             ])
         })
     }
+
+    const adjust = () => setInput('Ändere den Plan: ')
 
     return (
         <div className="flex max-w-3xl flex-col gap-4">
@@ -81,16 +105,17 @@ export function AssistantChat() {
                         <div className="flex items-start gap-2 text-sm">
                             <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
                             <div className="flex flex-col gap-1">
+                                {message.lookups && message.lookups.length > 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        Nachgeschlagen: {message.lookups.join(', ')}
+                                    </p>
+                                )}
                                 {message.text && <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>}
                                 {message.error && <p className="text-xs text-error">{message.error}</p>}
                             </div>
                         </div>
-                        {message.proposal && (
-                            <ProposalCard
-                                proposal={message.proposal}
-                                onAdjust={() => setInput('Ändere den Plan: ')}
-                            />
-                        )}
+                        {message.structure && <StructureCard proposal={message.structure} onAdjust={adjust} />}
+                        {message.useCase && <UseCaseCard plan={message.useCase} onAdjust={adjust} />}
                     </div>
                 ),
             )}
@@ -119,7 +144,7 @@ export function AssistantChat() {
                         }
                     }}
                     rows={3}
-                    placeholder="Beschreiben, was gemessen wird, oder nach dem Katalog fragen … (Diktat: zweimal Fn)"
+                    placeholder="Beschreiben, was gemessen wird, oder nach dem Katalog fragen …"
                     className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm"
                 />
                 <button
@@ -135,7 +160,118 @@ export function AssistantChat() {
     )
 }
 
-function ProposalCard({ proposal, onAdjust }: { proposal: StructureProposal; onAdjust: () => void }) {
+function AdjustButton({ onAdjust }: { onAdjust: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onAdjust}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+        >
+            <Pencil className="size-4" />
+            Anpassen
+        </button>
+    )
+}
+
+/** A whole use case: the steps the install will take, then the marketplace's own install dialog. */
+function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => void }) {
+    const [options, setOptions] = useState<InstallOptions | null>(null)
+    const [optionsError, setOptionsError] = useState<string | null>(null)
+    const [showFields, setShowFields] = useState(false)
+
+    useEffect(() => {
+        loadInstallOptions()
+            .then(setOptions)
+            .catch((error: unknown) => setOptionsError(error instanceof Error ? error.message : String(error)))
+    }, [])
+
+    const { proposal, steps } = plan
+
+    return (
+        <div className="ml-6 flex flex-col gap-4 rounded-lg border p-4">
+            <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    Vorschlag · {steps.length} Schritte
+                </p>
+                <h3 className="mt-1 text-base font-semibold">{proposal.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{proposal.description}</p>
+            </div>
+
+            <ol className="flex flex-col gap-2">
+                {steps.map((step, index) => (
+                    <li key={index} className="flex items-start gap-3 text-sm">
+                        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                            {index + 1}
+                        </span>
+                        <span>
+                            <span className="font-medium">{step.kind}</span> „{step.title}“
+                            <span className="block text-xs text-muted-foreground">{step.detail}</span>
+                        </span>
+                    </li>
+                ))}
+            </ol>
+
+            <div>
+                <button
+                    type="button"
+                    onClick={() => setShowFields((open) => !open)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                    <ChevronDown className={`size-3.5 transition-transform ${showFields ? 'rotate-180' : ''}`} />
+                    Felder der Nachricht „{proposal.messageName}“
+                </button>
+                {showFields && (
+                    <table className="mt-2 w-full text-xs">
+                        <tbody>
+                            {proposal.fields.map((field) => (
+                                <tr key={field.name} className="border-t">
+                                    <td className="py-1 pr-3 font-mono">{field.name}</td>
+                                    <td className="py-1 pr-3 text-muted-foreground">
+                                        {field.dateTime ? 'Zeitpunkt' : field.type}
+                                        {field.required ? ' · Pflicht' : ''}
+                                    </td>
+                                    <td className="py-1 pr-3">{field.description}</td>
+                                    <td className="py-1 text-muted-foreground">{field.generator.kind}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            <div className="flex flex-wrap items-start gap-2">
+                {options ? (
+                    <InstallDialog
+                        entryId={plan.entryId}
+                        displayName={plan.title}
+                        version={plan.version}
+                        demoAvailable={options.demoAvailable}
+                        datapools={options.datapools}
+                        datapoolProblem={options.datapoolProblem}
+                        canCreateDatapool={options.canCreateDatapool}
+                        triggerLabel="Plan bestätigen …"
+                        datapoolNamePrefix="[AI-Assistant] "
+                    />
+                ) : (
+                    <span className="inline-flex items-center gap-1.5 px-1 py-1.5 text-xs text-muted-foreground">
+                        {optionsError ? (
+                            <span className="text-error">{optionsError}</span>
+                        ) : (
+                            <>
+                                <Loader2 className="size-3.5 animate-spin" /> Lade Datenpools …
+                            </>
+                        )}
+                    </span>
+                )}
+                {options?.demoAvailable && <SamplePreview entryId={plan.entryId} displayName={plan.title} />}
+                <AdjustButton onAdjust={onAdjust} />
+            </div>
+        </div>
+    )
+}
+
+/** A data structure on its own: installed directly, it needs no datapool. */
+function StructureCard({ proposal, onAdjust }: { proposal: StructureProposal; onAdjust: () => void }) {
     const [result, setResult] = useState<InstallResult | null>(null)
     const [installing, startInstall] = useTransition()
     const done = result?.status === 'created'
@@ -186,17 +322,7 @@ function ProposalCard({ proposal, onAdjust }: { proposal: StructureProposal; onA
                     {installing ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
                     {installing ? 'Lege an …' : done ? 'Angelegt' : 'Plan bestätigen'}
                 </button>
-                {!done && (
-                    <button
-                        type="button"
-                        onClick={onAdjust}
-                        disabled={installing}
-                        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
-                    >
-                        <Pencil className="size-4" />
-                        Anpassen
-                    </button>
-                )}
+                {!done && <AdjustButton onAdjust={onAdjust} />}
             </div>
 
             {result && (

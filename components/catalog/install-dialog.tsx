@@ -52,6 +52,8 @@ export function InstallDialog({
     datapools = [],
     datapoolProblem,
     canCreateDatapool = false,
+    triggerLabel = 'Installieren',
+    datapoolNamePrefix = '',
 }: {
     entryId: string
     displayName: string
@@ -66,6 +68,10 @@ export function InstallDialog({
     datapoolProblem?: string
     /** DATAPOOL_CREATE across the tenant: decides whether a new pool is offered. */
     canCreateDatapool?: boolean
+    /** The trigger's text; the assistant's plan card says "Plan bestätigen". */
+    triggerLabel?: string
+    /** Put in front of the proposed name of a new datapool, e.g. "[AI-Assistant] " for generated use cases. */
+    datapoolNamePrefix?: string
 }) {
     const [open, setOpen] = useState(false)
     const [step, setStep] = useState(0)
@@ -74,7 +80,7 @@ export function InstallDialog({
     const [datapoolMode, setDatapoolMode] = useState<DatapoolMode>(canCreateDatapool ? 'new' : 'existing')
     const [newDatapoolName, setNewDatapoolName] = useState(() =>
         suggestDatapoolName(
-            displayName,
+            `${datapoolNamePrefix}${displayName}`,
             version,
             datapools.map((pool) => pool.name),
         ),
@@ -115,7 +121,7 @@ export function InstallDialog({
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
                 >
                     <Download className="size-4" />
-                    Installieren
+                    {triggerLabel}
                 </button>
             )}
             {/* A refusal stays below the trigger once the dialog is closed, so
