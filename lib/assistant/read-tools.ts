@@ -1,6 +1,6 @@
-import type { ReadTool } from '@/lib/assistant/llm'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry } from '@/lib/catalog/types'
+import { fetchDatasetOverview } from '@/lib/datapool-of-dataset'
 import { fetchDatapools } from '@/lib/datapools'
 import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
 import type { InstallationReceipt } from '@/lib/install-payload'
@@ -13,6 +13,14 @@ import { getAccessToken } from '@/lib/session'
  * answers in short text the model reads; a failed read is a sentence, not an
  * exception.
  */
+
+/** A read tool: its JSON Schema for the model, and what it answers. */
+export interface ReadTool {
+    name: string
+    description: string
+    input_schema: Record<string, unknown>
+    run: (input: unknown) => Promise<string>
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -135,18 +143,27 @@ export const READ_TOOLS: ReadTool[] = [
         description: 'Listet, was in dieser Instanz aus dem Marketplace installiert ist (aktiv und früher), mit Datensatz und angelegten Bausteinen.',
         input_schema: { type: 'object', properties: {} },
         run: async () => {
-            const list = await readAllInstallations<InstallationRow>(await getAccessToken())
+            const accessToken = await getAccessToken()
+            const list = await readAllInstallations<InstallationRow>(accessToken)
             if (!list.ok) return `Installationen nicht lesbar: ${list.status} ${list.statusText}`
             const { active, history } = partitionInstallations(list.rows)
             if (active.length === 0) return `Nichts installiert. Früher deinstalliert: ${history.length}.`
-            const lines = active.map((row) => {
+            // The pool and status live on the dataset, not on the installation record.
+            const overviews = await Promise.all(
+                active.map((row) => (row.dataSetId ? fetchDatasetOverview(row.dataSetId, accessToken) : null)),
+            )
+            const lines = active.map((row, index) => {
                 const kinds = new Map<string, number>()
                 for (const line of row.artifacts ?? []) {
                     const kind = line.artifactType ?? '?'
                     kinds.set(kind, (kinds.get(kind) ?? 0) + 1)
                 }
                 const made = [...kinds].map(([kind, count]) => `${count}× ${kind}`).join(', ')
-                return `- Paket ${row.packageId ?? '?'} v${row.packageVersion ?? '?'}: Datensatz „${row.dataSetName ?? '–'}“${row.installedAt ? `, installiert ${row.installedAt}` : ''}${made ? ` (${made})` : ''}`
+                const overview = overviews[index]
+                const pool = overview?.datapool ? `, Datenpool „${overview.datapool.name}“` : ''
+                const status = overview?.status ? `, Status ${overview.status}` : ''
+                const origin = row.packageId?.startsWith('urn:openurbanapps:usecase:assistent-') ? ' [vom Assistenten erzeugt]' : ''
+                return `- Paket ${row.packageId ?? '?'} v${row.packageVersion ?? '?'}${origin}: Datensatz „${row.dataSetName ?? '–'}“${pool}${status}${row.installedAt ? `, installiert ${row.installedAt}` : ''}${made ? ` (${made})` : ''}`
             })
             return [`Aktiv (${active.length}):`, ...lines, `Früher deinstalliert: ${history.length}.`].join('\n')
         },
@@ -175,12 +192,3 @@ export const READ_TOOLS: ReadTool[] = [
         run: () => readPortalList('/v1/datastructures?size=200', 'Datenstrukturen'),
     },
 ]
-
-/** German labels for the chat's "looked up" line. */
-export const READ_TOOL_LABELS: Record<string, string> = {
-    katalog_eintrag_lesen: 'Katalog-Eintrag',
-    installationen_auflisten: 'Installationen',
-    datenpools_auflisten: 'Datenpools',
-    datensaetze_auflisten: 'Datensätze',
-    datenstrukturen_der_instanz: 'Datenstrukturen der Instanz',
-}

@@ -46,6 +46,8 @@ export interface InstallResult {
     /** Human-readable summary (created) or backend message (ProblemDetail.detail). */
     detail: string
     httpStatus: number
+    /** The platform's id for the new installation, on success. */
+    installationId?: string
 }
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
@@ -206,6 +208,7 @@ export async function installEntry(
         status: 'created',
         detail: `${summary}${poolSegment}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
         httpStatus: 201,
+        installationId: receipt.id,
     }
 }
 

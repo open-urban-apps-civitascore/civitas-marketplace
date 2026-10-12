@@ -1,81 +1,66 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
-import { Check, ChevronDown, Loader2, Pencil, Send, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState, useTransition } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport, isToolUIPart, type UIMessage } from 'ai'
+import { Check, ChevronDown, ExternalLink, Loader2, Pencil, Search, Send, Sparkles, Wand2 } from 'lucide-react'
 
+import { ChatMarkdown } from '@/components/assistant/chat-markdown'
 import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
 import { InstallDialog } from '@/components/catalog/install-dialog'
 import { SamplePreview } from '@/components/catalog/sample-preview'
-import {
-    askAssistant,
-    installProposal,
-    loadInstallOptions,
-    type InstallOptions,
-    type UseCasePlan,
-} from '@/lib/assistant/actions'
-import type { ChatTurn } from '@/lib/assistant/llm'
+import { installProposal, loadInstallOptions, type InstallOptions } from '@/lib/assistant/actions'
 import type { StructureProposal } from '@/lib/assistant/proposal'
+import {
+    READ_TOOL_LABELS,
+    type Recommendation,
+    type RecommendationToolOutput,
+    type StructureToolOutput,
+    type UseCasePlan,
+    type UseCaseToolOutput,
+} from '@/lib/assistant/types'
 import type { InstallResult } from '@/lib/install-actions'
 
-interface Message {
-    role: 'user' | 'assistant'
-    text: string
-    structure?: StructureProposal
-    useCase?: UseCasePlan
-    /** What the assistant looked up before answering. */
-    lookups?: string[]
-    error?: string
-}
+const transport = new DefaultChatTransport({ api: '/api/assistant' })
 
 const EXAMPLES = [
     'Welche Use Cases gibt es zum Thema Verkehr?',
     'Was ist in unserer Instanz schon installiert, und in welchen Datenpools?',
+    'Wir messen an 40 Standorten Temperatur und Feinstaub, alle zehn Minuten per MQTT.',
     'Bau etwas wie die Verkehrszählung, aber für Lärmmessung an Schulen.',
-    'Wir messen an 40 Standorten Temperatur und Feinstaub, alle zehn Minuten per MQTT. Setz das als eigenen Anwendungsfall um.',
-    'Wir wollen die Füllstände unserer Altglascontainer erfassen, die Sensoren melden stündlich per MQTT.',
 ]
 
-/** The conversation as the model reads it; a plan travels along so a follow-up can change it. */
-function asTurns(messages: Message[]): ChatTurn[] {
-    return messages.map((message) => {
-        const parts = [message.text]
-        if (message.structure) parts.push(`[Vorschlag Datenstruktur: ${JSON.stringify(message.structure)}]`)
-        if (message.useCase) parts.push(`[Vorschlag Anwendungsfall: ${JSON.stringify(message.useCase.proposal)}]`)
-        if (message.error) parts.push(`[Fehler: ${message.error}]`)
-        const content = parts.filter(Boolean).join('\n\n')
-        return { role: message.role, content: content || '(leer)' }
-    })
+/** The installed page, opened at one installation (see the installed page's modal). */
+const installationHref = (installationId: string) => `/installed?installation=${encodeURIComponent(installationId)}`
+
+type Part = UIMessage['parts'][number]
+
+function toolNameOf(part: { type: string; toolName?: string }): string {
+    return part.type === 'dynamic-tool' ? (part.toolName ?? '') : part.type.replace(/^tool-/, '')
 }
 
 export function AssistantChat() {
-    const [messages, setMessages] = useState<Message[]>([])
+    const { messages, sendMessage, status, error } = useChat({ transport })
     const [input, setInput] = useState('')
-    const [pending, startTransition] = useTransition()
+    const endRef = useRef<HTMLDivElement>(null)
+    const inputRef = useRef<HTMLTextAreaElement>(null)
+    const busy = status === 'submitted' || status === 'streaming'
+
+    useEffect(() => {
+        endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }, [messages, status])
 
     function send(text: string) {
         const trimmed = text.trim()
-        if (!trimmed || pending) return
-        const next: Message[] = [...messages, { role: 'user', text: trimmed }]
-        setMessages(next)
+        if (!trimmed || busy) return
+        void sendMessage({ text: trimmed })
         setInput('')
-        startTransition(async () => {
-            const reply = await askAssistant(asTurns(next))
-            setMessages((current) => [
-                ...current,
-                {
-                    role: 'assistant',
-                    text: reply.text,
-                    structure: reply.structure,
-                    useCase: reply.useCase,
-                    lookups: reply.lookups,
-                    error: reply.error,
-                },
-            ])
-        })
     }
 
-    const adjust = () => setInput('Ändere den Plan: ')
+    function adjust() {
+        setInput('Ändere den Plan: ')
+        inputRef.current?.focus()
+    }
 
     return (
         <div className="flex max-w-3xl flex-col gap-4">
@@ -95,46 +80,41 @@ export function AssistantChat() {
                 </div>
             )}
 
-            {messages.map((message, index) =>
+            {messages.map((message) =>
                 message.role === 'user' ? (
-                    <div key={index} className="self-end rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">
-                        {message.text}
+                    <div key={message.id} className="self-end rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">
+                        {message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')}
                     </div>
                 ) : (
-                    <div key={index} className="flex flex-col gap-3">
-                        <div className="flex items-start gap-2 text-sm">
-                            <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-                            <div className="flex flex-col gap-1">
-                                {message.lookups && message.lookups.length > 0 && (
-                                    <p className="text-xs text-muted-foreground">
-                                        Nachgeschlagen: {message.lookups.join(', ')}
-                                    </p>
-                                )}
-                                {message.text && <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>}
-                                {message.error && <p className="text-xs text-error">{message.error}</p>}
-                            </div>
+                    <div key={message.id} className="flex items-start gap-2">
+                        <Sparkles className="mt-1 size-4 shrink-0 text-primary" />
+                        <div className="flex min-w-0 flex-1 flex-col gap-3">
+                            {message.parts.map((part, index) => (
+                                <AssistantPart key={index} part={part} onSend={send} onAdjust={adjust} />
+                            ))}
                         </div>
-                        {message.structure && <StructureCard proposal={message.structure} onAdjust={adjust} />}
-                        {message.useCase && <UseCaseCard plan={message.useCase} onAdjust={adjust} />}
                     </div>
                 ),
             )}
 
-            {pending && (
+            {status === 'submitted' && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
                     Denkt nach …
                 </div>
             )}
+            {error && <p className="text-xs text-error">{error.message}</p>}
+            <div ref={endRef} />
 
             <form
                 onSubmit={(event) => {
                     event.preventDefault()
                     send(input)
                 }}
-                className="flex items-end gap-2"
+                className="sticky bottom-0 z-10 flex items-end gap-2 border-t bg-background pb-4 pt-3"
             >
                 <textarea
+                    ref={inputRef}
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
                     onKeyDown={(event) => {
@@ -149,13 +129,61 @@ export function AssistantChat() {
                 />
                 <button
                     type="submit"
-                    disabled={pending || !input.trim()}
+                    disabled={busy || !input.trim()}
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
-                    <Send className="size-4" />
+                    {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
                     Senden
                 </button>
             </form>
+        </div>
+    )
+}
+
+/** One part of an assistant message: text, a lookup, or the card a final tool produced. */
+function AssistantPart({
+    part,
+    onSend,
+    onAdjust,
+}: {
+    part: Part
+    onSend: (text: string) => void
+    onAdjust: () => void
+}) {
+    if (part.type === 'text') return part.text.trim() ? <ChatMarkdown text={part.text} /> : null
+    if (!isToolUIPart(part)) return null
+
+    const name = toolNameOf(part)
+    const label = READ_TOOL_LABELS[name]
+    if (label) {
+        const done = part.state === 'output-available' || part.state === 'output-error'
+        return (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {done ? <Search className="size-3" /> : <Loader2 className="size-3 animate-spin" />}
+                {done ? `Nachgeschlagen: ${label}` : `Schlage nach: ${label} …`}
+            </p>
+        )
+    }
+
+    if (part.state === 'output-error') return <p className="text-xs text-error">{part.errorText}</p>
+    if (part.state !== 'output-available') {
+        return (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                {name === 'katalog_empfehlen' ? 'Prüfe den Katalog …' : 'Baue den Plan …'}
+            </p>
+        )
+    }
+
+    const output = part.output as UseCaseToolOutput | StructureToolOutput | RecommendationToolOutput
+    if (!output.ok) return <p className="text-xs text-error">{output.error}</p>
+
+    return (
+        <div className="flex flex-col gap-3">
+            {output.reply && <ChatMarkdown text={output.reply} />}
+            {'plan' in output && <UseCaseCard plan={output.plan} onAdjust={onAdjust} />}
+            {'proposal' in output && <StructureCard proposal={output.proposal} onAdjust={onAdjust} />}
+            {'recommendation' in output && <RecommendationCard recommendation={output.recommendation} onSend={onSend} />}
         </div>
     )
 }
@@ -173,6 +201,57 @@ function AdjustButton({ onAdjust }: { onAdjust: () => void }) {
     )
 }
 
+/** A catalogue entry that fits, wholly or partly: open it beside the chat, or generate after all. */
+function RecommendationCard({
+    recommendation,
+    onSend,
+}: {
+    recommendation: Recommendation
+    onSend: (text: string) => void
+}) {
+    const fits = recommendation.fit === 'passt'
+    return (
+        <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                        Empfehlung aus dem Katalog
+                    </p>
+                    <span
+                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                            fits ? 'bg-success/10 text-success' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        }`}
+                    >
+                        {fits ? 'Passt gut' : 'Passt teilweise'}
+                    </span>
+                </div>
+                <h3 className="mt-1 text-base font-semibold">{recommendation.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{recommendation.description}</p>
+                {recommendation.reason && <p className="mt-2 text-sm">{recommendation.reason}</p>}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+                <a
+                    href={recommendation.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                    <ExternalLink className="size-4" />
+                    Im Marketplace öffnen
+                </a>
+                <button
+                    type="button"
+                    onClick={() => onSend(`Erzeuge trotzdem einen eigenen Anwendungsfall statt „${recommendation.title}“.`)}
+                    className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                    <Wand2 className="size-4" />
+                    Trotzdem eigenen erzeugen
+                </button>
+            </div>
+        </div>
+    )
+}
+
 /** A whole use case: the steps the install will take, then the marketplace's own install dialog. */
 function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => void }) {
     const [options, setOptions] = useState<InstallOptions | null>(null)
@@ -182,13 +261,13 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
     useEffect(() => {
         loadInstallOptions()
             .then(setOptions)
-            .catch((error: unknown) => setOptionsError(error instanceof Error ? error.message : String(error)))
+            .catch((failure: unknown) => setOptionsError(failure instanceof Error ? failure.message : String(failure)))
     }, [])
 
     const { proposal, steps } = plan
 
     return (
-        <div className="ml-6 flex flex-col gap-4 rounded-lg border p-4">
+        <div className="flex flex-col gap-4 rounded-lg border p-4">
             <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-primary">
                     Vorschlag · {steps.length} Schritte
@@ -251,6 +330,7 @@ function UseCaseCard({ plan, onAdjust }: { plan: UseCasePlan; onAdjust: () => vo
                         canCreateDatapool={options.canCreateDatapool}
                         triggerLabel="Plan bestätigen …"
                         datapoolNamePrefix="[AI-Assistant] "
+                        installationHref={installationHref}
                     />
                 ) : (
                     <span className="inline-flex items-center gap-1.5 px-1 py-1.5 text-xs text-muted-foreground">
@@ -277,7 +357,7 @@ function StructureCard({ proposal, onAdjust }: { proposal: StructureProposal; on
     const done = result?.status === 'created'
 
     return (
-        <div className="ml-6 flex flex-col gap-4 rounded-lg border p-4">
+        <div className="flex flex-col gap-4 rounded-lg border p-4">
             <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-primary">
                     Vorschlag · Datenstruktur mit {proposal.objects.length} Objekt
@@ -328,12 +408,17 @@ function StructureCard({ proposal, onAdjust }: { proposal: StructureProposal; on
             {result && (
                 <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
                     {feedbackText(result)}
-                    {done && (
+                    {done && result.installationId && (
                         <>
                             {' '}
-                            <Link href="/installed" className="underline">
-                                Zu den Installationen
-                            </Link>
+                            <a
+                                href={installationHref(result.installationId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium underline"
+                            >
+                                Installation ansehen ↗
+                            </a>
                         </>
                     )}
                 </p>
