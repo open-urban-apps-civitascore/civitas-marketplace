@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { buildStarterDashboard } from '@/lib/assistant/dashboard'
+import { ASSISTANT_PACKAGE_PREFIX } from '@/lib/assistant/store'
 import { compactName, deriveDisambiguator, slugify, urnSegment } from '@/lib/export/urn'
 
 /**
@@ -7,9 +9,10 @@ import { compactName, deriveDisambiguator, slugify, urnSegment } from '@/lib/exp
  * fields with a hint how to simulate each, and the places that send it.
  * Everything else is built here after the pattern of the Verkehrszählung
  * package: a raw and a target structure, the MQTT source, a one-to-one mapping
- * with type conversion, the PostGIS sink, the pipeline and the simulation. The
- * package hangs together by construction and then passes the same assembly
- * checks as every catalogue package.
+ * with type conversion, the PostGIS sink, the pipeline, the simulation and a
+ * starter dashboard on the sink's table. The package hangs together by
+ * construction and then passes the same assembly checks as every catalogue
+ * package.
  */
 
 const FIELD_TYPES = ['string', 'number', 'integer', 'boolean'] as const
@@ -282,9 +285,11 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
         },
     })
 
+    const packageId = `${ASSISTANT_PACKAGE_PREFIX}${slugify(title)}-${deriveDisambiguator(`assistant#usecase#${title}#${now}`)}`
     const rawUrn = urn('datastructure', rawTitle)
     const targetUrn = urn('datastructure', title)
     const mappingUrn = urn('mapping', mappingName)
+    const dashboard = buildStarterDashboard({ seed: packageId, title, tableName, fields, now })
 
     const files: Record<string, Record<string, unknown>> = {
         'rohformat.datastructure.json': structure(rawTitle, `Nachricht, wie die Geräte sie senden: ${proposal.description}`, rawProperty, rawUrn),
@@ -357,10 +362,13 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
                 fields: Object.fromEntries(fields.map((field) => [field.key, generatorFor(field, station, index)])),
             })),
         },
+        ...(dashboard
+            ? { 'start.dashboard.json': dashboard.document as unknown as Record<string, unknown> }
+            : {}),
     }
 
     const manifest = {
-        id: `urn:openurbanapps:usecase:assistent-${slugify(title)}-${deriveDisambiguator(`assistant#usecase#${title}#${now}`)}`,
+        id: packageId,
         type: 'usecase',
         displayName: title,
         description: proposal.description,
@@ -389,6 +397,7 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
             ],
             pipelines: [{ file: 'import.pipeline.json' }],
             simulations: [{ file: 'demo.simulation.json' }],
+            ...(dashboard ? { dashboards: [{ file: 'start.dashboard.json' }] } : {}),
         },
         dependencies: [],
     }
@@ -409,6 +418,15 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
                 .map((field) => `${field.key}: ${describeGenerator(field)}`)
                 .join('; ')}`,
         },
+        ...(dashboard
+            ? [
+                  {
+                      kind: 'Dashboard',
+                      title: `${title} (Start-Dashboard)`,
+                      detail: `Superset, aktualisiert alle 10 s: ${dashboard.charts.join('; ')}`,
+                  },
+              ]
+            : []),
     ]
 
     return { manifest, files, steps }

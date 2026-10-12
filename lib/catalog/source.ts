@@ -1,4 +1,9 @@
-import { isAssistantEntryId, loadAssistantEntry } from '@/lib/assistant/store'
+import {
+    isAssistantEntryId,
+    isAssistantPackageId,
+    loadAssistantEntry,
+    loadAssistantEntryByPackageId,
+} from '@/lib/assistant/store'
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import { fetchCatalogEntry } from '@/lib/catalog/bundle'
 import {
@@ -96,6 +101,8 @@ export async function findUseCaseByPath(
 export async function resolveCatalogEntry(id: string): Promise<CatalogEntry | undefined> {
     // Packages the assistant generated are in no catalogue; they wait in its store.
     if (isAssistantEntryId(id)) return loadAssistantEntry(id)
+    // After the install they are looked up by their package id, the one the journal records.
+    if (isAssistantPackageId(id)) return loadAssistantEntryByPackageId(id)
     if (isMockCatalog()) {
         const pkg = mockPackages.find((candidate) => candidate.manifest.id === id)
         if (!pkg) return undefined
