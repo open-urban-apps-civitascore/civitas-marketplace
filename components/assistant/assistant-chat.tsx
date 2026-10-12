@@ -45,6 +45,8 @@ export function AssistantChat() {
     const endRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const busy = status === 'submitted' || status === 'streaming'
+    // Only the latest answer offers its numbered options as choices; older ones are history.
+    const lastAssistantId = [...messages].reverse().find((message) => message.role === 'assistant')?.id
 
     useEffect(() => {
         endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -90,7 +92,13 @@ export function AssistantChat() {
                         <Sparkles className="mt-1 size-4 shrink-0 text-primary" />
                         <div className="flex min-w-0 flex-1 flex-col gap-3">
                             {message.parts.map((part, index) => (
-                                <AssistantPart key={index} part={part} onSend={send} onAdjust={adjust} />
+                                <AssistantPart
+                                    key={index}
+                                    part={part}
+                                    onSend={send}
+                                    onAdjust={adjust}
+                                    onChoose={message.id === lastAssistantId && !busy ? send : undefined}
+                                />
                             ))}
                         </div>
                     </div>
@@ -145,12 +153,15 @@ function AssistantPart({
     part,
     onSend,
     onAdjust,
+    onChoose,
 }: {
     part: Part
     onSend: (text: string) => void
     onAdjust: () => void
+    /** Set on the latest answer: its numbered options become clickable. */
+    onChoose?: (choice: string) => void
 }) {
-    if (part.type === 'text') return part.text.trim() ? <ChatMarkdown text={part.text} /> : null
+    if (part.type === 'text') return part.text.trim() ? <ChatMarkdown text={part.text} onChoose={onChoose} /> : null
     if (!isToolUIPart(part)) return null
 
     const name = toolNameOf(part)
@@ -180,7 +191,7 @@ function AssistantPart({
 
     return (
         <div className="flex flex-col gap-3">
-            {output.reply && <ChatMarkdown text={output.reply} />}
+            {output.reply && <ChatMarkdown text={output.reply} onChoose={onChoose} />}
             {'plan' in output && <UseCaseCard plan={output.plan} onAdjust={onAdjust} />}
             {'proposal' in output && <StructureCard proposal={output.proposal} onAdjust={onAdjust} />}
             {'recommendation' in output && <RecommendationCard recommendation={output.recommendation} onSend={onSend} />}

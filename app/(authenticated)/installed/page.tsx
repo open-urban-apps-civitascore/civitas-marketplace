@@ -1,7 +1,13 @@
+import Link from 'next/link'
+import { LayoutList } from 'lucide-react'
+
+import { InstallationSection } from '@/components/catalog/installation-section'
+import { InstallationModal } from '@/components/installed/installation-modal'
 import { ReactivateDemoPanel } from '@/components/installed/reactivate-demo-panel'
 import { SimulatorPanel } from '@/components/installed/simulator-panel'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
+import { loadInstallationView } from '@/lib/installation-view'
 import { getAccessToken, requireSession } from '@/lib/session'
 import { isSimulatorConfigured, listSimulations, type SimulationStatus } from '@/lib/simulator/client'
 import { streamsOfInstallation } from '@/lib/simulator/registration'
@@ -151,7 +157,17 @@ function InstallationCard({
                             {dateFormat.format(new Date(installation.uninstalledAt))}
                         </span>
                     ) : (
-                        <UninstallButton installationId={installation.id} />
+                        <>
+                            <Link
+                                href={`/installed?installation=${encodeURIComponent(installation.id)}`}
+                                scroll={false}
+                                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
+                            >
+                                <LayoutList className="size-3.5" />
+                                Übersicht
+                            </Link>
+                            <UninstallButton installationId={installation.id} />
+                        </>
                     )}
                 </div>
             </div>
@@ -230,9 +246,17 @@ function InstallationCard({
  * record and is shown below, folded, so that the history does not push the
  * active installations off the page.
  */
-export default async function InstalledPage() {
+export default async function InstalledPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ installation?: string | string[] }>
+}) {
     await requireSession()
     const accessToken = await getAccessToken()
+    // `?installation=<id>` opens one installation's overview over the list, so
+    // the view has an address the assistant can link to after an install.
+    const requested = (await searchParams).installation
+    const openId = typeof requested === 'string' && requested ? requested : undefined
 
     const list = await readAllInstallations<InstallationRow>(accessToken)
 
@@ -267,9 +291,46 @@ export default async function InstalledPage() {
         }
     }
     const simulatorUiBase = simulatorUiUrl()
+    const view = openId ? await loadInstallationView(openId) : null
 
     return (
         <div className="flex flex-col gap-6">
+            {openId && (
+                <InstallationModal
+                    title={view?.title ?? 'Installation'}
+                    badges={
+                        view && (
+                            <>
+                                {view.generated && (
+                                    <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-400">
+                                        AI-generiert
+                                    </span>
+                                )}
+                                {view.packageVersion && (
+                                    <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">
+                                        v{view.packageVersion}
+                                    </span>
+                                )}
+                            </>
+                        )
+                    }
+                >
+                    {view ? (
+                        <InstallationSection
+                            installation={view.installation}
+                            dataset={view.dataset}
+                            dashboards={view.dashboards}
+                            streams={view.streams}
+                            simulatorUiBase={simulatorUiBase}
+                        />
+                    ) : (
+                        <p className="text-sm text-muted-foreground">
+                            Diese Installation ist nicht (mehr) aktiv oder nicht sichtbar. Deinstallierte
+                            Installationen stehen im Verlauf unten auf der Seite.
+                        </p>
+                    )}
+                </InstallationModal>
+            )}
             <div>
                 <h1>Installiert</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
