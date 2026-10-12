@@ -1,6 +1,6 @@
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
 import { readAllInstallations } from '@/lib/installation-list'
-import { installationMapHref, packageMapOf } from '@/lib/installation-map'
+import { installationMapHref, isMapPreviewConfigured, packageMapOf } from '@/lib/installation-map'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import type { ActiveInstallation } from '@/lib/installations'
 import { getAccessToken } from '@/lib/session'
@@ -69,7 +69,7 @@ export async function loadInstallationView(installationId: string): Promise<Inst
         row.dataSetId ? fetchDatasetOverview(row.dataSetId, accessToken) : Promise.resolve(null),
         row.packageId ? fetchInstalledDashboards(row.packageId, row.id) : Promise.resolve([]),
         readInstallationStreams(row.id),
-        row.packageId && row.dataSetId ? packageMapOf(row.packageId) : Promise.resolve(null),
+        row.packageId && row.dataSetId && isMapPreviewConfigured() ? packageMapOf(row.packageId) : Promise.resolve(null),
     ])
 
     return {

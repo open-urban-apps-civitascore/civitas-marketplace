@@ -57,8 +57,11 @@ const NAV_SECTIONS: NavSection[] = [
 export function AppSidebar({
     userName,
     organisation,
+    assistant = false,
 }: {
     userName?: string
+    /** Whether the assistant is configured on this instance (see lib/assistant/config); without it, no menu entry. */
+    assistant?: boolean
     /**
      * The municipality or utility the person belongs to. Deliberately NOT the
      * role: a role ("Plattform-Admin") describes what someone may do, which the
@@ -94,7 +97,7 @@ export function AppSidebar({
                         <span className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             {section.title}
                         </span>
-                        {section.items.map((item) => {
+                        {section.items.filter((item) => assistant || item.href !== '/assistent').map((item) => {
                             const active =
                                 pathname === item.href ||
                                 item.children?.some((child) => pathname === child.href)

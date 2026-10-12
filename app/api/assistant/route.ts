@@ -1,6 +1,7 @@
 import { createAgentUIStreamResponse } from 'ai'
 
 import { buildAssistantAgent } from '@/lib/assistant/agent'
+import { isAssistantConfigured } from '@/lib/assistant/config'
 import { requireSession } from '@/lib/session'
 
 /**
@@ -10,6 +11,9 @@ import { requireSession } from '@/lib/session'
  */
 export async function POST(request: Request) {
     await requireSession()
+    if (!isAssistantConfigured()) {
+        return new Response('Der Assistent ist auf dieser Instanz nicht eingerichtet.', { status: 503 })
+    }
     const body = (await request.json()) as { messages?: unknown[] }
     return createAgentUIStreamResponse({
         agent: await buildAssistantAgent(),

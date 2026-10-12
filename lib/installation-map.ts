@@ -83,6 +83,14 @@ export async function loadInstallationMap(installationId: string): Promise<Insta
     return { ...map, installationId: row.id, datasetId: row.dataSetId, title: row.dataSetName ?? map.layerTitle }
 }
 
+/**
+ * The map preview needs the gateway its images come through (see app/api/ows).
+ * Without it the marketplace offers no map, rather than a page of empty tiles.
+ */
+export function isMapPreviewConfigured(): boolean {
+    return Boolean(process.env.OWS_GATEWAY_URL)
+}
+
 /** The map page of an installation. */
 export function installationMapHref(installationId: string): string {
     return `/karte/${encodeURIComponent(installationId)}`

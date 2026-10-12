@@ -4,14 +4,15 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 import { InstallationMapView } from '@/components/installed/installation-map'
-import { loadInstallationMap } from '@/lib/installation-map'
+import { isMapPreviewConfigured, loadInstallationMap } from '@/lib/installation-map'
 import { requireSession } from '@/lib/session'
 
 /** The map of one installation: its OWS layer over OpenStreetMap. */
 export default async function InstallationMapPage({ params }: { params: Promise<{ installationId: string }> }) {
     await requireSession()
     const { installationId } = await params
-    const map = await loadInstallationMap(installationId)
+    const configured = isMapPreviewConfigured()
+    const map = configured ? await loadInstallationMap(installationId) : null
     const back = `/installed?installation=${encodeURIComponent(installationId)}`
 
     return (
@@ -41,7 +42,9 @@ export default async function InstallationMapPage({ params }: { params: Promise<
                 </>
             ) : (
                 <p className="text-sm text-muted-foreground">
-                    Diese Installation ist nicht (mehr) aktiv oder bringt keine Karte mit.
+                    {configured
+                        ? 'Diese Installation ist nicht (mehr) aktiv oder bringt keine Karte mit.'
+                        : 'Die Kartenvorschau ist auf dieser Instanz nicht eingerichtet (OWS_GATEWAY_URL fehlt).'}
                 </p>
             )}
         </div>

@@ -1,6 +1,7 @@
 import { AppHeader } from '@/components/layout/app-header'
 import { AppShell } from '@/components/layout/app-shell'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { isAssistantConfigured } from '@/lib/assistant/config'
 import { requireSession } from '@/lib/session'
 
 /**
@@ -21,7 +22,7 @@ export default async function AuthenticatedLayout({
     const userName = session.user?.name ?? session.user?.email ?? undefined
 
     return (
-        <AppShell sidebar={<AppSidebar userName={userName} />}>
+        <AppShell sidebar={<AppSidebar userName={userName} assistant={isAssistantConfigured()} />}>
             <AppHeader />
             <div className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">{children}</div>
         </AppShell>
