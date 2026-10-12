@@ -29,7 +29,7 @@ import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
-import { PortalReadError, readUseCase } from '@/lib/export/portal-reader'
+import { PortalReadError, readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
 import {
     inspectBundle,
     readBundleStatus,
@@ -700,9 +700,64 @@ function gitlabMessage(error: GitLabError): string {
 
 /** One row of the inventory: `type` for the code to decide on, `kind` as the page shows it. */
 export interface InventoryArtifact {
-    type: 'structure' | 'source' | 'mapping' | 'sink' | 'pipeline'
+    type: 'structure' | 'source' | 'mapping' | 'sink' | 'pipeline' | 'api' | 'style' | 'layer'
     kind: string
     name: string
+    /** The map members are shown as one group, see mapArtifacts. */
+    group?: 'map'
+    /** Indent inside the group: a layer under the API, a style under its layer. */
+    depth?: 1 | 2
+    /** A grey line under the name, e.g. the sink a layer shows. */
+    detail?: string
+}
+
+/**
+ * The map members as one group, the way a reader asks about them ("what belongs
+ * to the map?"): the API first, each layer under it with the sink it shows, each
+ * layer's styles under the layer. The platform keeps all three as objects of the
+ * dataset; it is the layer that refers to a sink and to styles, and the API that
+ * makes the dataset's layers reachable. A style no layer uses stands on its own.
+ */
+function mapArtifacts(snapshot: InstanceSnapshot): InventoryArtifact[] {
+    const sinkNames = new Map(snapshot.sinks.map((sink) => [sink.id, sink.name]))
+    const styles = new Map((snapshot.styles ?? []).map((style) => [style.id, style]))
+    const used = new Set<string>()
+    const rows: InventoryArtifact[] = (snapshot.apis ?? []).map((api): InventoryArtifact => ({
+        type: 'api',
+        kind: `API (${api.standard})`,
+        name: api.name,
+        group: 'map',
+    }))
+    for (const layer of snapshot.layers ?? []) {
+        const sink = layer.dataSinkId ? sinkNames.get(layer.dataSinkId) : undefined
+        rows.push({
+            type: 'layer',
+            kind: 'Kartenebene',
+            name: layer.title ?? layer.layerName,
+            group: 'map',
+            depth: 1,
+            detail: sink ? `zeigt Senke ${sink}` : 'ihre Senke gehört nicht zum Use Case, die Ebene wird nicht geteilt',
+        })
+        for (const id of [layer.defaultStyleId, ...layer.alternativeStyleIds]) {
+            const style = id ? styles.get(id) : undefined
+            if (!style) continue
+            used.add(style.id)
+            rows.push({
+                type: 'style',
+                kind: 'Stil',
+                name: style.name,
+                group: 'map',
+                depth: 2,
+                ...(id === layer.defaultStyleId ? {} : { detail: 'alternativ' }),
+            })
+        }
+    }
+    for (const style of snapshot.styles ?? []) {
+        if (!used.has(style.id)) {
+            rows.push({ type: 'style', kind: 'Stil', name: style.name, group: 'map', depth: 1, detail: 'von keiner Ebene benutzt' })
+        }
+    }
+    return rows
 }
 
 /** Demo data the share can take along: the streams per source, or why none could be read. */
@@ -727,6 +782,7 @@ export async function inspectExportSource(datasetId: string): Promise<{
                 ...snapshot.mappings.map((row) => ({ type: 'mapping' as const, kind: 'Mapping', name: row.urn })),
                 ...snapshot.sinks.map((row) => ({ type: 'sink' as const, kind: 'Datensenke', name: row.name })),
                 ...snapshot.pipelines.map((row) => ({ type: 'pipeline' as const, kind: 'Pipeline', name: row.name })),
+                ...mapArtifacts(snapshot),
             ],
             warnings: snapshot.warnings,
             demo: await demoInventory(snapshot),

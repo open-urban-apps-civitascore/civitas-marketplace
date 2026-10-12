@@ -78,6 +78,39 @@ export interface SnapshotMapping {
     document: Record<string, unknown>
 }
 
+/** A named API of the dataset (`namedApis` of the dataset output), e.g. an OWS map service. */
+export interface SnapshotApi {
+    name: string
+    slug: string
+    standard: string
+    version?: string
+    description?: string
+}
+
+export interface SnapshotStyle {
+    id: string
+    name: string
+    sldContent: string
+}
+
+/** A map layer as the platform returns it: its sink and styles by id, which the package names by title and name. */
+export interface SnapshotLayer {
+    id: string
+    layerName: string
+    title?: string
+    description?: string
+    keywords: string[]
+    attribute: string[]
+    geometryColumnRef?: string
+    cqlFilter?: string
+    dataSinkId?: string
+    defaultStyleId?: string
+    alternativeStyleIds: string[]
+    crs?: string
+    nativeBoundingBox?: Record<string, unknown>
+    latLonBoundingBox?: Record<string, unknown>
+}
+
 export interface InstanceSnapshot {
     dataset: { id: string; name: string; description?: string }
     pipelines: SnapshotPipeline[]
@@ -85,6 +118,10 @@ export interface InstanceSnapshot {
     sinks: SnapshotSink[]
     structures: SnapshotStructure[]
     mappings: SnapshotMapping[]
+    /** The geo members: named APIs, and the styles and layers that publish the dataset's sinks. */
+    apis?: SnapshotApi[]
+    styles?: SnapshotStyle[]
+    layers?: SnapshotLayer[]
     /** What could not be resolved — surfaced in the preview, never silently dropped. */
     warnings: string[]
 }
@@ -282,6 +319,82 @@ function versionSummary(value: unknown): { versionId: string; dataStructureId: s
     return { versionId: value.id, dataStructureId: value.dataStructureId }
 }
 
+const optionalString = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() ? value : undefined
+
+const stringList = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : [])
+
+/**
+ * The dataset's named APIs from its own output, which lists them in every
+ * status. The discovery endpoint `/datasets/{id}/apis` would answer an empty
+ * list for a draft, and a draft is a fine thing to share.
+ */
+function namedApisOf(dataset: Record<string, unknown>): SnapshotApi[] {
+    const rows = Array.isArray(dataset.namedApis) ? dataset.namedApis : []
+    return rows.flatMap((row) => {
+        if (!isRecord(row) || !optionalString(row.slug) || !optionalString(row.standard)) return []
+        const slug = row.slug as string
+        return [
+            {
+                name: optionalString(row.name) ?? slug,
+                slug,
+                standard: row.standard as string,
+                version: optionalString(row.version),
+                description: optionalString(row.description),
+            },
+        ]
+    })
+}
+
+/**
+ * The dataset's styles and layers. An instance whose platform predates them
+ * answers 404 (an empty list here) or refuses; that costs the export its map,
+ * not the whole package, so a refusal becomes a warning.
+ */
+async function readGeoMembers(
+    accessToken: string,
+    datasetId: string,
+    warnings: string[],
+): Promise<{ styles: SnapshotStyle[]; layers: SnapshotLayer[] }> {
+    const read = async (kind: 'styles' | 'layers') => {
+        try {
+            return await listPages<Record<string, unknown>>(accessToken, `/v1/datasets/${datasetId}/${kind}`)
+        } catch (error) {
+            if (!(error instanceof PortalReadError)) throw error
+            warnings.push(`${kind === 'styles' ? 'Stile' : 'Kartenebenen'} konnten nicht gelesen werden: ${error.message}`)
+            return []
+        }
+    }
+    const styles = (await read('styles')).flatMap((dto) =>
+        optionalString(dto.name) && optionalString(dto.sldContent)
+            ? [{ id: String(dto.id), name: dto.name as string, sldContent: dto.sldContent as string }]
+            : [],
+    )
+    const layers = (await read('layers')).flatMap((dto): SnapshotLayer[] => {
+        const layerName = optionalString(dto.layerName)
+        if (!layerName) return []
+        return [
+            {
+                id: String(dto.id),
+                layerName,
+                title: optionalString(dto.title),
+                description: optionalString(dto.description),
+                keywords: stringList(dto.keywords),
+                attribute: stringList(dto.attribute),
+                geometryColumnRef: optionalString(dto.geometryColumnRef),
+                cqlFilter: optionalString(dto.cqlFilter),
+                dataSinkId: optionalString(dto.dataSinkId),
+                defaultStyleId: optionalString(dto.defaultStyleId),
+                alternativeStyleIds: stringList(dto.alternativeStyleIds),
+                crs: optionalString(dto.crs),
+                nativeBoundingBox: isRecord(dto.nativeBoundingBox) ? dto.nativeBoundingBox : undefined,
+                latLonBoundingBox: isRecord(dto.latLonBoundingBox) ? dto.latLonBoundingBox : undefined,
+            },
+        ]
+    })
+    return { styles, layers }
+}
+
 const DATASET_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
 
 export function isSafeDatasetId(datasetId: string): boolean {
@@ -444,6 +557,8 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         connector.structureVersionId = knownStructure(ref)?.versionId
     }
 
+    const { styles, layers } = await readGeoMembers(accessToken, datasetId, warnings)
+
     return {
         dataset: {
             id: String(dataset.id),
@@ -455,6 +570,9 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         sinks,
         structures: [...structures.values()],
         mappings,
+        apis: namedApisOf(dataset),
+        styles,
+        layers,
         warnings,
     }
 }

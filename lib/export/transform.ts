@@ -20,6 +20,8 @@ import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
  *   - addresses: the instance's broker and database hosts give way to the
  *     neutral defaults the catalogue's packages carry; the receiving
  *     instance sets its own through the same install parameters
+ *   - maps: a layer's sink and style ids become the sink's title and the
+ *     styles' names, the references the install binds again
  */
 
 export interface ExportOptions {
@@ -385,6 +387,64 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         simulationMembers.push({ file })
     }
 
+    // ── Geo members: named APIs, styles, and the layers that publish a sink ──
+    // None carries an identity in a package; the install derives theirs. A layer
+    // names its sink by title and its styles by name, the way the install binds them.
+    const apiMembers: PackageMember[] = []
+    for (const api of snapshot.apis ?? []) {
+        const file = nameFile(api.slug, 'api')
+        files[`core-ir/${file}`] = json({
+            name: api.name,
+            slug: api.slug,
+            standard: api.standard,
+            ...(api.version ? { version: api.version } : {}),
+            ...(api.description ? { description: api.description } : {}),
+        })
+        apiMembers.push({ file })
+    }
+    const styleNameById = new Map<string, string>()
+    const styleMembers: PackageMember[] = []
+    for (const style of snapshot.styles ?? []) {
+        styleNameById.set(style.id, style.name)
+        const file = nameFile(style.name, 'style')
+        files[`core-ir/${file}`] = json({ name: style.name, sldContent: style.sldContent })
+        styleMembers.push({ file })
+    }
+    const sinkTitleById = new Map(snapshot.sinks.map((sink) => [sink.id, sink.name]))
+    const layerMembers: PackageMember[] = []
+    for (const layer of snapshot.layers ?? []) {
+        const file = nameFile(layer.layerName, 'layer')
+        const sinkRef = layer.dataSinkId ? sinkTitleById.get(layer.dataSinkId) : undefined
+        if (!sinkRef) {
+            // The install refuses a layer without its sink, so it stays home and says why.
+            warnings.push(`Kartenebene ${layer.layerName}: ihre Senke ist nicht Teil des Pakets, die Ebene wird ausgelassen`)
+            continue
+        }
+        const styleRef = (id: string) => {
+            const name = styleNameById.get(id)
+            if (!name) warnings.push(`${file}: Stil ${id} ist nicht Teil des Pakets, der Verweis entfällt`)
+            return name
+        }
+        const defaultStyleRef = layer.defaultStyleId ? styleRef(layer.defaultStyleId) : undefined
+        const alternativeStyleRefs = layer.alternativeStyleIds.map(styleRef).filter((name): name is string => !!name)
+        files[`core-ir/${file}`] = json({
+            layerName: layer.layerName,
+            ...(layer.title ? { title: layer.title } : {}),
+            ...(layer.description ? { description: layer.description } : {}),
+            ...(layer.keywords.length ? { keywords: layer.keywords } : {}),
+            sinkRef,
+            ...(layer.attribute.length ? { attribute: layer.attribute } : {}),
+            ...(layer.geometryColumnRef ? { geometryColumnRef: layer.geometryColumnRef } : {}),
+            ...(layer.cqlFilter ? { cqlFilter: layer.cqlFilter } : {}),
+            ...(defaultStyleRef ? { defaultStyleRef } : {}),
+            ...(alternativeStyleRefs.length ? { alternativeStyleRefs } : {}),
+            ...(layer.crs ? { crs: layer.crs } : {}),
+            ...(layer.nativeBoundingBox ? { nativeBoundingBox: layer.nativeBoundingBox } : {}),
+            ...(layer.latLonBoundingBox ? { latLonBoundingBox: layer.latLonBoundingBox } : {}),
+        })
+        layerMembers.push({ file })
+    }
+
     const manifest: PackageManifest = {
         ...exportMetadataSchema.parse(options.metadata ?? {}),
         id: `urn:${publisher}:usecase:${options.slug}`,
@@ -403,6 +463,9 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             pipelines: pipelineMembers,
             simulations: simulationMembers,
             dashboards: [],
+            ...(apiMembers.length ? { apis: apiMembers } : {}),
+            ...(styleMembers.length ? { styles: styleMembers } : {}),
+            ...(layerMembers.length ? { layers: layerMembers } : {}),
         },
         dependencies: [],
     }

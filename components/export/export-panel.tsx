@@ -144,7 +144,10 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 : inventory.error ? <><p role="alert" className="text-sm text-error">{inventory.error}</p><button type="button" className={buttonClass('secondary')} onClick={reloadInventory}>Erneut laden</button></>
                 : <>
                     {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
-                        {inventory.artifacts.map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
+                        {inventory.artifacts.filter((item) => item.group !== 'map').map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
+                        {/* The map's members as one group: API, its layers indented, their styles under them. */}
+                        {inventory.artifacts.some((item) => item.group === 'map') && <li className="pb-1 pt-4 text-sm font-semibold">Karte</li>}
+                        {inventory.artifacts.filter((item) => item.group === 'map').map((item, index) => <li key={`map-${index}`} className={`flex flex-wrap justify-between gap-2 py-3 text-sm ${item.depth === 2 ? 'pl-10' : item.depth === 1 ? 'pl-5' : ''}`}><span className="min-w-0 break-all">{item.name}{item.detail && <span className="block text-xs text-muted-foreground">{item.detail}</span>}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
                     </ul> : <p className="text-sm text-warn">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</p>}
                     {lacksStructure && <p className="text-sm text-warn">Ohne eigene Datenstruktur kann der Use Case nicht geteilt werden - die Paketprüfung verlangt mindestens eine.</p>}
                     {!!inventory.warnings.length && <List title="Hinweise zum Bestand" items={inventory.warnings} tone="warn" />}
