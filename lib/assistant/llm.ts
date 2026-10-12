@@ -1,8 +1,10 @@
 /**
- * One call to a language model, with the proposal tool offered. Anthropic by
- * default; with only OPENAI_API_KEY set, OpenAI. Plain fetch, no SDK: this is a
- * demo spike and should not add dependencies. ASSISTANT_MODEL overrides the
- * model of either provider.
+ * The conversation with the language model: Anthropic's Messages API over
+ * plain fetch (no SDK, this is a spike), with tools. `runConversation` keeps
+ * calling while the model asks for READ tools and hands their results back;
+ * it stops at the first plain answer or at the first call of a FINAL tool (a
+ * proposal), which the caller turns into a plan card. ASSISTANT_MODEL
+ * overrides the model.
  */
 
 export interface ChatTurn {
@@ -10,101 +12,105 @@ export interface ChatTurn {
     content: string
 }
 
-export interface ModelAnswer {
+export interface ToolSpec {
+    name: string
+    description: string
+    input_schema: Record<string, unknown>
+}
+
+type ContentBlock =
+    | { type: 'text'; text: string }
+    | { type: 'tool_use'; id: string; name: string; input: unknown }
+    | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+
+interface ApiMessage {
+    role: 'user' | 'assistant'
+    content: string | ContentBlock[]
+}
+
+export interface ConversationResult {
     text: string
-    /** The proposal tool's input, when the model chose to call it. */
-    toolInput?: unknown
+    /** The final tool the model chose, with its input. */
+    final?: { name: string; input: unknown }
+    /** Read tools used on the way, for the chat to show what was looked up. */
+    lookups: string[]
 }
 
-export const TOOL_NAME = 'datenstruktur_vorschlagen'
+/** A read tool answers with text the model reads; it must not throw for a wrong input. */
+export type ReadTool = ToolSpec & { run: (input: unknown) => Promise<string> }
 
-const TOOL_DESCRIPTION =
-    'Schlägt eine neue Datenstruktur für CIVITAS/CORE vor. Nur aufrufen, wenn die Person eigene Daten beschreibt, die angelegt werden sollen, und kein Katalog-Eintrag passt oder sie ausdrücklich etwas Eigenes will.'
+const MAX_ROUNDS = 6
 
-export async function callModel(
-    system: string,
-    turns: ChatTurn[],
-    toolSchema: Record<string, unknown>,
-): Promise<ModelAnswer> {
-    if (process.env.ANTHROPIC_API_KEY) return callAnthropic(system, turns, toolSchema)
-    if (process.env.OPENAI_API_KEY) return callOpenAI(system, turns, toolSchema)
-    throw new Error('Kein Schlüssel für ein Sprachmodell: ANTHROPIC_API_KEY oder OPENAI_API_KEY in .env.local setzen.')
-}
-
-async function callAnthropic(
-    system: string,
-    turns: ChatTurn[],
-    toolSchema: Record<string, unknown>,
-): Promise<ModelAnswer> {
+async function callModel(system: string, messages: ApiMessage[], tools: ToolSpec[]): Promise<ContentBlock[]> {
+    const key = process.env.ANTHROPIC_API_KEY
+    if (!key) throw new Error('Kein Schlüssel für das Sprachmodell: ANTHROPIC_API_KEY in .env.local setzen.')
     const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-            'x-api-key': process.env.ANTHROPIC_API_KEY ?? '',
+            'x-api-key': key,
             'anthropic-version': '2023-06-01',
             'content-type': 'application/json',
         },
         body: JSON.stringify({
             model: process.env.ASSISTANT_MODEL || 'claude-sonnet-5-5',
-            max_tokens: 4096,
+            max_tokens: 8192,
             system,
-            messages: turns,
-            tools: [{ name: TOOL_NAME, description: TOOL_DESCRIPTION, input_schema: toolSchema }],
+            messages,
+            tools,
         }),
         cache: 'no-store',
     })
     if (!response.ok) {
         throw new Error(`Anthropic ${response.status}: ${(await response.text()).slice(0, 300)}`)
     }
-    const body = (await response.json()) as {
-        content: { type: string; text?: string; name?: string; input?: unknown }[]
-    }
-    const text = body.content
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text ?? '')
-        .join('\n')
-        .trim()
-    const tool = body.content.find((block) => block.type === 'tool_use' && block.name === TOOL_NAME)
-    return { text, toolInput: tool?.input }
+    const body = (await response.json()) as { content: ContentBlock[] }
+    return body.content
 }
 
-async function callOpenAI(
+export async function runConversation(
     system: string,
     turns: ChatTurn[],
-    toolSchema: Record<string, unknown>,
-): Promise<ModelAnswer> {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY ?? ''}`,
-            'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-            model: process.env.ASSISTANT_MODEL || 'gpt-4.1',
-            messages: [{ role: 'system', content: system }, ...turns],
-            tools: [
-                {
-                    type: 'function',
-                    function: { name: TOOL_NAME, description: TOOL_DESCRIPTION, parameters: toolSchema },
-                },
-            ],
-        }),
-        cache: 'no-store',
-    })
-    if (!response.ok) {
-        throw new Error(`OpenAI ${response.status}: ${(await response.text()).slice(0, 300)}`)
-    }
-    const body = (await response.json()) as {
-        choices: {
-            message: {
-                content?: string | null
-                tool_calls?: { function: { name: string; arguments: string } }[]
+    readTools: ReadTool[],
+    finalTools: ToolSpec[],
+): Promise<ConversationResult> {
+    const messages: ApiMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }))
+    const tools: ToolSpec[] = [
+        ...readTools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
+        ...finalTools,
+    ]
+    const lookups: string[] = []
+    const texts: string[] = []
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+        const content = await callModel(system, messages, tools)
+        for (const block of content) {
+            if (block.type === 'text' && block.text.trim()) texts.push(block.text.trim())
+        }
+        const uses = content.filter((block): block is Extract<ContentBlock, { type: 'tool_use' }> => block.type === 'tool_use')
+
+        const final = uses.find((use) => finalTools.some((tool) => tool.name === use.name))
+        if (final) return { text: texts.join('\n\n'), final: { name: final.name, input: final.input }, lookups }
+        if (uses.length === 0) return { text: texts.join('\n\n'), lookups }
+
+        // Read tools: run them, hand the results back, and ask again.
+        messages.push({ role: 'assistant', content })
+        const results: ContentBlock[] = []
+        for (const use of uses) {
+            const tool = readTools.find((candidate) => candidate.name === use.name)
+            lookups.push(use.name)
+            try {
+                const output = tool ? await tool.run(use.input) : `Unbekanntes Werkzeug ${use.name}`
+                results.push({ type: 'tool_result', tool_use_id: use.id, content: output.slice(0, 20000) })
+            } catch (error) {
+                results.push({
+                    type: 'tool_result',
+                    tool_use_id: use.id,
+                    content: error instanceof Error ? error.message : String(error),
+                    is_error: true,
+                })
             }
-        }[]
+        }
+        messages.push({ role: 'user', content: results })
     }
-    const message = body.choices[0]?.message
-    const call = message?.tool_calls?.find((candidate) => candidate.function.name === TOOL_NAME)
-    return {
-        text: message?.content?.trim() ?? '',
-        toolInput: call ? JSON.parse(call.function.arguments) : undefined,
-    }
+    return { text: [...texts, '(Abgebrochen: zu viele Nachschlage-Schritte.)'].join('\n\n'), lookups }
 }
