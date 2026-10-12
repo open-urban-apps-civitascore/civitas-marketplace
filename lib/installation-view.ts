@@ -1,5 +1,6 @@
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
 import { readAllInstallations } from '@/lib/installation-list'
+import { installationMapHref, packageMapOf } from '@/lib/installation-map'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import type { ActiveInstallation } from '@/lib/installations'
 import { getAccessToken } from '@/lib/session'
@@ -34,6 +35,8 @@ export interface InstallationView {
     dataset: DatasetOverview | null
     dashboards: InstalledDashboardLink[]
     streams: InstalledStreams
+    /** The map page, when the package publishes a layer on an OWS API. */
+    map: { href: string; title: string } | null
 }
 
 /** Null: simulator not configured or not reachable. Empty: reachable, no streams for this installation. */
@@ -62,10 +65,11 @@ export async function loadInstallationView(installationId: string): Promise<Inst
         ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
         hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
     }
-    const [dataset, dashboards, streams] = await Promise.all([
+    const [dataset, dashboards, streams, packageMap] = await Promise.all([
         row.dataSetId ? fetchDatasetOverview(row.dataSetId, accessToken) : Promise.resolve(null),
         row.packageId ? fetchInstalledDashboards(row.packageId, row.id) : Promise.resolve([]),
         readInstallationStreams(row.id),
+        row.packageId && row.dataSetId ? packageMapOf(row.packageId) : Promise.resolve(null),
     ])
 
     return {
@@ -77,5 +81,6 @@ export async function loadInstallationView(installationId: string): Promise<Inst
         dataset,
         dashboards,
         streams,
+        map: packageMap ? { href: installationMapHref(row.id), title: packageMap.layerTitle } : null,
     }
 }

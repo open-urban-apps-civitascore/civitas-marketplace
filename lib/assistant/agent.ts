@@ -156,7 +156,7 @@ export async function buildAssistantAgent() {
             ...readTools,
             use_case_vorschlagen: tool({
                 description:
-                    'Schlägt einen ganzen Anwendungsfall vor: Datenstrukturen, MQTT-Datenquelle, Datensatz, Mapping, PostGIS-Senke, Pipeline, passende Demodaten und ein Start-Dashboard in Superset (Nachrichten pro Minute und bis zu vier Messwerte, je Station eine Linie; Mengen summiert, Zustände gemittelt, je nach aggregate). Das Dashboard ist ein Entwurf zum Anpassen, kein fertiger Bericht.',
+                    'Schlägt einen ganzen Anwendungsfall vor: Datenstrukturen, MQTT-Datenquelle, Datensatz, Mapping, PostGIS-Senke, Pipeline, passende Demodaten und ein Start-Dashboard in Superset (Nachrichten pro Minute und bis zu vier Messwerte, je Station eine Linie; Mengen summiert, Zustände gemittelt, je nach aggregate). Das Dashboard ist ein Entwurf zum Anpassen, kein fertiger Bericht. Dazu eine Karte der Stationen als OWS-API (WMS und WFS) mit Stil und Ebene, Ausschnitt um die Stationen.',
                 inputSchema: schemaOf(USE_CASE_TOOL_SCHEMA),
                 execute: (input: unknown) => planUseCase(input),
             }),

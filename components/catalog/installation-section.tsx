@@ -8,6 +8,8 @@ import {
     FolderOpen,
     Layers,
     LayoutDashboard,
+    MapIcon,
+    MapPin,
     Radio,
     TriangleAlert,
     type LucideIcon,
@@ -44,6 +46,7 @@ const TONES = {
     simulator: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
     platform: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
     dashboards: 'bg-sky-500/10 text-sky-700 dark:text-sky-400',
+    map: 'bg-violet-500/10 text-violet-700 dark:text-violet-400',
 } as const
 
 /**
@@ -67,12 +70,15 @@ export function InstallationSection({
     dashboards,
     streams,
     simulatorUiBase,
+    map,
 }: {
     installation: ActiveInstallation
     dataset: DatasetOverview | null
     dashboards: InstalledDashboardLink[]
     streams: InstallationStream[] | null
     simulatorUiBase?: string
+    /** The map page, when the package publishes a layer. */
+    map?: { href: string; title: string } | null
 }) {
     const blocker = uninstallBlocker(dataset)
     // A release sets AVAILABLE at once; its pipeline runs only once the
@@ -172,6 +178,30 @@ export function InstallationSection({
                             }
                         />
                     )}
+                </SystemGroup>
+            ),
+        })
+    }
+
+    if (map) {
+        groups.push({
+            key: 'map',
+            node: (
+                <SystemGroup icon={MapIcon} tone="map" title="Karte" subtitle="OWS-API (WMS und WFS)">
+                    <Item
+                        icon={<MapPin className="size-4" />}
+                        kind="Ebene"
+                        name={map.title}
+                        href={map.href}
+                        target="Karte"
+                        note={
+                            releasing
+                                ? 'Zeigt Punkte, sobald die Freigabe abgeschlossen ist.'
+                                : awaitingRelease
+                                  ? 'Zeigt Punkte erst nach der Freigabe des Datensatzes.'
+                                  : undefined
+                        }
+                    />
                 </SystemGroup>
             ),
         })

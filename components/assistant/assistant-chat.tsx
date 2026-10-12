@@ -34,6 +34,9 @@ const EXAMPLES = [
 /** The installed page, opened at one installation (see the installed page's modal). */
 const installationHref = (installationId: string) => `/installed?installation=${encodeURIComponent(installationId)}`
 
+/** The installation's map page (see lib/installation-map, which this file cannot import: it runs on the server). */
+const mapHref = (installationId: string) => `/karte/${encodeURIComponent(installationId)}`
+
 type Part = UIMessage['parts'][number]
 
 function toolNameOf(part: { type: string; toolName?: string }): string {
@@ -48,10 +51,12 @@ function toolNameOf(part: { type: string; toolName?: string }): string {
  * it has to arrive at once and carry the exact id, and it still lands in the
  * history, so the model knows about the install in the next turn.
  */
-function installReport(title: string, result: InstallResult): string {
+function installReport(title: string, result: InstallResult, hasMap: boolean): string {
+    const id = result.installationId ?? ''
     const lines = [
-        `**Installiert:** „${title}“. [Übersicht der Installation öffnen ↗](${installationHref(result.installationId ?? '')}): Datensatz, Demo-Ströme und Dashboard auf einen Blick.`,
+        `**Installiert:** „${title}“. [Übersicht der Installation öffnen ↗](${installationHref(id)}): Datensatz, Demo-Ströme und Dashboard auf einen Blick.`,
     ]
+    if (hasMap) lines.push('', `[Karte der Stationen öffnen ↗](${mapHref(id)}): Punkte erscheinen nach der Freigabe.`)
     const problems = result.detail
         .split(' · ')
         .map((segment) => segment.trim())
@@ -90,13 +95,16 @@ export function AssistantChat() {
         inputRef.current?.focus()
     }
 
-    function reportInstall(title: string, result: InstallResult) {
+    function reportInstall(title: string, result: InstallResult, hasMap = false) {
         if (!result.installationId) return
         const id = `installed-${result.installationId}`
         setMessages((current) =>
             current.some((message) => message.id === id)
                 ? current
-                : [...current, { id, role: 'assistant', parts: [{ type: 'text', text: installReport(title, result) }] }],
+                : [
+                      ...current,
+                      { id, role: 'assistant', parts: [{ type: 'text', text: installReport(title, result, hasMap) }] },
+                  ],
         )
     }
 
@@ -196,8 +204,8 @@ function AssistantPart({
     part: Part
     onSend: (text: string) => void
     onAdjust: () => void
-    /** A plan was installed: the chat answers with a link to the installation. */
-    onInstalled: (title: string, result: InstallResult) => void
+    /** A plan was installed: the chat answers with a link to the installation (and its map, if it has one). */
+    onInstalled: (title: string, result: InstallResult, hasMap?: boolean) => void
     /** Set on the latest answer: its numbered options become clickable. */
     onChoose?: (choice: string) => void
 }) {
@@ -313,7 +321,7 @@ function UseCaseCard({
 }: {
     plan: UseCasePlan
     onAdjust: () => void
-    onInstalled: (title: string, result: InstallResult) => void
+    onInstalled: (title: string, result: InstallResult, hasMap?: boolean) => void
 }) {
     const [options, setOptions] = useState<InstallOptions | null>(null)
     const [optionsError, setOptionsError] = useState<string | null>(null)
@@ -400,7 +408,9 @@ function UseCaseCard({
                         triggerLabel="Plan bestätigen …"
                         datapoolNamePrefix="[AI-Assistant] "
                         installationHref={installationHref}
-                        onInstalled={(result) => onInstalled(plan.title, result)}
+                        onInstalled={(result) =>
+                            onInstalled(plan.title, result, steps.some((step) => step.kind === 'Karte'))
+                        }
                     />
                 ) : (
                     <span className="inline-flex items-center gap-1.5 px-1 py-1.5 text-xs text-muted-foreground">
