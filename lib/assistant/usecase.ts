@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { buildStarterDashboard } from '@/lib/assistant/dashboard'
 import { describeGenerator } from '@/lib/assistant/describe'
+import { buildUseCaseMap } from '@/lib/assistant/map'
 import { ASSISTANT_PACKAGE_PREFIX } from '@/lib/assistant/store'
 import { compactName, deriveDisambiguator, slugify, urnSegment } from '@/lib/export/urn'
 
@@ -89,7 +90,7 @@ export const USE_CASE_TOOL_SCHEMA: Record<string, unknown> = {
         fields: {
             type: 'array',
             description:
-                'Die Felder einer Nachricht. Immer dabei: die Kennung der Station (generator.kind "station") und der Zeitpunkt (dateTime true, generator.kind "now"). Für Standorte Breiten- und Längengrad mit "stationLat" und "stationLon".',
+                'Die Felder einer Nachricht. Immer dabei: die Kennung der Station (generator.kind "station"), der Zeitpunkt (dateTime true, generator.kind "now") sowie Breiten- und Längengrad der Station (generator.kind "stationLat" und "stationLon"); aus den Koordinaten entsteht die Karte.',
             items: {
                 type: 'object',
                 properties: {
@@ -183,6 +184,15 @@ function targetProperty(field: Field): Record<string, unknown> {
     return { type: field.type, description: field.description }
 }
 
+/**
+ * Where a station stands, as its demo data send it. The model gives
+ * coordinates; without them the stations line up in Münster. The map's
+ * bounding box is computed from the same values, so the two cannot drift apart.
+ */
+function stationCoordinates(station: Station, index: number): { lat: number; lon: number } {
+    return { lat: station.lat ?? 51.96 + index * 0.004, lon: station.lon ?? 7.63 + index * 0.006 }
+}
+
 /** One stream's generator for a field, in the simulator's own vocabulary. */
 function generatorFor(field: Field, station: Station, index: number): Record<string, unknown> {
     const g = field.generator
@@ -191,9 +201,9 @@ function generatorFor(field: Field, station: Station, index: number): Record<str
         case 'station':
             return { kind: 'constant', value: station.id }
         case 'stationLat':
-            return { kind: 'constant', value: station.lat ?? 51.96 + index * 0.004 }
+            return { kind: 'constant', value: stationCoordinates(station, index).lat }
         case 'stationLon':
-            return { kind: 'constant', value: station.lon ?? 7.63 + index * 0.006 }
+            return { kind: 'constant', value: stationCoordinates(station, index).lon }
         case 'now':
             return { kind: 'now' }
         case 'constant':
@@ -257,7 +267,13 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
     }
     const required = fields.filter((field) => field.required || field.generator.kind === 'station' || field.dateTime).map((field) => field.key)
 
-    const structure = (structureTitle: string, description: string, property: (field: Field) => Record<string, unknown>, id: string) => ({
+    const structure = (
+        structureTitle: string,
+        description: string,
+        property: (field: Field) => Record<string, unknown>,
+        id: string,
+        extra: Record<string, Record<string, unknown>> = {},
+    ) => ({
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         $id: id,
         title: structureTitle,
@@ -265,7 +281,7 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
         $defs: {
             [messageDef]: {
                 type: 'object',
-                properties: Object.fromEntries(fields.map((field) => [field.key, property(field)])),
+                properties: { ...Object.fromEntries(fields.map((field) => [field.key, property(field)])), ...extra },
                 ...(required.length ? { required } : {}),
             },
         },
@@ -276,10 +292,18 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
     const targetUrn = urn('datastructure', title)
     const mappingUrn = urn('mapping', mappingName)
     const dashboard = buildStarterDashboard({ seed: packageId, title, tableName, fields, now })
+    const map = buildUseCaseMap({
+        title,
+        sinkTitle,
+        fields,
+        stations: proposal.stations.map((station, index) => stationCoordinates(station, index)),
+    })
+    // Only the target format carries the geometry: the devices send coordinates, the mapping makes the point.
+    const positionProperty: Record<string, Record<string, unknown>> = map ? { [map.positionKey]: map.positionProperty } : {}
 
     const files: Record<string, Record<string, unknown>> = {
         'rohformat.datastructure.json': structure(rawTitle, `Nachricht, wie die Geräte sie senden: ${proposal.description}`, rawProperty, rawUrn),
-        'zielformat.datastructure.json': structure(title, proposal.description, targetProperty, targetUrn),
+        'zielformat.datastructure.json': structure(title, proposal.description, targetProperty, targetUrn, positionProperty),
         'feed.datasource.json': {
             $schema: 'https://civitasconnect.digital/core/datasource/v1',
             id: urn('datasource', sourceTitle),
@@ -294,19 +318,24 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
         'mapping.mapping.json': {
             mappingUrn,
             name: mappingName,
-            description: 'Übernimmt jedes Feld eins zu eins und gibt Zahlen ihren Typ.',
+            description: map
+                ? 'Übernimmt jedes Feld eins zu eins, gibt Zahlen ihren Typ und setzt die Koordinaten zu einem Punkt zusammen.'
+                : 'Übernimmt jedes Feld eins zu eins und gibt Zahlen ihren Typ.',
             document: {
                 title: mappingName,
                 source: rawUrn,
                 target: targetUrn,
-                fields: Object.fromEntries(
-                    fields.map((field) => {
-                        const input = `$.${field.key}`
-                        if (!field.dateTime && field.type === 'integer') return [`$.${field.key}`, { op: 'toInt', input }]
-                        if (!field.dateTime && field.type === 'number') return [`$.${field.key}`, { op: 'toFloat', input }]
-                        return [`$.${field.key}`, input]
-                    }),
-                ),
+                fields: {
+                    ...Object.fromEntries(
+                        fields.map((field) => {
+                            const input = `$.${field.key}`
+                            if (!field.dateTime && field.type === 'integer') return [`$.${field.key}`, { op: 'toInt', input }]
+                            if (!field.dateTime && field.type === 'number') return [`$.${field.key}`, { op: 'toFloat', input }]
+                            return [`$.${field.key}`, input]
+                        }),
+                    ),
+                    ...(map ? { [`$.${map.positionKey}`]: map.positionMapping } : {}),
+                },
             },
         },
         'tabelle.datasink.json': {
@@ -351,6 +380,7 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
         ...(dashboard
             ? { 'start.dashboard.json': dashboard.document as unknown as Record<string, unknown> }
             : {}),
+        ...(map ? map.files : {}),
     }
 
     const manifest = {
@@ -384,6 +414,7 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
             pipelines: [{ file: 'import.pipeline.json' }],
             simulations: [{ file: 'demo.simulation.json' }],
             ...(dashboard ? { dashboards: [{ file: 'start.dashboard.json' }] } : {}),
+            ...(map ? map.members : {}),
         },
         dependencies: [],
     }
@@ -404,6 +435,15 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
                 .map((field) => `${field.key}: ${describeGenerator(field)}`)
                 .join('; ')}`,
         },
+        ...(map
+            ? [
+                  {
+                      kind: 'Karte',
+                      title: `${title}: Stationen`,
+                      detail: `OWS-API „karte“ (WMS und WFS), Ebene „${map.layerName}“ mit ${proposal.stations.length} Station(en), Ausschnitt um die Stationen`,
+                  },
+              ]
+            : []),
         ...(dashboard
             ? [
                   {

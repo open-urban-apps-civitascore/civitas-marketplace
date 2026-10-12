@@ -322,6 +322,7 @@ export default async function InstalledPage({
                             dashboards={view.dashboards}
                             streams={view.streams}
                             simulatorUiBase={simulatorUiBase}
+                            map={view.map}
                         />
                     ) : (
                         <p className="text-sm text-muted-foreground">
