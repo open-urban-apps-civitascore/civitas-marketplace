@@ -1,6 +1,6 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
 import type { BundledSimulation, InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
-import type { InstanceSnapshot } from '@/lib/export/portal-reader'
+import type { InstanceSnapshot, SnapshotMapping } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
 
@@ -123,6 +123,20 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 function stringOr(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+/**
+ * A mapping's name in the package: its document title, or "Mapping 2" by its
+ * position. The share page names it the same way, so what it shows is what
+ * travels - never the instance's raw URN.
+ */
+export function mappingTitle(mapping: SnapshotMapping, index: number): string {
+    return stringOr(mapping.document.title, `Mapping ${index + 1}`)
+}
+
+/** Whether a mapping has no title of its own and gets the made-up one. */
+export function isUnnamedMapping(mapping: SnapshotMapping): boolean {
+    return stringOr(mapping.document.title, '') === ''
 }
 
 function json(value: unknown): string {
@@ -288,7 +302,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     const mappingMembers: PackageMember[] = []
     const mappingUrnMap = new Map<string, string>()
     for (const [index, mapping] of snapshot.mappings.entries()) {
-        const title = stringOr(mapping.document.title, `Mapping ${index + 1}`)
+        const title = mappingTitle(mapping, index)
         const kept = isCatalogAuthored(mapping.urn)
         const to = kept ? mapping.urn : catalogUrn(publisher, 'mapping', domain, title)
         mappingUrnMap.set(mapping.urn, to)

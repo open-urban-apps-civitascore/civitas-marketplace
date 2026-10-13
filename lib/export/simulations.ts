@@ -36,6 +36,14 @@ export interface DemoSource {
     /** The source's structure, for a link that starts a new stream from it. */
     structureUrn?: string
     streams: DemoStream[]
+    /**
+     * 'no-topic': an MQTT source that subscribes to nothing. A package derives
+     * each stream's topic from the subscription, so its streams cannot travel -
+     * known at once, instead of only when the package is built.
+     */
+    problem?: 'no-topic'
+    /** Where the source is fixed in the portal; built on the server, which knows the portal's address. */
+    portalHref?: string
 }
 
 type Transport = DemoSource['transport']
@@ -48,6 +56,15 @@ function transportOf(source: SnapshotSource): Transport | undefined {
 function topicsOf(source: SnapshotSource): string[] {
     const topics = source.configuration.topics
     return Array.isArray(topics) ? topics.filter((topic): topic is string => typeof topic === 'string') : []
+}
+
+/**
+ * The Topic a source's demo streams publish under: its first subscription. One
+ * rule for the inventory and the export, so a source the inventory offers is
+ * never one the export then leaves out. An empty string is no Topic.
+ */
+function subscriptionOf(source: SnapshotSource): string | undefined {
+    return topicsOf(source)[0] || undefined
 }
 
 /** MQTT filter matching: `+` stands for one level, a trailing `#` for any rest. */
@@ -106,6 +123,7 @@ export function demoSources(snapshot: InstanceSnapshot, details: SimulationDetai
             transport,
             ...(structure ? { structureUrn: logicalUrn(structure.modelUrn) } : {}),
             streams: streams.sort((a, b) => a.label.localeCompare(b.label, 'de')),
+            ...(transport === 'mqtt' && !subscriptionOf(source) ? { problem: 'no-topic' as const } : {}),
         }]
     })
 }
@@ -195,7 +213,7 @@ export function simulationMembers(
             }
             built = withMessageClass(sql, model)
         } else {
-            const subscription = topicsOf(source)[0]
+            const subscription = subscriptionOf(source)
             if (!subscription) {
                 warnings.push(`Demo-Daten für ${demo.name}: die Quelle abonniert kein Topic - ausgelassen`)
                 continue

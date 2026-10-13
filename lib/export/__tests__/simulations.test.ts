@@ -183,3 +183,20 @@ describe('simulationMembers', () => {
         ])
     })
 })
+
+describe('demoSources: a source without a Topic', () => {
+    it('is flagged at once, because its streams could not travel in a package', () => {
+        const withoutTopic = snapshot()
+        withoutTopic.sources[0]!.configuration = { urls: ['tcp://broker:1883'], topics: [] }
+        const [feed, db] = demoSources(withoutTopic, details)
+        expect(feed.problem).toBe('no-topic')
+        expect(db.problem).toBeUndefined()
+        expect(demoSources(snapshot(), details)[0]!.problem).toBeUndefined()
+    })
+
+    it('counts an empty Topic as none, like the export does', () => {
+        const emptyTopic = snapshot()
+        emptyTopic.sources[0]!.configuration = { urls: ['tcp://broker:1883'], topics: [''] }
+        expect(demoSources(emptyTopic, details)[0]!.problem).toBe('no-topic')
+    })
+})
