@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 'lucide-react'
+import { CircleCheck, ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 'lucide-react'
 import { exportAction, inspectExportSource, type DemoInventory, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { verificationLabel } from '@/lib/export/labels'
+import { mergeRequestRef, rememberShareResult, shareKey, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
@@ -89,8 +90,16 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const [metadata, setMetadata] = useState(() => metadataDraft(catalog?.metadata))
     const [targetKey, setTargetKey] = useState(targets[0]?.key ?? '')
     const forgeReady = readiness === 'ready' && targets.length > 0 && mayShare
+    // What is known about THIS version's merge requests, kept apart from the last result:
+    // "Status prüfen" overwrites that and "Steckbrief bearbeiten" clears it (lib/export/share-state).
+    // One entry per version, so previewing another version does not forget this one's merge request.
+    const currentShareKey = shareKey({ ...basics, targetKey })
+    const [shareStates, setShareStates] = useState<ShareStates>({})
+    const known = shareStates[currentShareKey] ?? {}
+    const bundleProposed = known.bundle?.state === 'mr-open' || known.bundle?.state === 'on-base'
+    const catalogProposed = known.catalog?.state === 'mr-open' || known.catalog?.state === 'listed'
     // The catalogue step needs the package on the base branch AND, by tree id, the merged one.
-    const bundleReady = result?.bundle?.state === 'on-base' && result.bundle.verification?.state === 'verified'
+    const bundleReady = known.bundle?.state === 'on-base' && known.bundle.verification?.state === 'verified'
     useEffect(() => {
         let cancelled = false
         inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
@@ -98,6 +107,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         return () => { cancelled = true }
     }, [source.id, inventoryAttempt])
     const run = (intent: ExportIntent) => startTransition(async () => {
+        // The version this request is about, even if the form changes while it runs.
+        const requestKey = currentShareKey
         const data = new FormData()
         for (const [key, value] of Object.entries(basics)) data.set(key, value)
         data.set('datasetId', source.id)
@@ -108,6 +119,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         try {
             const next = await exportAction(null, data)
             setResult(next)
+            setShareStates((previous) => rememberShareResult(previous, requestKey, next))
             if (next.preview) setPreview(next.preview)
             if (intent === 'preview' && next.status === 'ok') setStep(4)
         } catch {
@@ -157,7 +169,10 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         </section>}
         {step === 3 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
             <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
-                {source.notice && <p className="mt-2 text-sm text-muted-foreground">{source.notice}</p>}</div>
+                {source.notice && <p className="mt-2 text-sm text-muted-foreground">{source.notice}</p>}
+                {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
+                {known.bundle?.state === 'mr-open' && <p className="mt-2 text-sm text-muted-foreground">Für Version {basics.version} ist schon ein Merge Request offen{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst nach dem Merge oder nach dem Schließen des Merge Requests, dann mit einer neuen Version.</p>}
+                {known.bundle?.state === 'on-base' && <p className="mt-2 text-sm text-muted-foreground">Version {basics.version} ist schon im Repository. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</p>}</div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
@@ -191,15 +206,21 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             <Preview preview={preview} />
             <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={pending} className={buttonClass('secondary')} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</button>
-                <button type="button" disabled={pending || !forgeReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('bundle')}><GitPullRequest className="size-4" />Bundle-MR erstellen</button>
+                {/* Once proposed, a step shows its merge request instead of a button that would propose it again. */}
+                {bundleProposed
+                    ? <Done label={known.bundle?.state === 'on-base' ? 'Paket ist im Repository' : 'Zur Prüfung vorgeschlagen'} url={known.bundle?.mrUrl} />
+                    : <button type="button" disabled={pending || !forgeReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('bundle')}><GitPullRequest className="size-4" />Bundle-MR erstellen</button>}
                 <button type="button" disabled={pending || !forgeReady} className={buttonClass('secondary')} onClick={() => run('status')}><RefreshCw className="size-4" />Status prüfen</button>
-                <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>
+                {catalogProposed
+                    ? <Done label={known.catalog?.state === 'listed' ? 'Im Katalog' : 'Katalog-Eintrag vorgeschlagen'} url={known.catalog?.mrUrl} />
+                    : <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>}
             </div>
             <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unten unter „Geteilte Pakete“, ohne dieses Formular.</p>
         </>}
         {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
         {result && <div role={result.status === 'invalid' || result.status === 'error' || result.status === 'forbidden' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
-            {result.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
+            {/* Not twice: once a step shows its merge request, the result line does not repeat the link. */}
+            {result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
         </div>}
         {refused && <div className="flex flex-col gap-3">
             <List title="Paketprüfung" items={refused.errors} tone="error" />
@@ -214,6 +235,16 @@ function buttonClass(kind: 'primary' | 'secondary'): string {
     return kind === 'primary'
         ? `${base} bg-primary text-primary-foreground hover:opacity-90`
         : `${base} border text-foreground hover:bg-muted`
+}
+
+/** A step that is done: what happened, and its merge request to open. */
+function Done({ label, url }: { label: string; url?: string }) {
+    const ref = mergeRequestRef(url)
+    return <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-md border px-3 py-1.5 text-sm text-foreground">
+        <CircleCheck aria-hidden className="size-4 text-success" />{label}
+        {url && <><span aria-hidden className="text-muted-foreground">-</span>
+            <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">{ref ? `Merge Request ${ref} öffnen` : 'Merge Request öffnen'}<ExternalLink aria-hidden className="size-3" /></a></>}
+    </span>
 }
 
 function bundleLabel(state: string): string {
