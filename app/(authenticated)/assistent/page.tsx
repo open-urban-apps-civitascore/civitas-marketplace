@@ -18,8 +18,9 @@ export default async function AssistantPage() {
     }
 
     return (
-        <div className="flex flex-col gap-6">
-            <div>
+        // The page's full height, so the chat can keep its input at the bottom (see AssistantChat).
+        <div className="flex h-full flex-col gap-6">
+            <div className="shrink-0">
                 <h1>Assistent</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
                     Fragen zum Katalog stellen oder eigene Daten beschreiben. Der Assistent schlägt einen

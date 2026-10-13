@@ -109,7 +109,9 @@ export function AssistantChat() {
     }
 
     return (
-        <div className="flex max-w-3xl flex-col gap-4">
+        // The full height of the page: the history scrolls on its own, the input stays at the bottom.
+        <div className="flex min-h-0 w-full max-w-3xl flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4">
             {messages.length === 0 && (
                 <div className="flex flex-col gap-2">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Beispiele</p>
@@ -158,13 +160,14 @@ export function AssistantChat() {
             )}
             {error && <p className="text-xs text-error">{error.message}</p>}
             <div ref={endRef} />
+            </div>
 
             <form
                 onSubmit={(event) => {
                     event.preventDefault()
                     send(input)
                 }}
-                className="sticky bottom-0 z-10 flex items-end gap-2 border-t bg-background pb-4 pt-3"
+                className="flex shrink-0 items-end gap-2 border-t bg-background pt-3"
             >
                 <textarea
                     ref={inputRef}
