@@ -1,5 +1,7 @@
+import Link from 'next/link'
+
 import { ExportPanel } from '@/components/export/export-panel'
-import { SharedPackages } from '@/components/export/shared-packages'
+import { PageHeader } from '@/components/ui/layout'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -39,12 +41,16 @@ export default async function ExportPage() {
 
     return (
         <div className="flex flex-col gap-6">
-            <div>
-                <h1>Teilen</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    Wähle einen Use Case dieser Instanz aus, ergänze seinen Steckbrief und teile ihn mit anderen Kommunen.
-                </p>
-            </div>
+            <PageHeader
+                title="Teilen"
+                lead="Wähle einen Use Case dieser Instanz aus, ergänze seinen Steckbrief und teile ihn mit anderen Kommunen."
+                actions={
+                    // The list of what was shared lives on its own page (Ewa, 2026-10-13).
+                    <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
+                        Geteilte Pakete ansehen
+                    </Link>
+                }
+            />
 
             {readiness !== 'ready' && (
                 <p className="rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm text-warn dark:bg-warn/15">
@@ -79,9 +85,6 @@ export default async function ExportPage() {
                     }}
                 />
             )}
-
-            {/* The way back after a merge: the catalogue step from here needs no form. */}
-            {readiness === 'ready' && mayShare && <SharedPackages />}
         </div>
     )
 }

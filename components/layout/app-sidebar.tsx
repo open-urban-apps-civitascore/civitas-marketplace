@@ -42,7 +42,15 @@ const NAV_SECTIONS: NavSection[] = [
                 ],
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
-            { title: 'Teilen', href: '/export', icon: Share2 },
+            {
+                title: 'Teilen',
+                href: '/export',
+                icon: Share2,
+                children: [
+                    { title: 'Neu teilen', href: '/export' },
+                    { title: 'Geteilte Pakete', href: '/export/shared' },
+                ],
+            },
             { title: 'Assistent', href: '/assistent', icon: Sparkles },
         ],
     },

@@ -1,7 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { ExternalLink, GitMerge, Loader2, RefreshCw } from 'lucide-react'
+
+import { EmptyState } from '@/components/ui/layout'
 
 import {
     listSharedPackages,
@@ -27,7 +30,8 @@ const OUTCOME_STYLES: Record<ExportActionResult['status'], string> = {
  * The catalogue step lives here too, one click per merged and verified
  * package: it reads the merged manifest, so nobody fills in the export form
  * again days after the merge. Loaded after the page, because it asks GitLab
- * several questions per package.
+ * several questions per package. The page around it (/export/shared) carries
+ * the heading.
  */
 export function SharedPackages() {
     const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
@@ -70,16 +74,8 @@ export function SharedPackages() {
     }
 
     return (
-        <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <h2 className="text-xl font-semibold">Geteilte Pakete</h2>
-                    <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                        Über diesen Marketplace vorgeschlagen, neueste zuerst. Ist ein Paket gemergt und
-                        entspricht es auf dem Basisbranch genau dem gemergten Stand, lässt sich hier der
-                        Katalog-Eintrag vorschlagen, ohne den Steckbrief erneut auszufüllen.
-                    </p>
-                </div>
+        <div className="flex flex-col gap-4">
+            <div className="flex justify-end">
                 <button
                     type="button"
                     onClick={load}
@@ -103,9 +99,19 @@ export function SharedPackages() {
                     Stand wird bei GitLab abgefragt …
                 </p>
             ) : rows.length === 0 ? (
-                !error && <p className="text-sm text-muted-foreground">Noch nichts geteilt.</p>
+                !error && (
+                    <EmptyState
+                        action={
+                            <Link href="/export" className="font-medium text-primary underline-offset-2 hover:underline">
+                                Ersten Datensatz teilen
+                            </Link>
+                        }
+                    >
+                        Noch nichts geteilt.
+                    </EmptyState>
+                )
             ) : (
-                <ul className="divide-y rounded-lg border">
+                <ul className="divide-y rounded-lg border bg-card">
                     {rows.map((row) => (
                         <SharedRow
                             key={row.key}
@@ -118,7 +124,7 @@ export function SharedPackages() {
                     ))}
                 </ul>
             )}
-        </section>
+        </div>
     )
 }
 
