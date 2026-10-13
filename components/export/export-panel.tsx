@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { CircleCheck, Eye, GitMerge, GitPullRequest, RefreshCw } from 'lucide-react'
-import { exportAction, inspectExportSource, type DemoInventory, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
+import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { verificationLabel } from '@/lib/export/labels'
@@ -12,12 +12,12 @@ import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { MetadataForm } from '@/components/export/metadata-form'
+import { PackageContents } from '@/components/export/package-contents'
 import { Button, ExternalAnchor } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/layout'
+import { EmptyState, Section } from '@/components/ui/layout'
 import { InlineNotice, Notice, NoticeList, Pending } from '@/components/ui/notice'
 import { resultTone } from '@/lib/export/result-tone'
 import { Select } from '@/components/ui/select'
-import { newSimulationUiHref } from '@/lib/simulator/ui-links'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
@@ -103,7 +103,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     useEffect(() => {
         let cancelled = false
         inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
-            .catch(() => { if (!cancelled) setInventory({ artifacts: [], warnings: [], error: 'Bestand konnte nicht geladen werden. Bitte erneut versuchen.' }) })
+            // The notice around it already says what failed and offers "Erneut laden"; this names why.
+            .catch(() => { if (!cancelled) setInventory({ artifacts: [], warnings: [], error: 'Die Anfrage an den Server ist fehlgeschlagen.' }) })
         return () => { cancelled = true }
     }, [source.id, inventoryAttempt])
     const run = (intent: ExportIntent) => startTransition(async () => {
@@ -128,7 +129,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     })
     const editBasics = (key: keyof typeof basics, value: string) => setBasics({ ...basics, [key]: value })
     const reloadInventory = () => { setInventory(null); setInventoryAttempt((n) => n + 1) }
-    const demoChosen = (inventory?.demo?.sources ?? []).flatMap((demoSource) => demoSource.streams.map((stream) => stream.id)).filter((id) => !demoExcluded.has(id))
+    // A source without a Topic cannot take its streams along (see DemoSource.problem), so they are never sent.
+    const demoChosen = (inventory?.demo?.sources ?? []).filter((demoSource) => !demoSource.problem)
+        .flatMap((demoSource) => demoSource.streams.map((stream) => stream.id)).filter((id) => !demoExcluded.has(id))
     const toggleDemo = (id: string) => setDemoExcluded((excluded) => {
         const next = new Set(excluded)
         if (next.has(id)) next.delete(id)
@@ -136,12 +139,13 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         return next
     })
     // The package validator refuses a use case without a data structure of its own, so the
-    // inventory says so before the author fills in the whole form. An empty inventory has
-    // its own line already.
-    const lacksStructure = !!inventory?.artifacts.length && !inventory.artifacts.some((item) => item.type === 'structure')
+    // inventory says so before the author fills in the whole form - an empty inventory too,
+    // since it has none either. Not while the inventory is loading or failed to load.
+    const lacksStructure = !!inventory && !inventory.error && !inventory.artifacts.some((item) => item.type === 'structure')
     // A refused preview stays on step 3 and never reaches the step-4 view, yet the export's
     // warnings there usually name the cause (a source without a structure, say), so they
-    // are shown next to the errors.
+    // are shown next to the errors - in place of the general answer, which would only
+    // repeat that the check failed.
     const refused = step === 3 && result?.preview?.errors.length ? result.preview : undefined
     return <div className="flex flex-col gap-6">
         <Steps current={step} />
@@ -149,24 +153,25 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             <p className="text-sm"><span className="text-muted-foreground">Ausgewählt: </span><strong>{source.name}</strong></p>
             <Button variant="ghost" disabled={pending} onClick={onChoose}>Andere Auswahl (Eingaben verwerfen)</Button>
         </div>
-        {step === 2 && <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
-            <h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Was wird geteilt?</h2>
-            <p className="text-sm text-muted-foreground">Diese Artefakte sind aktuell mit dem Use Case verbunden. Die Vorschau liest den Bestand erneut und zeigt, welche Zugangsdaten entfernt werden.</p>
+        {step === 2 && <Section title="Was kommt ins Paket?" headingRef={stepHeading}
+            lead={<>Das gehört zum Datensatz „{source.name}“ - in der Reihenfolge, in der die Daten fließen.</>}>
             {!inventory ? <Pending>Bestand wird geladen …</Pending>
                 : inventory.error ? <Notice tone="error" title="Der Bestand konnte nicht gelesen werden" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
                 : <>
-                    {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
-                        {inventory.artifacts.filter((item) => item.group !== 'map').map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
-                        {/* The map's members as one group: API, its layers indented, their styles under them. */}
-                        {inventory.artifacts.some((item) => item.group === 'map') && <li className="pb-1 pt-4 text-sm font-semibold">Karte</li>}
-                        {inventory.artifacts.filter((item) => item.group === 'map').map((item, index) => <li key={`map-${index}`} className={`flex flex-wrap justify-between gap-2 py-3 text-sm ${item.depth === 2 ? 'pl-10' : item.depth === 1 ? 'pl-5' : ''}`}><span className="min-w-0 break-all">{item.name}{item.detail && <span className="block text-xs text-muted-foreground">{item.detail}</span>}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
-                    </ul> : <Notice tone="neutral">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</Notice>}
+                    <PackageContents source={source} artifacts={inventory.artifacts} demo={inventory.demo}
+                        demoExcluded={demoExcluded} onToggleDemo={toggleDemo} onReloadDemo={reloadInventory} />
                     {lacksStructure && <Notice tone="warn" title="Es fehlt eine eigene Datenstruktur">Ohne eigene Datenstruktur lässt sich das Paket nicht teilen - die Paketprüfung verlangt mindestens eine.</Notice>}
                     {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Bestand"><NoticeList items={inventory.warnings} /></Notice>}
-                    {inventory.demo && <DemoData demo={inventory.demo} excluded={demoExcluded} onToggle={toggleDemo} onReload={reloadInventory} />}
-                    <Button variant="primary" className="self-start" onClick={() => setStep(3)}>Steckbrief ergänzen</Button>
+                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-muted-foreground">Nicht im Paket: gespeicherte Daten, der Datenpool und Zugangsdaten.</p>
+                        {/* Blocked rather than refused later: the package check would turn it down after the whole form (Ewa's plan, 2026-10-13). */}
+                        <div className="flex flex-wrap items-center gap-3">
+                            {lacksStructure && <InlineNotice tone="warn" id="steckbrief-gesperrt">Geht erst mit einer eigenen Datenstruktur.</InlineNotice>}
+                            <Button variant="primary" disabled={lacksStructure} aria-describedby={lacksStructure ? 'steckbrief-gesperrt' : undefined} onClick={() => setStep(3)}>Weiter zum Steckbrief</Button>
+                        </div>
+                    </div>
                 </>}
-        </section>}
+        </Section>}
         {step === 3 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
             <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
                 <div className="mt-3 flex flex-col gap-2 empty:hidden">
@@ -194,7 +199,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><Select value={targetKey} onValueChange={setTargetKey} disabled={!targets.length} placeholder="Nicht konfiguriert - Vorschau verfügbar"
                         options={targets.map((target) => ({ value: target.key, label: `${target.label} · ${target.baseBranch}` }))} /></label>
                 </section>
-                <div className="flex flex-wrap gap-2"><Button onClick={() => setStep(2)}>Zurück zum Bestand</Button>
+                {/* The answer belongs to this step's form: back in the inventory it would describe a form no longer shown. */}
+                <div className="flex flex-wrap gap-2"><Button onClick={() => { setStep(2); setResult(null) }}>Zurück zum Bestand</Button>
                     <Button type="submit" variant="primary" icon={Eye} pending={pending}>Vorschau erstellen</Button></div>
             </fieldset>
         </form>}
@@ -222,12 +228,12 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         </>}
         {pending && <Pending>Anfrage wird verarbeitet …</Pending>}
         {/* Not twice: once a step shows its merge request, the answer does not repeat the link. */}
-        {result && <Notice tone={resultTone(result.status)} live
+        {result && !refused && <Notice tone={resultTone(result.status)} live
             action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
             <p className="whitespace-pre-wrap">{result.detail}</p>
         </Notice>}
         {refused && <div className="flex flex-col gap-3">
-            <Notice tone="error" title="Das Paket würde die Prüfung nicht bestehen"><NoticeList items={refused.errors} /></Notice>
+            <Notice tone="error" live title={`Das Paket würde die Prüfung nicht bestehen (${refused.errors.length} Fehler)`}><NoticeList items={refused.errors} /></Notice>
             {!!refused.warnings.length && <Notice tone="warn" title="Hinweise aus dem Export"><NoticeList items={refused.warnings} /></Notice>}
         </div>}
         {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.bundle.verification && <Badge label={`Prüfung: ${verificationLabel(result.bundle.verification)}`} url={result.bundle.verification.mergedMrUrl} />}{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
@@ -379,31 +385,4 @@ function MetadataReview({ metadata }: { metadata: MetadataDraft }) {
             <div key={field.path}><dt className="text-muted-foreground">{field.label}</dt><dd className="whitespace-pre-wrap break-words">{field.options?.[metadata.fields[field.path]] ?? metadata.fields[field.path]}</dd></div>)}
         {metadata.media.map((item, index) => <div key={index} className="sm:col-span-2"><dt className="text-muted-foreground">Bild {index + 1}</dt><dd className="break-all">{item.src}</dd><dd>{item.alt}</dd>{item.caption && <dd className="text-muted-foreground">{item.caption}</dd>}</div>)}
     </dl>
-}
-
-/**
- * Optional demo data: the simulator's streams that feed this use case's sources.
- * Demo data is written in the simulator, not here; a source without streams
- * links to the simulator's form, and "Erneut prüfen" picks up what was made.
- */
-function DemoData({ demo, excluded, onToggle, onReload }: { demo: DemoInventory; excluded: ReadonlySet<string>; onToggle: (id: string) => void; onReload: () => void }) {
-    return <div className="flex flex-col gap-3 border-t pt-4">
-        <h3 className="font-semibold">Demo-Daten</h3>
-        <p className="text-sm text-muted-foreground">Freiwillig. Angehakte Datenströme des Simulators kommen ins Paket, und eine Installation startet sie für ihre eigenen Datenquellen. Ohne Demo-Daten fließen nach der Installation erst Daten, wenn eine echte Quelle angebunden ist.</p>
-        {demo.problem ? <InlineNotice tone="neutral">{demo.problem}</InlineNotice>
-            : !demo.sources.length ? <p className="text-sm text-muted-foreground">Dieser Use Case hat keine MQTT- oder SQL-Quelle, für die der Simulator Daten erzeugen könnte.</p>
-            : demo.sources.map((demoSource) => <div key={demoSource.id} className="rounded-lg border p-3 text-sm">
-                <p className="font-medium">{demoSource.name} <span className="font-normal text-muted-foreground">· {demoSource.transport === 'mqtt' ? 'MQTT' : 'SQL'}</span></p>
-                {demoSource.streams.length ? <ul className="mt-2 flex flex-col gap-1.5">
-                    {demoSource.streams.map((stream) => <li key={stream.id}><label className="flex items-center gap-2">
-                        <input type="checkbox" checked={!excluded.has(stream.id)} onChange={() => onToggle(stream.id)} />
-                        <span>{stream.label}</span>
-                        {stream.matchedBy === 'address' && <span className="text-xs text-muted-foreground">über Topic oder Tabelle gefunden</span>}
-                    </label></li>)}
-                </ul> : <p className="mt-1 text-muted-foreground">Für diese Quelle gibt es keine Demo-Daten.{' '}
-                    {demo.simulatorUi && demoSource.structureUrn && <ExternalAnchor href={newSimulationUiHref(demo.simulatorUi, demoSource.structureUrn, demoSource.id)}>Im Simulator anlegen</ExternalAnchor>}
-                </p>}
-            </div>)}
-        <Button variant="ghost" className="self-start" onClick={onReload}>Erneut prüfen</Button>
-    </div>
 }

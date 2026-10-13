@@ -77,6 +77,14 @@ export function FlowGroup({
  * Without `href` the row only reports, for a system the page cannot link into.
  * `target` names that place ("Portal", "Simulator"); it stays a label inside
  * the row link, never a link of its own.
+ *
+ * `control` puts a checkbox in front, for choosing what comes along; the row
+ * is then its label. `depth` indents what belongs to the row above it (a map
+ * layer under its API): the row's content moves right and its tick grows with
+ * it, so the tick still starts at the guide line. A note is inline content
+ * only: it sits inside the row's link or label, so a link of its own or a
+ * paragraph belongs in a `FlowNote` instead. Without these, the row is exactly
+ * the installed view's.
  */
 export function FlowItem({
     icon,
@@ -86,6 +94,8 @@ export function FlowItem({
     target,
     badge,
     note,
+    control,
+    depth,
 }: {
     icon: ReactNode
     kind?: string
@@ -93,11 +103,14 @@ export function FlowItem({
     href?: string
     target?: string
     badge?: ReactNode
-    note?: string
+    note?: ReactNode
+    control?: ReactNode
+    depth?: 1 | 2
 }) {
     const body = (
         <>
             <span className="flex items-center gap-3">
+                {control}
                 <span aria-hidden className="flex w-5 shrink-0 justify-center text-muted-foreground">
                     {icon}
                 </span>
@@ -119,23 +132,35 @@ export function FlowItem({
                     </span>
                 )}
             </span>
-            {/* Indented by the icon column, so it reads as part of the name. */}
-            {note && <span className="mt-0.5 block pl-8 text-xs leading-relaxed text-muted-foreground">{note}</span>}
+            {/* Indented by the icon column (and the checkbox), so it reads as part of the name. */}
+            {note && <span className={`mt-0.5 block ${control ? 'pl-15' : 'pl-8'} text-xs leading-relaxed text-muted-foreground`}>{note}</span>}
         </>
     )
-    const row = 'block rounded-r-md py-2 pl-4 pr-3 text-sm'
+    const row = `block rounded-r-md py-2 ${depth === 2 ? 'pl-14' : depth === 1 ? 'pl-9' : 'pl-4'} pr-3 text-sm`
+    const tick = depth === 2 ? 'before:w-12' : depth === 1 ? 'before:w-7' : 'before:w-2.5'
 
     return (
-        <li className="relative before:absolute before:left-0 before:top-[1.125rem] before:h-px before:w-2.5 before:bg-border">
+        <li className={`relative before:absolute before:left-0 before:top-[1.125rem] before:h-px ${tick} before:bg-border`}>
             {href ? (
                 <a href={href} target="_blank" rel="noreferrer" className={`group ${row} transition-colors hover:bg-muted/60`}>
                     {body}
                 </a>
+            ) : control ? (
+                <label className={`${row} cursor-pointer has-[:disabled]:cursor-not-allowed`}>{body}</label>
             ) : (
                 <div className={row}>{body}</div>
             )}
         </li>
     )
+}
+
+/**
+ * A quiet label over the rows of one kind inside a group ("Datenquellen (2)").
+ * An eyebrow, not a heading level: it labels rows, it does not compete with
+ * the group's title.
+ */
+export function FlowHeading({ children }: { children: ReactNode }) {
+    return <li className="pb-0.5 pl-4 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</li>
 }
 
 /** A remark inside a group, on the guide line, at the size of a row's note. */
