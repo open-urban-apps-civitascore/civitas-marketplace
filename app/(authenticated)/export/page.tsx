@@ -1,7 +1,9 @@
 import Link from 'next/link'
 
 import { ExportPanel } from '@/components/export/export-panel'
+import { Disclosure } from '@/components/ui/disclosure'
 import { PageHeader } from '@/components/ui/layout'
+import { Notice } from '@/components/ui/notice'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -21,7 +23,8 @@ export default async function ExportPage() {
     const accessToken = await getAccessToken()
     const config = exportConfig()
     const readiness = exportReadiness(config)
-    const refusal = shareRefusal(await fetchShareRight())
+    const right = await fetchShareRight()
+    const refusal = shareRefusal(right)
     const mayShare = !refusal
 
     let datasets: DatasetListing[] = []
@@ -52,24 +55,35 @@ export default async function ExportPage() {
                 }
             />
 
+            {/* Neutral: setting it up is the operator's task, nothing the person here can supply. */}
             {readiness !== 'ready' && (
-                <p className="rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm text-warn dark:bg-warn/15">
-                    {readiness === 'missing-targets'
-                        ? (config.targetsError ??
-                          'Kein Zielrepository konfiguriert (EXPORT_TARGET_REPOS) - die Vorschau funktioniert, ein Merge Request nicht.')
-                        : 'Kein GitLab-Zugang hinterlegt (EXPORT_REPO_TOKEN) - die Vorschau funktioniert, ein Merge Request nicht.'}
-                </p>
+                <Notice tone="neutral" title="Teilen ist auf dieser Instanz noch nicht eingerichtet">
+                    <p>
+                        Die Vorschau funktioniert. Damit ein Paket vorgeschlagen werden kann, braucht die Instanz ein
+                        Zielrepository und einen GitLab-Zugang - das richtet der Betrieb ein.
+                    </p>
+                    <Disclosure summary="Für den Betrieb" className="mt-1">
+                        <p className="text-xs">
+                            {readiness === 'missing-targets'
+                                ? (config.targetsError ?? 'Kein Zielrepository konfiguriert: EXPORT_TARGET_REPOS setzen.')
+                                : 'Kein GitLab-Zugang hinterlegt: EXPORT_REPO_TOKEN setzen.'}
+                        </p>
+                    </Disclosure>
+                </Notice>
             )}
 
-            {/* Neutral, not amber: amber asks for something the person can still supply, a right is not. */}
+            {/* Neutral, not amber: amber asks for something the person can still supply, a right is not.
+                The title claims a refusal only when there is one; an unreachable portal is not a "no". */}
             {readiness === 'ready' && refusal && (
-                <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{refusal}</p>
+                <Notice tone="neutral" title={right === 'refused' ? 'Teilen ist für dich nicht freigeschaltet' : undefined}>
+                    {refusal}
+                </Notice>
             )}
 
             {datasetsError ? (
-                <p className="rounded-lg border border-error/40 bg-error/5 px-4 py-3 text-sm text-error dark:bg-error/15">
-                    Datasets konnten nicht gelesen werden: {datasetsError}
-                </p>
+                <Notice tone="error" title="Datensätze konnten nicht gelesen werden">
+                    {datasetsError}
+                </Notice>
             ) : (
                 <ExportPanel
                     sources={sources}

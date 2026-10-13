@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { SharedPackages } from '@/components/export/shared-packages'
 import { PageHeader } from '@/components/ui/layout'
+import { Notice } from '@/components/ui/notice'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { fetchShareRight, type ShareRight } from '@/lib/export/share-permission'
 import { requireSession } from '@/lib/session'
@@ -41,11 +42,11 @@ export default async function SharedPackagesPage() {
             />
 
             {readiness !== 'ready' ? (
-                <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">
-                    Teilen ist auf dieser Instanz noch nicht eingerichtet, deshalb gibt es hier noch nichts zu sehen.
-                </p>
+                <Notice tone="neutral" title="Teilen ist auf dieser Instanz noch nicht eingerichtet">
+                    Deshalb gibt es hier noch nichts zu sehen. Das Einrichten übernimmt der Betrieb.
+                </Notice>
             ) : right !== 'allowed' ? (
-                <p className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{HIDDEN_BECAUSE[right ?? 'unknown']}</p>
+                <Notice tone="neutral">{HIDDEN_BECAUSE[right ?? 'unknown']}</Notice>
             ) : (
                 <SharedPackages />
             )}
