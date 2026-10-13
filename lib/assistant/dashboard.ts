@@ -7,7 +7,9 @@ import { deriveInstallUuid } from '@/lib/superset/rebind'
  * messages per minute, which shows at a glance that data arrives; one line
  * chart per measured value follows it over time, a line per station. Counts
  * are summed and readings averaged, so a count never appears as an average.
- * A text tile says that this is a starting point to adapt in Superset.
+ * A text tile says that this is a starting point to adapt in Superset. A time
+ * filter above the charts lets a viewer choose the range, and the time axis
+ * reads in local time.
  *
  * Shaped like the export of the Verkehrszählung dashboard (Superset 6.1),
  * cut down to what the import reads. The install binds the database file to
@@ -46,6 +48,52 @@ const MAX_MEASURES = 4
 const REFRESH_SECONDS = 10
 
 const STARTER_NOTE = '_Automatisch erzeugtes Start-Dashboard: ein erster Blick auf die Daten, zum Anpassen in Superset._'
+
+/** The time zone the time axis reads in. The stored time stays UTC. */
+const LOCAL_TIME_ZONE = 'Europe/Berlin'
+
+/**
+ * The time filter's default: the last hour up to now. An expression rather
+ * than "Last day", because Superset anchors "Last day" at midnight by default,
+ * which leaves out today.
+ */
+const DEFAULT_TIME_RANGE = 'DATEADD(DATETIME("now"), -1, hour) : now'
+
+/**
+ * The time filter in the bar above the charts. It names no dataset: Superset
+ * writes its range into the temporal filter of every chart in scope. The
+ * export's `chartsInScope` stays out, because it lists chart ids of the
+ * exporting instance; without it Superset takes every chart of the dashboard.
+ */
+const TIME_FILTER = {
+    id: 'NATIVE_FILTER-zeitraum',
+    type: 'NATIVE_FILTER',
+    name: 'Zeitraum',
+    filterType: 'filter_time',
+    targets: [{}],
+    controlValues: {},
+    defaultDataMask: {
+        extraFormData: { time_range: DEFAULT_TIME_RANGE },
+        filterState: { value: DEFAULT_TIME_RANGE },
+        ownState: {},
+    },
+    cascadeParentIds: [],
+    scope: { rootPath: ['ROOT_ID'], excluded: [] },
+    description: '',
+}
+
+/**
+ * The time field in local time, as a column the dataset computes. The charts
+ * draw their axis along it, while their time filter stays on the stored UTC
+ * field: Superset computes "now" in UTC, so a filter on local time would cut
+ * off the latest hours.
+ */
+function localTimeColumn(time: DashboardField): { name: string; expression: string } {
+    return {
+        name: `${time.key}_local`,
+        expression: `"${time.key.replace(/"/g, '""')}" AT TIME ZONE '${LOCAL_TIME_ZONE}'`,
+    }
+}
 
 type Aggregate = 'SUM' | 'AVG'
 
@@ -97,6 +145,7 @@ export function buildStarterDashboard(input: StarterDashboardInput): StarterDash
     if (!time) return undefined
     const station = input.fields.find((field) => field.generator.kind === 'station' && !field.dateTime)
     const perStation = station ? ' je Station' : ''
+    const localTime = localTimeColumn(time)
 
     const uuid = (name: string) => deriveInstallUuid(`assistant#${input.seed}`, name)
     const dashboardUuid = uuid('dashboard')
@@ -198,7 +247,7 @@ export function buildStarterDashboard(input: StarterDashboardInput): StarterDash
                 // The import points this at the dataset it creates.
                 datasource: '1__table',
                 viz_type: chart.vizType,
-                x_axis: time.key,
+                x_axis: localTime.name,
                 time_grain_sqla: 'PT1M',
                 metrics: [chart.metric],
                 groupby: station ? [station.key] : [],
@@ -251,7 +300,8 @@ export function buildStarterDashboard(input: StarterDashboardInput): StarterDash
             label_colors: {},
             shared_label_colors: [],
             color_scheme_domain: [],
-            native_filter_configuration: [],
+            native_filter_configuration: [TIME_FILTER],
+            filter_bar_orientation: 'HORIZONTAL',
             cross_filters_enabled: false,
             default_filters: '{}',
         },
@@ -293,21 +343,38 @@ export function buildStarterDashboard(input: StarterDashboardInput): StarterDash
                 warning_text: null,
             },
         ],
-        columns: input.fields.map((field) => ({
-            column_name: field.key,
-            verbose_name: null,
-            is_dttm: Boolean(field.dateTime),
-            is_active: true,
-            type: columnType(field),
-            advanced_data_type: null,
-            groupby: true,
-            filterable: true,
-            expression: '',
-            description: field.description || null,
-            python_date_format: null,
-            datetime_format: null,
-            extra: { warning_markdown: null },
-        })),
+        columns: [
+            ...input.fields.map((field) => ({
+                column_name: field.key,
+                verbose_name: null,
+                is_dttm: Boolean(field.dateTime),
+                is_active: true,
+                type: columnType(field),
+                advanced_data_type: null,
+                groupby: true,
+                filterable: true,
+                expression: '',
+                description: field.description || null,
+                python_date_format: null,
+                datetime_format: null,
+                extra: { warning_markdown: null },
+            })),
+            {
+                column_name: localTime.name,
+                verbose_name: 'Zeit (Ortszeit)',
+                is_dttm: true,
+                is_active: true,
+                type: 'TIMESTAMP WITHOUT TIME ZONE',
+                advanced_data_type: null,
+                groupby: true,
+                filterable: true,
+                expression: localTime.expression,
+                description: `${time.description || time.key}, in Ortszeit (${LOCAL_TIME_ZONE})`,
+                python_date_format: null,
+                datetime_format: null,
+                extra: { warning_markdown: null },
+            },
+        ],
         version: '1.0.0',
         database_uuid: databaseUuid,
     }

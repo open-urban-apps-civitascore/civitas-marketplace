@@ -26,10 +26,37 @@ const FIELDS: DashboardField[] = [
 
 const INPUT = { seed: 'urn:test:package', title: 'Luft an Schulen', tableName: 'luft_an_schulen', fields: FIELDS, now: 0 }
 
+interface ChartParams {
+    metrics: Record<string, unknown>[]
+    groupby: string[]
+    x_axis: string
+    adhoc_filters: { operator: string; subject: string }[]
+}
+
 function chartsOf(files: Record<string, Record<string, unknown>>) {
     return Object.entries(files)
         .filter(([file]) => file.startsWith('charts/'))
-        .map(([, chart]) => chart as { slice_name: string; params: { metrics: Record<string, unknown>[]; groupby: string[] } })
+        .map(([, chart]) => chart as { slice_name: string; params: ChartParams })
+}
+
+function fileIn(files: Record<string, Record<string, unknown>>, folder: string) {
+    return Object.entries(files).find(([file]) => file.startsWith(folder))?.[1]
+}
+
+interface NativeFilter {
+    filterType: string
+    targets: Record<string, unknown>[]
+    chartsInScope?: number[]
+    scope: { rootPath: string[] }
+    defaultDataMask: { extraFormData: { time_range?: string } }
+}
+
+function filtersOf(files: Record<string, Record<string, unknown>>) {
+    const metadata = fileIn(files, 'dashboards/')?.metadata as {
+        native_filter_configuration: NativeFilter[]
+        filter_bar_orientation: string
+    }
+    return metadata
 }
 
 describe('buildStarterDashboard', () => {
@@ -82,6 +109,33 @@ describe('buildStarterDashboard', () => {
         expect(chartsOf(buildStarterDashboard({ ...INPUT, fields: many })!.document.files)).toHaveLength(5)
     })
 
+    it('puts a time filter for the last hour above the charts', () => {
+        const metadata = filtersOf(buildStarterDashboard(INPUT)!.document.files)
+        expect(metadata.filter_bar_orientation).toBe('HORIZONTAL')
+        expect(metadata.native_filter_configuration).toHaveLength(1)
+        const [filter] = metadata.native_filter_configuration
+        expect(filter.filterType).toBe('filter_time')
+        expect(filter.scope.rootPath).toEqual(['ROOT_ID'])
+        expect(filter.defaultDataMask.extraFormData.time_range).toBe('DATEADD(DATETIME("now"), -1, hour) : now')
+        // No dataset and no chart ids of another instance: the filter applies to every chart.
+        expect(filter.targets).toEqual([{}])
+        expect(filter.chartsInScope).toBeUndefined()
+    })
+
+    it('draws the axis in local time and filters on the stored time', () => {
+        const files = buildStarterDashboard(INPUT)!.document.files
+        const columns = fileIn(files, 'datasets/')?.columns as { column_name: string; expression: string; is_dttm: boolean }[]
+        const local = columns.find((column) => column.column_name === 'observedAt_local')
+        expect(local?.expression).toBe(`"observedAt" AT TIME ZONE 'Europe/Berlin'`)
+        expect(local?.is_dttm).toBe(true)
+        for (const chart of chartsOf(files)) {
+            expect(chart.params.x_axis).toBe('observedAt_local')
+            expect(chart.params.adhoc_filters.find((filter) => filter.operator === 'TEMPORAL_RANGE')?.subject).toBe(
+                'observedAt',
+            )
+        }
+    })
+
     it('builds nothing without a time field', () => {
         expect(buildStarterDashboard({ ...INPUT, fields: FIELDS.filter((field) => !field.dateTime) })).toBeUndefined()
     })
@@ -98,6 +152,7 @@ describe('buildStarterDashboard', () => {
         expect(dataset?.schema).toBe(datasetSchema(datasetId))
         expect(dataset?.database_uuid).toBe(instanceDatabase)
         expect(bound.slug).toMatch(/^luft-an-schulen-/)
+        expect(filtersOf(bound.files).native_filter_configuration[0].filterType).toBe('filter_time')
     })
 })
 
