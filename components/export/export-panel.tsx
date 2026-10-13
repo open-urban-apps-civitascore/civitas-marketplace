@@ -215,7 +215,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     ? <Done label={known.catalog?.state === 'listed' ? 'Im Katalog' : 'Katalog-Eintrag vorgeschlagen'} url={known.catalog?.mrUrl} />
                     : <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>}
             </div>
-            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unten unter „Geteilte Pakete“, ohne dieses Formular.</p>
+            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unter <a href="/export/shared" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">„Geteilte Pakete“<ExternalLink aria-hidden className="size-3" /></a>, ohne dieses Formular.</p>
         </>}
         {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
         {result && <div role={result.status === 'invalid' || result.status === 'error' || result.status === 'forbidden' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
