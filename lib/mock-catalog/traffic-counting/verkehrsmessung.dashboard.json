@@ -106,9 +106,7 @@
           "Promenade (Z-001)": "#2a78d6",
           "Wolbecker Straße (Z-002)": "#eb6834",
           "Ring (Z-003)": "#1baf7a",
-          "Hafen (Z-004)": "#eda100",
-          "fahrzeuge": "#898781",
-          "Fahrzeuge": "#898781"
+          "Hafen (Z-004)": "#eda100"
         },
         "shared_label_colors": [],
         "color_scheme_domain": [],
@@ -340,6 +338,7 @@
           { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
         ],
         "orientation": "horizontal",
+        "color_by_primary_axis": true,
         "row_limit": 100,
         "order_desc": true,
         "truncate_metric": true,
