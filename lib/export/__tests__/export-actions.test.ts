@@ -13,7 +13,10 @@ function form(metadata: unknown, intent = 'preview') {
     for (const [key, value] of Object.entries({ datasetId: 'local', publisher: 'stadt', slug: 'baeume', version: '1.0.0', domain: 'environment', displayName: 'Bäume', description: 'Stadtbäume', maintainer: 'Stadt', license: 'EUPL-1.2', catalogMetadata: JSON.stringify(metadata), intent })) data.set(key, value)
     return data
 }
-afterEach(() => vi.clearAllMocks())
+afterEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllEnvs()
+})
 describe('export action schema boundary', () => {
     it.each(['preview', 'bundle', 'catalog', 'status'])('validates metadata before %s can read or write', async (intent) => {
         const result = await exportAction(null, form({ curation: { tier: 'verified' } }, intent))
@@ -46,5 +49,39 @@ describe('export action schema boundary', () => {
             structures: [{ versionId: 'version', dataStructureId: 'structure', name: 'Baum', modelUrn: 'urn:stadt:model:baum:1.0.0', model: {} }] })
         const inventory = await inspectExportSource('local')
         expect(inventory.artifacts).toEqual([{ type: 'structure', kind: 'Datenstruktur', name: 'Baum' }])
+    })
+    it('names artifacts as the package will and flags the names the portal did not have', async () => {
+        vi.mocked(readUseCase).mockResolvedValueOnce({ dataset: { id: 'local', name: 'Bäume' }, structures: [], warnings: [],
+            sources: [],
+            mappings: [{ urn: 'urn:local:mapping:a', document: { title: 'Messung zu Wert' } }, { urn: 'urn:local:mapping:b', document: {} }],
+            sinks: [{ id: 'sink', name: 'Senke 1', dataSinkType: 'POSTGIS', configuration: {}, unnamed: true }],
+            pipelines: [
+                { id: 'p1', name: 'Untitled Pipeline', model: {}, dataSourceIds: [], dataSinkIds: [] },
+                { id: 'p2', name: 'Pipeline ohne Namen', model: {}, dataSourceIds: [], dataSinkIds: [] },
+                { id: 'p3', name: 'Import', model: {}, dataSourceIds: [], dataSinkIds: [] },
+            ] })
+        const inventory = await inspectExportSource('local')
+        expect(inventory.artifacts.map(({ type, name, unnamed }) => [type, name, !!unnamed])).toEqual([
+            ['mapping', 'Messung zu Wert', false],
+            // Never the instance's URN: the package names it by its position.
+            ['mapping', 'Mapping 2', true],
+            ['sink', 'Senke 1', true],
+            ['pipeline', 'Untitled Pipeline', true],
+            ['pipeline', 'Pipeline ohne Namen', true],
+            ['pipeline', 'Import', false],
+        ])
+    })
+    it('links a source without a Topic to its portal page, so the author can add one', async () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.example.org')
+        vi.mocked(readUseCase).mockResolvedValueOnce({ dataset: { id: 'local', name: 'Bäume' }, structures: [], mappings: [], pipelines: [], sinks: [], warnings: [],
+            sources: [
+                { id: 'feed', name: 'Feed', connectorType: 'MQTT', configuration: { topics: [] } },
+                { id: 'sensor', name: 'Sensor', connectorType: 'MQTT', configuration: { topics: ['stadt/+'] } },
+            ] })
+        const inventory = await inspectExportSource('local')
+        expect(inventory.demo?.sources.map(({ id, problem, portalHref }) => ({ id, problem, portalHref }))).toEqual([
+            { id: 'feed', problem: 'no-topic', portalHref: 'https://portal.example.org/datasources/feed' },
+            { id: 'sensor', problem: undefined, portalHref: undefined },
+        ])
     })
 })

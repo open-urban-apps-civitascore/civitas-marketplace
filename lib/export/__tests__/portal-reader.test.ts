@@ -306,6 +306,29 @@ describe('readUseCase', () => {
         expect(versionReads(calls).some((url) => url.includes('/s-fremd-alt/'))).toBe(true)
     })
 
+    it('flags the names it had to make up, and only those', async () => {
+        const routes = instanceRoutes()
+        const nameless = { ...(routes[`/v1/datasets/${DATASET}/pipelines/p-feuchte-import`] as Record<string, unknown>) }
+        delete nameless.name
+        routes[`/v1/datasets/${DATASET}/pipelines/p-feuchte-import`] = nameless
+        routes[`/v1/datasets/${DATASET}/datasinks?size=100`] = {
+            content: SINKS.map((sink) =>
+                // Without a name, a table name still names a sink; without both, nothing does.
+                sink.id === 'sink-jungbaeume' ? { ...sink, name: '' }
+                    : sink.id === 'sink-feuchte' ? { ...sink, name: '', configuration: { ...sink.configuration, tableName: undefined } }
+                    : sink,
+            ),
+            last: true,
+        }
+        fakePortal(routes)
+        const snapshot = await readUseCase('token', DATASET)
+        expect(snapshot.pipelines.filter((p) => p.unnamed).map((p) => p.id)).toEqual(['p-feuchte-import'])
+        expect(snapshot.sinks.find((s) => s.id === 'sink-jungbaeume')).toMatchObject({ name: 'jungbaeume' })
+        expect(snapshot.sinks.find((s) => s.id === 'sink-jungbaeume')?.unnamed).toBeUndefined()
+        expect(snapshot.sinks.find((s) => s.id === 'sink-feuchte')).toMatchObject({ name: 'Senke 2', unnamed: true })
+        expect(snapshot.sinks.filter((s) => s.unnamed)).toHaveLength(1)
+    })
+
     it('reports a structure list it cannot read instead of failing the inventory', async () => {
         const routes = instanceRoutes()
         routes['/v1/datastructures?size=200&page=0'] = problem(500, 'Interner Fehler')

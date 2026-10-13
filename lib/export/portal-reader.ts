@@ -60,11 +60,15 @@ export interface SnapshotSink {
      * PostGIS output embeds, or found by URN for a FROST output, which names only `element`.
      */
     structureVersionId?: string
+    /** The platform had no name for it: `name` was made up here ("Senke 2") and travels as such. */
+    unnamed?: boolean
 }
 
 export interface SnapshotPipeline {
     id: string
     name: string
+    /** The platform had no name for it: `name` was made up here ("Pipeline 2") and travels as such. */
+    unnamed?: boolean
     description?: string
     model: Record<string, unknown>
     styles?: Record<string, unknown>
@@ -427,6 +431,7 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         pipelines.push({
             id: String(dto.id),
             name: typeof dto.name === 'string' ? dto.name : `Pipeline ${pipelines.length + 1}`,
+            ...(typeof dto.name === 'string' ? {} : { unnamed: true }),
             description: typeof dto.description === 'string' ? dto.description : undefined,
             model: dto.model,
             styles: isRecord(dto.styles) ? dto.styles : undefined,
@@ -448,12 +453,11 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         const configuration = isRecord(dto.configuration) ? dto.configuration : {}
         const summary = versionSummary(configuration.dataStructureVersion)
         if (summary) wantedVersions.set(summary.versionId, summary.dataStructureId)
+        const given = (typeof dto.name === 'string' && dto.name) || (typeof configuration.tableName === 'string' && configuration.tableName)
         const sink: SnapshotSink = {
             id: String(dto.id),
-            name:
-                (typeof dto.name === 'string' && dto.name) ||
-                (typeof configuration.tableName === 'string' && configuration.tableName) ||
-                `Senke ${index + 1}`,
+            name: given || `Senke ${index + 1}`,
+            ...(given ? {} : { unnamed: true }),
             dataSinkType: typeof dto.dataSinkType === 'string' ? dto.dataSinkType : 'POSTGIS',
             configuration,
             configurationUrn: typeof dto.configurationUrn === 'string' ? dto.configurationUrn : undefined,

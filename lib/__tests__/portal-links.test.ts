@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { datapoolHref } from '@/lib/portal-links'
+import { datapoolHref, datasourceHref } from '@/lib/portal-links'
 
 afterEach(() => {
     vi.unstubAllEnvs()
@@ -23,5 +23,13 @@ describe('datapoolHref', () => {
         vi.stubEnv('PORTAL_URL', 'https://portal.example.org')
 
         expect(datapoolHref('a b')).toBe('https://portal.example.org/datapools/a%20b')
+    })
+})
+
+describe('datasourceHref', () => {
+    it('points at the data source in the configured portal, escaping the id', () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.example.org/')
+
+        expect(datasourceHref('a b')).toBe('https://portal.example.org/datasources/a%20b')
     })
 })

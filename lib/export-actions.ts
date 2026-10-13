@@ -38,7 +38,8 @@ import {
     type BundleVerification,
     type CatalogStatus,
 } from '@/lib/export/status'
-import { transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
+import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
+import { datasourceHref } from '@/lib/portal-links'
 import { demoSources, simulationMembers, type DemoSource } from '@/lib/export/simulations'
 import { getSimulation, isSimulatorConfigured, listSimulations, SimulatorError, type SimulationDetail } from '@/lib/simulator/client'
 import { simulatorUiUrl } from '@/lib/simulator/ui-links'
@@ -709,7 +710,14 @@ export interface InventoryArtifact {
     depth?: 1 | 2
     /** A grey line under the name, e.g. the sink a layer shows. */
     detail?: string
+    /** An API's standard ("OWS"), for naming the map service as a whole. */
+    standard?: string
+    /** No name of its own: `name` was made up (or is the portal's default) and travels as such. */
+    unnamed?: boolean
 }
+
+/** The portal's names for a pipeline nobody named, in each of its languages. */
+const PORTAL_DEFAULT_PIPELINE_NAMES: ReadonlySet<string> = new Set(['Untitled Pipeline', 'Pipeline ohne Namen'])
 
 /**
  * The map members as one group, the way a reader asks about them ("what belongs
@@ -727,6 +735,7 @@ function mapArtifacts(snapshot: InstanceSnapshot): InventoryArtifact[] {
         kind: `API (${api.standard})`,
         name: api.name,
         group: 'map',
+        standard: api.standard,
     }))
     for (const layer of snapshot.layers ?? []) {
         const sink = layer.dataSinkId ? sinkNames.get(layer.dataSinkId) : undefined
@@ -779,9 +788,15 @@ export async function inspectExportSource(datasetId: string): Promise<{
             artifacts: [
                 ...snapshot.structures.map((row) => ({ type: 'structure' as const, kind: 'Datenstruktur', name: row.name })),
                 ...snapshot.sources.map((row) => ({ type: 'source' as const, kind: 'Datenquelle', name: row.name })),
-                ...snapshot.mappings.map((row) => ({ type: 'mapping' as const, kind: 'Mapping', name: row.urn })),
-                ...snapshot.sinks.map((row) => ({ type: 'sink' as const, kind: 'Datensenke', name: row.name })),
-                ...snapshot.pipelines.map((row) => ({ type: 'pipeline' as const, kind: 'Pipeline', name: row.name })),
+                // Named as the package will name them: a mapping by its title, never by the instance's URN.
+                ...snapshot.mappings.map((row, index) => ({
+                    type: 'mapping' as const, kind: 'Mapping', name: mappingTitle(row, index), ...(isUnnamedMapping(row) ? { unnamed: true } : {}),
+                })),
+                ...snapshot.sinks.map((row) => ({ type: 'sink' as const, kind: 'Datensenke', name: row.name, ...(row.unnamed ? { unnamed: true } : {}) })),
+                ...snapshot.pipelines.map((row) => ({
+                    type: 'pipeline' as const, kind: 'Pipeline', name: row.name,
+                    ...(row.unnamed || PORTAL_DEFAULT_PIPELINE_NAMES.has(row.name) ? { unnamed: true } : {}),
+                })),
                 ...mapArtifacts(snapshot),
             ],
             warnings: snapshot.warnings,
@@ -796,5 +811,7 @@ export async function inspectExportSource(datasetId: string): Promise<{
 async function demoInventory(snapshot: Awaited<ReturnType<typeof readUseCase>>): Promise<DemoInventory> {
     const { details, problem } = await readSimulations()
     const ui = simulatorUiUrl()
-    return { sources: demoSources(snapshot, details), ...(problem ? { problem } : {}), ...(ui ? { simulatorUi: ui } : {}) }
+    // The portal link is built here: only the server knows the portal's address.
+    const sources = demoSources(snapshot, details).map((source) => (source.problem ? { ...source, portalHref: datasourceHref(source.id) } : source))
+    return { sources, ...(problem ? { problem } : {}), ...(ui ? { simulatorUi: ui } : {}) }
 }
