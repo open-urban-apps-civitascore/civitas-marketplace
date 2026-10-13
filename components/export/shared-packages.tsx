@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { ExternalLink, GitMerge, Loader2, RefreshCw } from 'lucide-react'
+import { ExternalLink, GitMerge, RefreshCw } from 'lucide-react'
 
+import { Button, ExternalAnchor } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/layout'
+import { Notice, Pending } from '@/components/ui/notice'
 
 import {
     listSharedPackages,
@@ -13,17 +15,7 @@ import {
     type SharedPackageRow,
 } from '@/lib/export-actions'
 import { catalogStateLabel, mergeRequestStateLabel, verificationLabel } from '@/lib/export/labels'
-
-const OUTCOME_STYLES: Record<ExportActionResult['status'], string> = {
-    ok: 'text-success',
-    'already-open': 'text-warn',
-    unchanged: 'text-warn',
-    'not-merged': 'text-warn',
-    unconfigured: 'text-warn',
-    forbidden: 'text-error',
-    invalid: 'text-error',
-    error: 'text-error',
-}
+import { resultTone } from '@/lib/export/result-tone'
 
 /**
  * Everything shared through this marketplace, and where each package stands.
@@ -76,28 +68,19 @@ export function SharedPackages() {
     return (
         <div className="flex flex-col gap-4">
             <div className="flex justify-end">
-                <button
-                    type="button"
-                    onClick={load}
-                    disabled={loading}
-                    className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
-                >
-                    {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                <Button icon={RefreshCw} pending={loading} onClick={load}>
                     Aktualisieren
-                </button>
+                </Button>
             </div>
 
             {error && (
-                <p role="alert" className="text-sm text-error">
+                <Notice tone="error" live>
                     {error}
-                </p>
+                </Notice>
             )}
 
             {rows === null ? (
-                <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    Stand wird bei GitLab abgefragt …
-                </p>
+                <Pending>Stand wird bei GitLab abgefragt …</Pending>
             ) : rows.length === 0 ? (
                 !error && (
                     <EmptyState
@@ -171,29 +154,24 @@ function SharedRow({
                         tone={row.catalog.state === 'listed' ? 'ok' : undefined}
                     />
                 )}
+                {/* Not primary: several rows can offer it at once, and a surface has one main action. */}
                 {canPropose && (
-                    <button
-                        type="button"
-                        onClick={onPropose}
-                        disabled={disabled}
-                        className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                    >
-                        {proposing ? <Loader2 className="size-4 animate-spin" /> : <GitMerge className="size-4" />}
+                    <Button icon={GitMerge} pending={proposing} disabled={disabled} onClick={onPropose} className="ml-auto">
                         Katalog-Eintrag vorschlagen
-                    </button>
+                    </Button>
                 )}
             </div>
 
+            {/* Smaller than a page-level notice: it answers one row, inside that row. */}
             {outcome && (
-                <div className={`text-xs leading-relaxed ${OUTCOME_STYLES[outcome.status]}`}>
-                    <p>{outcome.detail}</p>
-                    {outcome.mrUrl && (
-                        <a href={outcome.mrUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 underline">
-                            Merge Request öffnen
-                            <ExternalLink className="size-3" />
-                        </a>
-                    )}
-                </div>
+                <Notice
+                    tone={resultTone(outcome.status)}
+                    live
+                    className="rounded-md px-3 py-2"
+                    action={outcome.mrUrl ? <ExternalAnchor href={outcome.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}
+                >
+                    {outcome.detail}
+                </Notice>
             )}
         </li>
     )

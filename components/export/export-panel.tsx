@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { CircleCheck, ExternalLink, Eye, GitMerge, GitPullRequest, Loader2, RefreshCw } from 'lucide-react'
+import { CircleCheck, Eye, GitMerge, GitPullRequest, RefreshCw } from 'lucide-react'
 import { exportAction, inspectExportSource, type DemoInventory, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
@@ -12,15 +12,15 @@ import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { MetadataForm } from '@/components/export/metadata-form'
+import { Button, ExternalAnchor } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/layout'
+import { InlineNotice, Notice, NoticeList, Pending } from '@/components/ui/notice'
+import { resultTone } from '@/lib/export/result-tone'
 import { Select } from '@/components/ui/select'
 import { newSimulationUiHref } from '@/lib/simulator/ui-links'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
-const FEEDBACK_STYLES: Record<ExportActionResult['status'], string> = {
-    ok: 'text-success', 'already-open': 'text-warn', unchanged: 'text-warn', 'not-merged': 'text-warn',
-    unconfigured: 'text-warn', forbidden: 'text-error', invalid: 'text-error', error: 'text-error',
-}
 interface PanelProps {
     sources: ExportSource[]
     sourceNotice?: string
@@ -43,20 +43,20 @@ export function ExportPanel(props: PanelProps) {
     const [selection, setSelection] = useState('')
     const [active, setActive] = useState('')
     const source = props.sources.find((row) => row.id === active)
-    if (!props.sources.length) return <p className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">Diese Instanz hat noch keinen Use Case, auf den du zugreifen kannst.</p>
+    if (!props.sources.length) return <EmptyState>Diese Instanz hat noch keinen Use Case, auf den du zugreifen kannst.</EmptyState>
     if (source) return <ExportEditor key={source.id} {...props} source={source} onChoose={() => setActive('')} />
     return <div className="flex flex-col gap-6">
         <Steps current={1} />
         <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
             <h2 className="text-xl font-semibold">Welchen Use Case möchtest du teilen?</h2>
             <p className="text-sm text-muted-foreground">Wähle einen installierten oder selbst erstellten Use Case dieser Instanz.</p>
-            {props.sourceNotice && <p className="text-sm text-warn">{props.sourceNotice}</p>}
+            {props.sourceNotice && <Notice tone="neutral">{props.sourceNotice}</Notice>}
             <label className="flex flex-col gap-2 text-sm">
                 <span>Lokaler Use Case</span>
                 <Select value={selection} onValueChange={setSelection} placeholder="Bitte auswählen …"
                     options={props.sources.map((row) => ({ value: row.id, label: `${row.catalog?.displayName ?? row.name} · ${row.catalog ? `installiert (${row.name})` : 'lokaler Bestand'}` }))} />
             </label>
-            <button type="button" disabled={!selection} className={`${buttonClass('primary')} self-start`} onClick={() => setActive(selection)}>Bestand prüfen</button>
+            <Button variant="primary" disabled={!selection} className="self-start" onClick={() => setActive(selection)}>Bestand prüfen</Button>
         </section>
     </div>
 }
@@ -147,32 +147,34 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         <Steps current={step} />
         <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm"><span className="text-muted-foreground">Ausgewählt: </span><strong>{source.name}</strong></p>
-            <button type="button" disabled={pending} className="text-sm underline disabled:opacity-50" onClick={onChoose}>Andere Auswahl (Eingaben verwerfen)</button>
+            <Button variant="ghost" disabled={pending} onClick={onChoose}>Andere Auswahl (Eingaben verwerfen)</Button>
         </div>
         {step === 2 && <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
             <h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Was wird geteilt?</h2>
             <p className="text-sm text-muted-foreground">Diese Artefakte sind aktuell mit dem Use Case verbunden. Die Vorschau liest den Bestand erneut und zeigt, welche Zugangsdaten entfernt werden.</p>
-            {!inventory ? <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Bestand wird geladen …</p>
-                : inventory.error ? <><p role="alert" className="text-sm text-error">{inventory.error}</p><button type="button" className={buttonClass('secondary')} onClick={reloadInventory}>Erneut laden</button></>
+            {!inventory ? <Pending>Bestand wird geladen …</Pending>
+                : inventory.error ? <Notice tone="error" title="Der Bestand konnte nicht gelesen werden" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
                 : <>
                     {inventory.artifacts.length ? <ul className="divide-y rounded-lg border px-4">
                         {inventory.artifacts.filter((item) => item.group !== 'map').map((item, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="min-w-0 break-all">{item.name}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
                         {/* The map's members as one group: API, its layers indented, their styles under them. */}
                         {inventory.artifacts.some((item) => item.group === 'map') && <li className="pb-1 pt-4 text-sm font-semibold">Karte</li>}
                         {inventory.artifacts.filter((item) => item.group === 'map').map((item, index) => <li key={`map-${index}`} className={`flex flex-wrap justify-between gap-2 py-3 text-sm ${item.depth === 2 ? 'pl-10' : item.depth === 1 ? 'pl-5' : ''}`}><span className="min-w-0 break-all">{item.name}{item.detail && <span className="block text-xs text-muted-foreground">{item.detail}</span>}</span><span className="text-muted-foreground">{item.kind}</span></li>)}
-                    </ul> : <p className="text-sm text-warn">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</p>}
-                    {lacksStructure && <p className="text-sm text-warn">Ohne eigene Datenstruktur kann der Use Case nicht geteilt werden - die Paketprüfung verlangt mindestens eine.</p>}
-                    {!!inventory.warnings.length && <List title="Hinweise zum Bestand" items={inventory.warnings} tone="warn" />}
+                    </ul> : <Notice tone="neutral">Keine verbundenen Artefakte gefunden. Die Vorschau prüft, ob das Paket exportierbar ist.</Notice>}
+                    {lacksStructure && <Notice tone="warn" title="Es fehlt eine eigene Datenstruktur">Ohne eigene Datenstruktur lässt sich das Paket nicht teilen - die Paketprüfung verlangt mindestens eine.</Notice>}
+                    {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Bestand"><NoticeList items={inventory.warnings} /></Notice>}
                     {inventory.demo && <DemoData demo={inventory.demo} excluded={demoExcluded} onToggle={toggleDemo} onReload={reloadInventory} />}
-                    <button type="button" className={`${buttonClass('primary')} self-start`} onClick={() => setStep(3)}>Steckbrief ergänzen</button>
+                    <Button variant="primary" className="self-start" onClick={() => setStep(3)}>Steckbrief ergänzen</Button>
                 </>}
         </section>}
         {step === 3 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
             <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
-                {source.notice && <p className="mt-2 text-sm text-muted-foreground">{source.notice}</p>}
-                {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
-                {known.bundle?.state === 'mr-open' && <p className="mt-2 text-sm text-muted-foreground">Für Version {basics.version} ist schon ein Merge Request offen{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst nach dem Merge oder nach dem Schließen des Merge Requests, dann mit einer neuen Version.</p>}
-                {known.bundle?.state === 'on-base' && <p className="mt-2 text-sm text-muted-foreground">Version {basics.version} ist schon im Repository. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</p>}</div>
+                <div className="mt-3 flex flex-col gap-2 empty:hidden">
+                    {source.notice && <Notice tone="neutral">{source.notice}</Notice>}
+                    {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
+                    {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Merge Request offen{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst nach dem Merge oder nach dem Schließen des Merge Requests, dann mit einer neuen Version.</Notice>}
+                    {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon im Repository. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
+                </div></div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
@@ -192,8 +194,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><Select value={targetKey} onValueChange={setTargetKey} disabled={!targets.length} placeholder="Nicht konfiguriert - Vorschau verfügbar"
                         options={targets.map((target) => ({ value: target.key, label: `${target.label} · ${target.baseBranch}` }))} /></label>
                 </section>
-                <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass('secondary')} onClick={() => setStep(2)}>Zurück zum Bestand</button>
-                    <button type="submit" className={buttonClass('primary')}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}Vorschau erstellen</button></div>
+                <div className="flex flex-wrap gap-2"><Button onClick={() => setStep(2)}>Zurück zum Bestand</Button>
+                    <Button type="submit" variant="primary" icon={Eye} pending={pending}>Vorschau erstellen</Button></div>
             </fieldset>
         </form>}
         {step === 4 && preview && <>
@@ -205,36 +207,31 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             </section>
             <Preview preview={preview} />
             <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={pending} className={buttonClass('secondary')} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</button>
+                <Button disabled={pending} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</Button>
                 {/* Once proposed, a step shows its merge request instead of a button that would propose it again. */}
                 {bundleProposed
                     ? <Done label={known.bundle?.state === 'on-base' ? 'Paket ist im Repository' : 'Zur Prüfung vorgeschlagen'} url={known.bundle?.mrUrl} />
-                    : <button type="button" disabled={pending || !forgeReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('bundle')}><GitPullRequest className="size-4" />Bundle-MR erstellen</button>}
-                <button type="button" disabled={pending || !forgeReady} className={buttonClass('secondary')} onClick={() => run('status')}><RefreshCw className="size-4" />Status prüfen</button>
+                    : <Button variant="primary" icon={GitPullRequest} disabled={pending || !forgeReady || !!preview.errors.length} onClick={() => run('bundle')}>Bundle-MR erstellen</Button>}
+                <Button icon={RefreshCw} disabled={pending || !forgeReady} onClick={() => run('status')}>Status prüfen</Button>
                 {catalogProposed
                     ? <Done label={known.catalog?.state === 'listed' ? 'Im Katalog' : 'Katalog-Eintrag vorgeschlagen'} url={known.catalog?.mrUrl} />
-                    : <button type="button" disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} className={buttonClass('primary')} onClick={() => run('catalog')}><GitMerge className="size-4" />Katalog-Eintrag vorschlagen</button>}
+                    // Primary only once the package is proposed: one main action per row.
+                    : <Button variant={bundleProposed ? 'primary' : 'secondary'} icon={GitMerge} disabled={pending || !forgeReady || !catalogUrl || !bundleReady || !!preview.errors.length} onClick={() => run('catalog')}>Katalog-Eintrag vorschlagen</Button>}
             </div>
-            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unter <a href="/export/shared" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">„Geteilte Pakete“<ExternalLink aria-hidden className="size-3" /></a>, ohne dieses Formular.</p>
+            <p className="text-xs text-muted-foreground">Nach dem Paket-Merge „Status prüfen“ wählen, um den Katalogvorschlag freizuschalten. Er geht nur, wenn das Paket auf dem Basisbranch genau dem gemergten Stand entspricht. Später geht das auch unter <ExternalAnchor href="/export/shared">„Geteilte Pakete“</ExternalAnchor>, ohne dieses Formular.</p>
         </>}
-        {pending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />Anfrage wird verarbeitet …</p>}
-        {result && <div role={result.status === 'invalid' || result.status === 'error' || result.status === 'forbidden' ? 'alert' : 'status'} className={`whitespace-pre-wrap text-sm ${FEEDBACK_STYLES[result.status]}`}><p>{result.detail}</p>
-            {/* Not twice: once a step shows its merge request, the result line does not repeat the link. */}
-            {result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl && <a href={result.mrUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 underline">Merge Request öffnen<ExternalLink className="size-3" /></a>}
-        </div>}
+        {pending && <Pending>Anfrage wird verarbeitet …</Pending>}
+        {/* Not twice: once a step shows its merge request, the answer does not repeat the link. */}
+        {result && <Notice tone={resultTone(result.status)} live
+            action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
+            <p className="whitespace-pre-wrap">{result.detail}</p>
+        </Notice>}
         {refused && <div className="flex flex-col gap-3">
-            <List title="Paketprüfung" items={refused.errors} tone="error" />
-            {!!refused.warnings.length && <List title="Hinweise aus dem Export" items={refused.warnings} tone="warn" />}
+            <Notice tone="error" title="Das Paket würde die Prüfung nicht bestehen"><NoticeList items={refused.errors} /></Notice>
+            {!!refused.warnings.length && <Notice tone="warn" title="Hinweise aus dem Export"><NoticeList items={refused.warnings} /></Notice>}
         </div>}
         {result?.bundle && <div className="flex flex-wrap gap-2 text-xs"><Badge label={`Bundle: ${bundleLabel(result.bundle.state)}`} url={result.bundle.mrUrl} />{result.bundle.verification && <Badge label={`Prüfung: ${verificationLabel(result.bundle.verification)}`} url={result.bundle.verification.mergedMrUrl} />}{result.catalog && <Badge label={`Katalog: ${catalogLabel(result.catalog.state)}`} url={result.catalog.mrUrl} />}</div>}
     </div>
-}
-
-function buttonClass(kind: 'primary' | 'secondary'): string {
-    const base = 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-opacity disabled:opacity-50'
-    return kind === 'primary'
-        ? `${base} bg-primary text-primary-foreground hover:opacity-90`
-        : `${base} border text-foreground hover:bg-muted`
 }
 
 /** A step that is done: what happened, and its merge request to open. */
@@ -243,7 +240,7 @@ function Done({ label, url }: { label: string; url?: string }) {
     return <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-md border px-3 py-1.5 text-sm text-foreground">
         <CircleCheck aria-hidden className="size-4 text-success" />{label}
         {url && <><span aria-hidden className="text-muted-foreground">-</span>
-            <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline">{ref ? `Merge Request ${ref} öffnen` : 'Merge Request öffnen'}<ExternalLink aria-hidden className="size-3" /></a></>}
+            <ExternalAnchor href={url} className="font-normal">{ref ? `Merge Request ${ref} öffnen` : 'Merge Request öffnen'}</ExternalAnchor></>}
     </span>
 }
 
@@ -291,9 +288,9 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
             </p>
 
             {preview.errors.length > 0 && (
-                <List title="Validierung schlägt fehl" items={preview.errors} tone="error" />
+                <Notice tone="error" title="Das Paket würde die Prüfung nicht bestehen"><NoticeList items={preview.errors} /></Notice>
             )}
-            {preview.warnings.length > 0 && <List title="Hinweise aus dem Export" items={preview.warnings} tone="warn" />}
+            {preview.warnings.length > 0 && <Notice tone="warn" title="Hinweise aus dem Export"><NoticeList items={preview.warnings} /></Notice>}
 
             <div className="overflow-x-auto">
                 <table className="w-full min-w-[32rem] text-xs">
@@ -346,7 +343,6 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                         ? [...new Set(preview.stripped.map((s) => `${s.file}: ${s.field} (${s.reason})`))]
                         : ['keine - das Paket enthielt keine Zugangsdaten']
                 }
-                tone="muted"
             />
             <List
                 title="Install-Parameter der Zielinstanz"
@@ -355,18 +351,17 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                         ? preview.parameters.map((p) => `${p.file}: ${p.fields.join(', ')}`)
                         : ['keine']
                 }
-                tone="muted"
             />
         </div>
     )
 }
 
-function List({ title, items, tone }: { title: string; items: string[]; tone: 'error' | 'warn' | 'muted' }) {
-    const color = tone === 'error' ? 'text-error' : tone === 'warn' ? 'text-warn' : 'text-muted-foreground'
+/** A plain list of facts in the preview; messages use `Notice`. */
+function List({ title, items }: { title: string; items: string[] }) {
     return (
         <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-            <ul className={`mt-1 list-disc pl-5 text-xs ${color}`}>
+            <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
                 {items.map((item) => (
                     <li key={item} className="break-all">
                         {item}
@@ -395,7 +390,7 @@ function DemoData({ demo, excluded, onToggle, onReload }: { demo: DemoInventory;
     return <div className="flex flex-col gap-3 border-t pt-4">
         <h3 className="font-semibold">Demo-Daten</h3>
         <p className="text-sm text-muted-foreground">Freiwillig. Angehakte Datenströme des Simulators kommen ins Paket, und eine Installation startet sie für ihre eigenen Datenquellen. Ohne Demo-Daten fließen nach der Installation erst Daten, wenn eine echte Quelle angebunden ist.</p>
-        {demo.problem ? <p className="text-sm text-muted-foreground">{demo.problem}</p>
+        {demo.problem ? <InlineNotice tone="neutral">{demo.problem}</InlineNotice>
             : !demo.sources.length ? <p className="text-sm text-muted-foreground">Dieser Use Case hat keine MQTT- oder SQL-Quelle, für die der Simulator Daten erzeugen könnte.</p>
             : demo.sources.map((demoSource) => <div key={demoSource.id} className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">{demoSource.name} <span className="font-normal text-muted-foreground">· {demoSource.transport === 'mqtt' ? 'MQTT' : 'SQL'}</span></p>
@@ -406,9 +401,9 @@ function DemoData({ demo, excluded, onToggle, onReload }: { demo: DemoInventory;
                         {stream.matchedBy === 'address' && <span className="text-xs text-muted-foreground">über Topic oder Tabelle gefunden</span>}
                     </label></li>)}
                 </ul> : <p className="mt-1 text-muted-foreground">Für diese Quelle gibt es keine Demo-Daten.{' '}
-                    {demo.simulatorUi && demoSource.structureUrn && <a href={newSimulationUiHref(demo.simulatorUi, demoSource.structureUrn, demoSource.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">Im Simulator anlegen<ExternalLink className="size-3" /></a>}
+                    {demo.simulatorUi && demoSource.structureUrn && <ExternalAnchor href={newSimulationUiHref(demo.simulatorUi, demoSource.structureUrn, demoSource.id)}>Im Simulator anlegen</ExternalAnchor>}
                 </p>}
             </div>)}
-        <button type="button" className="self-start text-sm underline" onClick={onReload}>Erneut prüfen</button>
+        <Button variant="ghost" className="self-start" onClick={onReload}>Erneut prüfen</Button>
     </div>
 }

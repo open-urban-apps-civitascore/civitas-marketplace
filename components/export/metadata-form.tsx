@@ -2,6 +2,7 @@
 
 import { METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { THEME_LABELS, THEME_ORDER } from '@/lib/catalog/vocabulary'
+import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
@@ -40,9 +41,9 @@ export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChan
                     <span>{key === 'src' ? 'Bildadresse / Pfad *' : key === 'alt' ? 'Alternativtext *' : 'Bildunterschrift'}</span>
                     <input className={inputClass} value={item[key]} required={key !== 'caption' && Object.values(item).some((text) => text.trim())} onChange={(event) => onChange({ ...value, media: value.media.map((row, i) => i === index ? { ...row, [key]: event.target.value } : row) })} />
                 </label>)}
-                <button type="button" className="justify-self-start text-sm underline" onClick={() => onChange({ ...value, media: value.media.filter((_, i) => i !== index) })}>Bild {index + 1} entfernen</button>
+                <Button variant="ghost" className="justify-self-start" onClick={() => onChange({ ...value, media: value.media.filter((_, i) => i !== index) })}>Bild {index + 1} entfernen</Button>
             </div>)}
-            <button type="button" className="self-start rounded-md border px-3 py-2 text-sm hover:bg-muted" onClick={() => onChange({ ...value, media: [...value.media, { src: '', alt: '', caption: '' }] })}>Bild hinzufügen</button>
+            <Button className="self-start" onClick={() => onChange({ ...value, media: [...value.media, { src: '', alt: '', caption: '' }] })}>Bild hinzufügen</Button>
         </fieldset>
     </>
 }
