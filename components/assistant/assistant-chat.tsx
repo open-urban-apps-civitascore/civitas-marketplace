@@ -409,6 +409,8 @@ function UseCaseCard({
                         datapoolProblem={options.datapoolProblem}
                         canCreateDatapool={options.canCreateDatapool}
                         triggerLabel="Plan bestätigen …"
+                        // A generated use case is new, not taken over from another municipality.
+                        title={`„${plan.title}“ installieren`}
                         datapoolNamePrefix="[AI-Assistant] "
                         installationHref={installationHref}
                         onInstalled={(result) =>
