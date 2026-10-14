@@ -24,7 +24,11 @@ export default async function AuthenticatedLayout({
     return (
         <AppShell sidebar={<AppSidebar userName={userName} assistant={isAssistantConfigured()} />}>
             <AppHeader />
-            <div className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">{children}</div>
+            {/* `relative` keeps absolutely positioned content inside the scrolling area. Without it,
+                the hidden native select a dropdown adds inside a <form> (the Steckbrief) is placed
+                against the page, makes the page itself taller than the frame and scrollable, and
+                a white strip shows below the frame (Ewa, 2026-10-14). */}
+            <div className="relative flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">{children}</div>
         </AppShell>
     )
 }
