@@ -9,6 +9,11 @@
  * clash.
  */
 export const TONES = {
+    // The kinds of catalogue entry, design system §4.2: emerald a use case,
+    // orange an add-on, CIVITAS blue a data structure.
+    usecase: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    addon: 'bg-orange-500/10 text-orange-700 dark:text-orange-400',
+    datastructure: 'bg-primary/10 text-primary',
     simulator: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
     platform: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
     dashboards: 'bg-sky-500/10 text-sky-700 dark:text-sky-400',
