@@ -63,7 +63,11 @@ export type UseCaseStatus = z.infer<typeof useCaseStatusSchema>
 
 export const USE_CASE_STATUS_LABELS: Record<UseCaseStatus, string> = {
     idee: 'Idee',
-    entwurf: 'Entwurf',
+    // CIVITAS Connect calls this stage "Entwurf"; here it reads "In Konzeption",
+    // as in the clickdummy (2026-10-12): "Entwurf" already is a dataset's state
+    // in this app ("als Entwurf installiert"), and one word with two meanings on
+    // one page gets misread. The stored value stays `entwurf`.
+    entwurf: 'In Konzeption',
     'in-entwicklung': 'In Entwicklung',
     prototyp: 'Prototyp',
     produktiv: 'Produktiv',
@@ -82,6 +86,20 @@ export const USE_CASE_STATUS_HINTS: Record<UseCaseStatus, string> = {
     archiviert: 'Nicht mehr in Betrieb.',
 }
 
+/**
+ * The two answers to "is anyone wanted to work on this?". Worded rather than
+ * "Ja"/"Nein" (clickdummy, 2026-10-12), and the second claims no more than it
+ * knows: an entry that says nothing about partners has not sought any
+ * explicitly either.
+ */
+export const COLLABORATION_LABELS = {
+    sought: 'Suche Mitstreiter',
+    notSought: 'Keine Mitstreiter explizit gesucht',
+} as const
+
+export const collaborationLabel = (wanted: boolean | undefined): string =>
+    wanted ? COLLABORATION_LABELS.sought : COLLABORATION_LABELS.notSought
+
 export const curationTierSchema = z.enum(['experimental', 'community', 'verified'])
 export type CurationTier = z.infer<typeof curationTierSchema>
 
@@ -96,6 +114,33 @@ export const CURATION_TIER_HINTS: Record<CurationTier, string> = {
     community: 'Gegen die Kuratierungs-Checkliste geprüft.',
     verified: 'Geprüft und mit einer festen Version gelistet.',
 }
+
+/**
+ * What each seal stands for, so the people who sign off can check the claim.
+ * Taken from the catalogue's own rules (CONTRIBUTING.md, "Curation tiers" and
+ * the reviewer checklist), not from the clickdummy's longer list: the page
+ * may only promise what the curation actually checks.
+ */
+export const CURATION_TIER_CRITERIA: Record<CurationTier, string[]> = {
+    experimental: ['Eintrag formal gültig', 'Inhaltlich noch nicht geprüft'],
+    community: [
+        'Alle Kriterien von „Experimentell“',
+        'Öffentliches Repository mit angegebener Lizenz',
+        'Pflegestelle benannt und erreichbar',
+        'Bewusst gewählter, fester Stand',
+        'Beschreibung auch fachfremd verständlich',
+        'Keine echten personenbezogenen Daten in den Texten',
+    ],
+    verified: [
+        'Alle Kriterien von „Community“',
+        'Irgendwo produktiv im Einsatz',
+        'Auf eine benannte Release-Version festgelegt',
+    ],
+}
+
+/** Who gives a seal, and that it can be taken back (CONTRIBUTING.md). */
+export const CURATION_TIER_REVOCABLE =
+    'Vergibt die Kuratierung, nie der Eintrag selbst - und sie stuft zurück, wenn ein Eintrag die Kriterien nicht mehr erfüllt.'
 
 export const FIELD_LABELS = {
     themes: 'Themengebiet',

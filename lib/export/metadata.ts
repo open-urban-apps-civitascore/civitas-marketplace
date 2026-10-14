@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { pinnedRowObject } from '@/lib/catalog/schema'
 import {
-    COST_BAND_LABELS, EFFORT_BAND_LABELS, FIELD_LABELS, LOGIC_MODEL_STEPS,
+    COLLABORATION_LABELS, COST_BAND_LABELS, EFFORT_BAND_LABELS, FIELD_LABELS, LOGIC_MODEL_STEPS,
     USE_CASE_STATUS_LABELS,
 } from '@/lib/catalog/vocabulary'
 
@@ -44,7 +44,7 @@ export const METADATA_GROUPS: { title: string; fields: MetadataField[] }[] = [
         path: `implementation.logicModel.${step.key}`, label: `${step.label} — ${step.gloss}`, hint: step.hint, kind: 'multiline',
     })) },
     { title: 'Kooperation & Referenz', fields: [
-        { path: 'implementation.collaboration.wanted', label: FIELD_LABELS.collaboration, options: { true: 'Partner gesucht', false: 'Aktuell kein Bedarf' } },
+        { path: 'implementation.collaboration.wanted', label: FIELD_LABELS.collaboration, options: { true: COLLABORATION_LABELS.sought, false: COLLABORATION_LABELS.notSought } },
         { path: 'implementation.collaboration.seeking', label: 'Gesuchte Unterstützung', kind: 'multiline' },
         { path: 'implementation.reference.url', label: FIELD_LABELS.reference, kind: 'url', hint: 'HTTPS-Adresse' },
         { path: 'implementation.reference.source', label: 'Quelle / Sammlung' },
