@@ -32,13 +32,14 @@ const NAV_SECTIONS: NavSection[] = [
         title: 'Plattform',
         items: [
             {
-                title: 'Marketplace',
-                href: '/use-cases',
+                // Named and ordered as in the clickdummy.
+                title: 'Marktplatz',
+                href: '/',
                 icon: LayoutGrid,
                 children: [
-                    { title: 'Use Cases', href: '/use-cases' },
-                    { title: 'Datenstrukturen', href: '/datastructures' },
+                    { title: 'Anwendungsfälle', href: '/use-cases' },
                     { title: 'Add-ons', href: '/add-ons' },
+                    { title: 'Datenstrukturen', href: '/datastructures' },
                 ],
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },

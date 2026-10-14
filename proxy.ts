@@ -20,7 +20,7 @@ export default auth((req) => {
     // `session.user` is built from the token unconditionally, so a session whose
     // refresh failed still carries a user. Without the error check this guard
     // would call that "signed in" while requireSession() calls it "signed out",
-    // and the two would bounce the browser between /login and /use-cases until
+    // and the two would bounce the browser between /login and the front page until
     // it gave up with ERR_TOO_MANY_REDIRECTS.
     const isLoggedIn = !!req.auth?.user && !req.auth.error
     const isLoginPage = nextUrl.pathname === '/login'
@@ -29,7 +29,7 @@ export default auth((req) => {
         return NextResponse.redirect(new URL('/login', nextUrl))
     }
     if (isLoggedIn && isLoginPage) {
-        return NextResponse.redirect(new URL('/use-cases', nextUrl))
+        return NextResponse.redirect(new URL('/', nextUrl))
     }
     return NextResponse.next()
 })

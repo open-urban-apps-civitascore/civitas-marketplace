@@ -18,7 +18,7 @@ export default function LoginPage() {
                 <form
                     action={async () => {
                         'use server'
-                        await signIn('keycloak', { redirectTo: '/use-cases' })
+                        await signIn('keycloak', { redirectTo: '/' })
                     }}
                     className="w-full"
                 >
