@@ -1,15 +1,20 @@
 'use client'
 
-import { useActionState, useEffect, useRef, useState } from 'react'
-import { Check, Download, PlayCircle, X } from 'lucide-react'
+import { useActionState, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeft, ArrowRight, Download, FileSearch, PlayCircle, ShieldCheck, X } from 'lucide-react'
 
-import { FEEDBACK_STYLES, feedbackText } from '@/components/catalog/install-button'
+import { feedbackText } from '@/components/catalog/install-button'
 import { InstallOutcomeView } from '@/components/catalog/install-outcome'
 import { SubmitButton } from '@/components/catalog/submit-button'
+import { Button } from '@/components/ui/button'
+import { Modal } from '@/components/ui/modal'
+import { InlineNotice, Notice, type NoticeTone } from '@/components/ui/notice'
 import { Select } from '@/components/ui/select'
+import type { PackageContents } from '@/lib/catalog/package-contents'
 import { DATAPOOL_NAME_MAX, DATAPOOL_NAME_MIN, suggestDatapoolName } from '@/lib/datapool-name'
 import type { DatapoolOption } from '@/lib/datapools'
 import { installEntry, type InstallResult } from '@/lib/install-actions'
+import { cn } from '@/lib/utils'
 
 /**
  * The use-case install wizard: data source → target and release → review.
@@ -20,6 +25,11 @@ import { installEntry, type InstallResult } from '@/lib/install-actions'
  * afterwards: as a draft, the default, because a release publishes data and is
  * the operator's call; or released in the same step, which stages and releases
  * the dataset right after the install (see installEntry).
+ *
+ * Shaped like the clickdummy's wizard (install-use-case-button.tsx): a modal
+ * with one decision per view, numbered steps, radio choices with the demo-data
+ * start featured, and for an entry nobody has checked in depth one view before
+ * the wizard that says so (friction in proportion to trust, D11).
  */
 
 type DataSourceMode = 'demo' | 'custom' | 'later'
@@ -33,7 +43,34 @@ type ReleaseMode = 'draft' | 'release'
  */
 type DatapoolMode = 'new' | 'existing'
 
+/** Why the wizard is preceded by a note: the seal says "not reviewed in depth", or there is no seal yet. */
+export type InstallAcknowledgement = 'experimental' | 'unreviewed'
+
 const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
+
+const STEP_HINTS: Record<number, string | undefined> = {
+    0: 'Woher kommen die Daten? Zum Ausprobieren brauchen Sie noch keine eigenen.',
+    2: 'Alles auf einen Blick - erst nach Ihrer Bestätigung wird etwas angelegt.',
+}
+
+const ACKNOWLEDGEMENT: Record<InstallAcknowledgement, { title: string; text: string }> = {
+    experimental: {
+        title: 'Als „Experimentell“ eingestuft',
+        text: 'Dieser Eintrag ist formal gültig, aber noch nicht inhaltlich geprüft.',
+    },
+    unreviewed: {
+        title: 'Noch ohne Siegel',
+        text: 'Die Kuratierung hat diesen Eintrag noch nicht eingestuft.',
+    },
+}
+
+/** A refusal is the platform's answer to this attempt; "already installed" is a fact, not a failure. */
+const RESULT_TONES: Record<InstallResult['status'], NoticeTone> = {
+    created: 'success',
+    conflict: 'neutral',
+    invalid: 'error',
+    error: 'error',
+}
 
 /**
  * Which existing datapool is selected once the user switches to one. A single
@@ -54,7 +91,10 @@ export function InstallDialog({
     datapools = [],
     datapoolProblem,
     canCreateDatapool = false,
-    triggerLabel = 'Installieren',
+    acknowledge,
+    contents,
+    triggerLabel = 'Nachnutzen',
+    title,
     datapoolNamePrefix = '',
     installationHref,
     onInstalled,
@@ -72,8 +112,14 @@ export function InstallDialog({
     datapoolProblem?: string
     /** DATAPOOL_CREATE across the tenant: decides whether a new pool is offered. */
     canCreateDatapool?: boolean
+    /** Set for a catalogue entry nobody has reviewed in depth: a note comes before the wizard. */
+    acknowledge?: InstallAcknowledgement
+    /** What the package holds, for the review's "Das wird angelegt"; absent, the review lists the choices only. */
+    contents?: PackageContents
     /** The trigger's text; the assistant's plan card says "Plan bestätigen". */
     triggerLabel?: string
+    /** The dialog's heading; by default the entry is taken over ("nachnutzen"). */
+    title?: string
     /** Put in front of the proposed name of a new datapool, e.g. "[AI-Assistant] " for generated use cases. */
     datapoolNamePrefix?: string
     /** Where the new installation can be looked at; set, the success message links there in a new tab. */
@@ -81,7 +127,9 @@ export function InstallDialog({
     /** Called once when the install succeeded, e.g. for the assistant to report it in the chat. */
     onInstalled?: (result: InstallResult) => void
 }) {
+    const titleId = useId()
     const [open, setOpen] = useState(false)
+    const [acknowledged, setAcknowledged] = useState(false)
     const [step, setStep] = useState(0)
     const [mode, setMode] = useState<DataSourceMode>(demoAvailable ? 'demo' : 'later')
     const [brokerUrl, setBrokerUrl] = useState('')
@@ -117,8 +165,11 @@ export function InstallDialog({
             (datapoolMode === 'existing'
                 ? !datapool
                 : newDatapoolName.trim().length < DATAPOOL_NAME_MIN))
+    const needsAcknowledgement = acknowledge !== undefined && !acknowledged && !done
 
     function close() {
+        // An install in flight finishes whether or not the dialog is open; closing would hide its answer.
+        if (pending) return
         setOpen(false)
         setStep(0)
     }
@@ -131,67 +182,79 @@ export function InstallDialog({
 
     return (
         <div className="flex flex-col gap-2">
+            {/* Download, not Sparkles: installing is a fixed sequence of steps, not magic (design system §6). */}
             {!done && (
-                <button
-                    type="button"
-                    onClick={() => setOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-                >
-                    <Download className="size-4" />
+                <Button variant="primary" icon={Download} onClick={() => setOpen(true)}>
                     {triggerLabel}
-                </button>
+                </Button>
             )}
             {/* A refusal stays below the trigger once the dialog is closed, so
                 the user can retry knowing why. A success needs no trace here. */}
             {!open && result && result.status !== 'created' && (
-                <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
+                <Notice tone={RESULT_TONES[result.status]} className="rounded-md px-3 py-2">
                     {feedbackText(result)}
-                </p>
+                </Notice>
             )}
 
-            {open && (
-                <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={`„${displayName}“ installieren`}
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-                >
-                    <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border bg-card shadow-xl">
-                        <div className="flex items-center justify-between border-b px-5 py-4">
-                            <h2 className="text-base font-semibold">„{displayName}“ installieren</h2>
-                            <button
-                                type="button"
-                                onClick={close}
-                                aria-label="Schließen"
-                                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted"
-                            >
-                                <X className="size-4" />
-                            </button>
-                        </div>
+            <Modal open={open} onClose={close} labelledBy={titleId}>
+                <div className="flex items-start justify-between gap-3 border-b p-5">
+                    <h2 id={titleId} className="text-lg font-semibold text-foreground">
+                        {title ?? `„${displayName}“ nachnutzen`}
+                    </h2>
+                    <button
+                        type="button"
+                        onClick={close}
+                        aria-label="Schließen"
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                        <X className="size-5" />
+                    </button>
+                </div>
 
-                        <div className="flex items-center gap-2 border-b px-5 py-3 text-sm">
+                {needsAcknowledgement ? (
+                    <>
+                        <div className="flex flex-col gap-3 overflow-y-auto p-5">
+                            <Notice tone="warn" title={ACKNOWLEDGEMENT[acknowledge].title}>
+                                {ACKNOWLEDGEMENT[acknowledge].text} Ausprobieren ist gefahrlos - die Installation
+                                lässt sich wieder entfernen. Für den Produktivbetrieb wird ein geprüfter Eintrag
+                                empfohlen.
+                            </Notice>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+                            <Button onClick={close}>Abbrechen</Button>
+                            <Button variant="primary" onClick={() => setAcknowledged(true)}>
+                                Verstanden, weiter
+                            </Button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <ol aria-label="Schritte" className="flex flex-wrap items-center gap-1.5 px-5 pt-4">
                             {STEPS.map((label, index) => (
-                                <div key={label} className="flex items-center gap-2">
-                                    {index > 0 && <span className="w-6 border-t" />}
+                                <li key={label} aria-current={index === step ? 'step' : undefined} className="flex items-center gap-1.5">
+                                    {index > 0 && <span aria-hidden className="h-px w-4 bg-border" />}
                                     <span
-                                        className={`flex size-6 items-center justify-center rounded-full text-xs font-semibold ${
+                                        className={cn(
+                                            'grid size-6 place-items-center rounded-full text-xs font-semibold',
                                             index === step
                                                 ? 'bg-primary text-primary-foreground'
                                                 : index < step
-                                                  ? 'bg-success/15 text-success'
-                                                  : 'bg-muted text-muted-foreground'
-                                        }`}
+                                                  ? 'bg-primary/15 text-primary'
+                                                  : 'bg-muted text-muted-foreground',
+                                        )}
                                     >
-                                        {index < step ? <Check className="size-3.5" /> : index + 1}
+                                        {index + 1}
                                     </span>
-                                    <span className={index === step ? 'font-medium' : 'text-muted-foreground'}>
+                                    <span className={cn('text-xs font-medium', index === step ? 'text-foreground' : 'text-muted-foreground')}>
                                         {label}
                                     </span>
-                                </div>
+                                </li>
                             ))}
-                        </div>
+                        </ol>
 
-                        <div className="flex-1 overflow-auto px-5 py-4">
+                        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
+                            {STEP_HINTS[step] && <p className="text-sm text-muted-foreground">{STEP_HINTS[step]}</p>}
+
                             {step === 0 && (
                                 <DataSourceStep
                                     mode={mode}
@@ -228,6 +291,7 @@ export function InstallDialog({
                                             : (datapool?.name ?? '')
                                     }
                                     releaseMode={releaseMode}
+                                    contents={contents}
                                 />
                             )}
 
@@ -242,7 +306,7 @@ export function InstallDialog({
                                 />
                             )}
                             {step === 2 && result && !(result.status === 'created' && result.outcome) && (
-                                <p className={`mt-3 text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
+                                <Notice tone={RESULT_TONES[result.status]} live>
                                     {feedbackText(result)}
                                     {result.status === 'created' && result.installationId && installationHref && (
                                         <>
@@ -257,118 +321,123 @@ export function InstallDialog({
                                             </a>
                                         </>
                                     )}
-                                </p>
+                                </Notice>
                             )}
                         </div>
 
-                        <div className="flex items-center justify-between border-t px-5 py-4">
-                            <button
-                                type="button"
-                                onClick={step === 0 ? close : () => setStep(step - 1)}
-                                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
-                            >
-                                {step === 0 ? 'Abbrechen' : 'Zurück'}
-                            </button>
-                            {step < 2 ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setStep(step + 1)}
-                                    disabled={stepIncomplete}
-                                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                                >
-                                    Weiter →
-                                </button>
-                            ) : done ? (
-                                <button
-                                    type="button"
-                                    onClick={close}
-                                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-                                >
-                                    Fertig
-                                </button>
-                            ) : (
-                                <form action={formAction}>
-                                    <input type="hidden" name="entryId" value={entryId} />
-                                    <input type="hidden" name="dataSourceMode" value={mode} />
-                                    <input type="hidden" name="brokerUrl" value={brokerUrl} />
-                                    <input type="hidden" name="datapoolMode" value={datapoolMode} />
-                                    <input
-                                        type="hidden"
-                                        name="datapoolId"
-                                        value={datapoolMode === 'existing' ? datapoolId : ''}
-                                    />
-                                    <input
-                                        type="hidden"
-                                        name="newDatapoolName"
-                                        value={datapoolMode === 'new' ? newDatapoolName.trim() : ''}
-                                    />
-                                    <input type="hidden" name="releaseMode" value={releaseMode} />
-                                    <SubmitButton
-                                        pending={pending}
-                                        icon={Download}
-                                        label="Installieren"
-                                        pendingLabel="Installiere …"
-                                    />
-                                </form>
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t p-4">
+                            {done ? <span /> : (
+                                <Button variant="ghost" onClick={close} disabled={pending}>
+                                    Abbrechen
+                                </Button>
                             )}
+                            <div className="flex gap-2">
+                                {step > 0 && !done && (
+                                    <Button icon={ArrowLeft} onClick={() => setStep(step - 1)} disabled={pending}>
+                                        Zurück
+                                    </Button>
+                                )}
+                                {step < 2 ? (
+                                    <Button variant="primary" onClick={() => setStep(step + 1)} disabled={stepIncomplete}>
+                                        Weiter
+                                        <ArrowRight aria-hidden className="size-4" />
+                                    </Button>
+                                ) : done ? (
+                                    <Button variant="primary" onClick={close}>
+                                        Fertig
+                                    </Button>
+                                ) : (
+                                    <form action={formAction}>
+                                        <input type="hidden" name="entryId" value={entryId} />
+                                        <input type="hidden" name="dataSourceMode" value={mode} />
+                                        <input type="hidden" name="brokerUrl" value={brokerUrl} />
+                                        <input type="hidden" name="datapoolMode" value={datapoolMode} />
+                                        <input
+                                            type="hidden"
+                                            name="datapoolId"
+                                            value={datapoolMode === 'existing' ? datapoolId : ''}
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="newDatapoolName"
+                                            value={datapoolMode === 'new' ? newDatapoolName.trim() : ''}
+                                        />
+                                        <input type="hidden" name="releaseMode" value={releaseMode} />
+                                        <SubmitButton
+                                            pending={pending}
+                                            icon={Download}
+                                            label="Jetzt installieren"
+                                            pendingLabel="Wird installiert …"
+                                        />
+                                    </form>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                </div>
-            )}
+                    </>
+                )}
+            </Modal>
         </div>
     )
 }
 
-function OptionCard({
-    selected,
+/**
+ * One choice of a step as a radio, the clickdummy's pattern: a native radio
+ * group gives arrow keys and one tab stop for free. The checked choice gets
+ * the primary tint; the featured one (the demo start) is tinted always, as a
+ * recommendation. What a choice needs filled in shows right under it once it
+ * is chosen.
+ */
+function Choice({
+    name,
+    checked,
     disabled = false,
     onSelect,
     title,
-    badge,
     description,
+    featured = false,
     children,
 }: {
-    selected: boolean
+    name: string
+    checked: boolean
     disabled?: boolean
     onSelect: () => void
     title: string
-    badge?: string
     description: string
-    children?: React.ReactNode
+    featured?: boolean
+    children?: ReactNode
 }) {
     return (
-        <div
-            className={`rounded-lg border p-4 transition-colors ${
-                selected ? 'border-success bg-success/5' : disabled ? 'opacity-60' : 'hover:bg-muted/50'
-            }`}
-        >
-            <button
-                type="button"
-                onClick={onSelect}
-                disabled={disabled}
-                className="flex w-full items-start gap-3 text-left disabled:cursor-not-allowed"
+        <div className="flex flex-col gap-2">
+            <label
+                className={cn(
+                    'flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60',
+                    featured
+                        ? 'border-emerald-300 bg-emerald-50/60 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:has-[:checked]:border-emerald-600'
+                        : 'has-[:checked]:border-primary has-[:checked]:bg-primary/5',
+                )}
             >
-                <span
-                    className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border ${
-                        selected ? 'border-success' : 'border-muted-foreground/50'
-                    }`}
-                >
-                    {selected && <span className="size-2 rounded-full bg-success" />}
-                </span>
-                <span className="flex flex-col gap-1">
-                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                        {title}
-                        {badge && (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
-                                <PlayCircle className="size-3" />
-                                {badge}
+                <input
+                    type="radio"
+                    name={name}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={onSelect}
+                    className={cn('mt-0.5', featured ? 'accent-emerald-600' : 'accent-primary')}
+                />
+                <span className="flex flex-col gap-0.5">
+                    <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-foreground">{title}</span>
+                        {featured && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                <PlayCircle aria-hidden className="size-3" />
+                                Empfohlen zum Ausprobieren
                             </span>
                         )}
                     </span>
                     <span className="text-xs leading-relaxed text-muted-foreground">{description}</span>
                 </span>
-            </button>
-            {selected && children && <div className="mt-3 pl-7">{children}</div>}
+            </label>
+            {checked && children && <div className="ml-6">{children}</div>}
         </div>
     )
 }
@@ -387,49 +456,50 @@ function DataSourceStep({
     demoAvailable: boolean
 }) {
     return (
-        <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-                Woher kommen die Daten? Zum Ausprobieren brauchen Sie noch keine eigenen.
-            </p>
-            <OptionCard
-                selected={mode === 'demo'}
+        <fieldset className="flex flex-col gap-2">
+            <legend className="sr-only">Datenquelle</legend>
+            <Choice
+                name="dataSource"
+                checked={mode === 'demo'}
                 disabled={!demoAvailable}
                 onSelect={() => onMode('demo')}
+                featured={demoAvailable}
                 title="Mit Demo-Daten starten"
-                badge="Empfohlen zum Ausprobieren"
                 description={
                     demoAvailable
-                        ? 'Der Anwendungsfall sendet nach der Freigabe mitgelieferte Beispieldaten — ohne eigene Sensoren, ohne Konfiguration. Ideal, um zu sehen, ob er zu Ihrer Kommune passt.'
+                        ? 'Der Anwendungsfall sendet nach der Freigabe mitgelieferte Beispieldaten - ohne eigene Sensoren, ohne Konfiguration. Ideal, um zu sehen, ob er zu Ihrer Kommune passt.'
                         : 'Nicht verfügbar: Der Demo-Daten-Simulator ist auf dieser Instanz nicht konfiguriert (SIMULATOR_API_URL).'
                 }
             />
-            <OptionCard
-                selected={mode === 'custom'}
+            <Choice
+                name="dataSource"
+                checked={mode === 'custom'}
                 onSelect={() => onMode('custom')}
                 title="Eigene Datenquelle anbinden"
                 description="Verbindet den Anwendungsfall direkt mit Ihrem MQTT-Broker."
             >
                 <label className="flex flex-col gap-1 text-xs font-medium">
-                    MQTT-Broker-URL
+                    MQTT-Broker-URL *
                     <input
                         type="text"
                         value={brokerUrl}
                         onChange={(event) => onBrokerUrl(event.target.value)}
                         placeholder="tcp://broker.meine-kommune.de:1883"
-                        className="rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+                        className="rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs"
                     />
                     <span className="font-normal text-muted-foreground">
                         Wird für die Datenquellen übernommen, die das Paket dafür freigibt.
                     </span>
                 </label>
-            </OptionCard>
-            <OptionCard
-                selected={mode === 'later'}
+            </Choice>
+            <Choice
+                name="dataSource"
+                checked={mode === 'later'}
                 onSelect={() => onMode('later')}
                 title="Später konfigurieren"
-                description="Installiert mit der Standard-Konfiguration des Pakets — die Broker-Adresse lässt sich danach im Portal anpassen."
+                description="Installiert mit der Standard-Konfiguration des Pakets - die Broker-Adresse lässt sich danach im Portal anpassen."
             />
-        </div>
+        </fieldset>
     )
 }
 
@@ -463,14 +533,15 @@ function TargetStep({
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
+            <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-sm text-muted-foreground">
                     In welchem Datenpool soll der Anwendungsfall angelegt werden? Datenquellen und
                     Datensatz gehören danach zu diesem Pool. Über ihn werden auch die
                     Zugriffsrechte vergeben.
-                </p>
-                <OptionCard
-                    selected={datapoolMode === 'new'}
+                </legend>
+                <Choice
+                    name="datapoolMode"
+                    checked={datapoolMode === 'new'}
                     disabled={!canCreateDatapool}
                     onSelect={() => onDatapoolMode('new')}
                     title="Neuen Datenpool anlegen"
@@ -487,17 +558,15 @@ function TargetStep({
                             value={newDatapoolName}
                             onChange={(event) => onNewDatapoolName(event.target.value)}
                             maxLength={DATAPOOL_NAME_MAX}
-                            className="rounded-md border bg-background px-2 py-1.5 text-sm font-normal"
+                            className="rounded-md border bg-background px-2.5 py-1.5 text-sm font-normal"
                         />
-                        {nameTooShort && (
-                            <span className="font-normal text-warn">
-                                Mindestens {DATAPOOL_NAME_MIN} Zeichen.
-                            </span>
-                        )}
+                        {/* Something to fix right here, so warn (design system §4.4). */}
+                        {nameTooShort && <InlineNotice tone="warn">Mindestens {DATAPOOL_NAME_MIN} Zeichen.</InlineNotice>}
                     </label>
-                </OptionCard>
-                <OptionCard
-                    selected={datapoolMode === 'existing'}
+                </Choice>
+                <Choice
+                    name="datapoolMode"
+                    checked={datapoolMode === 'existing'}
                     disabled={datapools.length === 0}
                     onSelect={() => onDatapoolMode('existing')}
                     title="Bestehenden Datenpool wählen"
@@ -523,26 +592,28 @@ function TargetStep({
                             </span>
                         )}
                     </label>
-                </OptionCard>
-            </div>
+                </Choice>
+            </fieldset>
 
-            <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
+            <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-sm text-muted-foreground">
                     Wie soll der Anwendungsfall nach der Installation stehen?
-                </p>
-                <OptionCard
-                    selected={releaseMode === 'draft'}
+                </legend>
+                <Choice
+                    name="releaseMode"
+                    checked={releaseMode === 'draft'}
                     onSelect={() => onReleaseMode('draft')}
                     title="Als Entwurf installieren"
                     description="Datenstrukturen und Datenquellen werden freigegeben, der Datensatz bleibt ein Entwurf. Seine Freigabe erfolgt anschließend im Portal (Datensatz → Freigeben)."
                 />
-                <OptionCard
-                    selected={releaseMode === 'release'}
+                <Choice
+                    name="releaseMode"
+                    checked={releaseMode === 'release'}
                     onSelect={() => onReleaseMode('release')}
                     title="Sofort freigeben"
                     description="Installiert und gibt in einem Schritt frei. Die Plattform richtet danach Speicher und Pipeline ein, dann fließen die Daten. Zurücknehmen lässt sich die Freigabe im Portal."
                 />
-            </div>
+            </fieldset>
         </div>
     )
 }
@@ -560,6 +631,7 @@ function ReviewStep({
     brokerUrl,
     datapoolName,
     releaseMode,
+    contents,
 }: {
     displayName: string
     version: string
@@ -567,22 +639,75 @@ function ReviewStep({
     brokerUrl: string
     datapoolName: string
     releaseMode: ReleaseMode
+    contents?: PackageContents
 }) {
+    const streams = mode === 'demo' ? (contents?.demoStreams ?? []) : []
+    const count = (contents?.parts ?? []).reduce((sum, part) => sum + part.names.length, 0) + streams.length
     return (
-        <dl className="flex flex-col gap-3 text-sm">
-            <ReviewRow label="Paket" value={`${displayName} · v${version}`} />
-            <ReviewRow label="Datenquelle" value={MODE_LABELS[mode]} />
-            {mode === 'custom' && <ReviewRow label="MQTT-Broker" value={brokerUrl} mono />}
-            <ReviewRow label="Datenpool" value={datapoolName} />
-            <ReviewRow
-                label="Freigabe"
-                value={
-                    releaseMode === 'release'
-                        ? 'Sofort freigeben, Daten fließen nach der Einrichtung'
-                        : 'Als Entwurf, Freigabe danach im Portal'
-                }
-            />
-        </dl>
+        <div className="flex flex-col gap-4">
+            <dl className="flex flex-col gap-3 text-sm">
+                <ReviewRow label="Paket" value={`${displayName} · v${version}`} />
+                <ReviewRow label="Datenquelle" value={MODE_LABELS[mode]} />
+                {mode === 'custom' && <ReviewRow label="MQTT-Broker" value={brokerUrl} mono />}
+                <ReviewRow label="Datenpool" value={datapoolName} />
+                <ReviewRow
+                    label="Freigabe"
+                    value={
+                        releaseMode === 'release'
+                            ? 'Sofort freigeben, Daten fließen nach der Einrichtung'
+                            : 'Als Entwurf, Freigabe danach im Portal'
+                    }
+                />
+            </dl>
+            {/* Grouped by kind rather than one flat list (clickdummy, `DryRunPreview`): "4 Datenstrukturen,
+                2 Datenquellen" reads as a plan, a mixed stack of rows just as a lot. */}
+            {contents && count > 0 && (
+                <div className="flex flex-col gap-4 rounded-md border bg-background p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                            <FileSearch aria-hidden className="size-4 text-muted-foreground" />
+                            Das wird angelegt
+                        </p>
+                        <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            {count} {count === 1 ? 'Element' : 'Elemente'}
+                        </span>
+                    </div>
+                    {contents.parts.map((part) => (
+                        <PlanGroup key={part.type} title={part.label} names={part.names} />
+                    ))}
+                    {streams.length > 0 && <PlanGroup title={streams.length === 1 ? 'Demo-Datenstrom' : 'Demo-Datenströme'} names={streams} />}
+                </div>
+            )}
+            {/* What a data protection officer signs off on: a sentence about what is NOT touched.
+                The install creates copies with identities of their own (see lib/catalog/types). */}
+            <div className="rounded-md bg-muted/50 p-3">
+                <p className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <ShieldCheck aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                    Was unberührt bleibt
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    Bestehende Datensätze, Datenquellen und Pipelines dieser Instanz bleiben unverändert: die
+                    Installation legt eigene an.
+                </p>
+            </div>
+        </div>
+    )
+}
+
+function PlanGroup({ title, names }: { title: string; names: string[] }) {
+    return (
+        <section>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {title} <span className="font-normal">({names.length})</span>
+            </p>
+            <ul className="mt-1.5 divide-y rounded-md border">
+                {names.map((name, index) => (
+                    <li key={`${name}:${index}`} className="px-3 py-2 text-sm font-medium text-foreground">
+                        {name}
+                    </li>
+                ))}
+            </ul>
+        </section>
     )
 }
 
