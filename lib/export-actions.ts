@@ -9,6 +9,7 @@ import {
     exportReadiness,
     packageDir,
     parseBundleBranch,
+    type CatalogRepo,
     type ExportConfig,
     type ExportTarget,
 } from '@/lib/export/config'
@@ -18,24 +19,33 @@ import {
     getProject,
     GitLabError,
     listMergeRequestsBy,
+    listOpenMergeRequests,
     listTree,
     openMergeRequest,
     parseProjectUrl,
     readFile,
     type GitLabClient,
+    type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
+import { SHARE_READS } from '@/lib/export/share-cache'
+import { mapWithLimit } from '@/lib/concurrency'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
 import { PortalReadError, readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
 import {
+    catalogStatusIn,
     inspectBundle,
+    inspectBundleIn,
+    packageFolder,
+    readBaseTrees,
     readBundleStatus,
     readCatalogStatus,
     type BundleStatus,
     type BundleVerification,
+    type CatalogContext,
     type CatalogStatus,
 } from '@/lib/export/status'
 import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
@@ -558,10 +568,21 @@ export interface SharedPackageRow {
     /** Read for a merged bundle only. */
     bundle?: BundleStatus
     catalog?: CatalogStatus
+    /** Why the state could not be read completely; the row then shows its merge request only. */
+    problem?: string
 }
 
-/** Each merged row costs about ten GitLab requests, so the list stops at the newest. */
+/**
+ * The list stops at the newest: it is a look at what happened lately, not an
+ * archive. A merged row costs two to four GitLab requests, since what all rows
+ * share is read once per visit.
+ */
 const MAX_SHARED_ROWS = 15
+
+/** How many packages are checked at once: side by side, but not every request at the same moment. */
+const ROW_CONCURRENCY = 5
+
+type ProjectOf = (client: GitLabClient, url: string) => Promise<GitLabProject>
 
 /**
  * What this marketplace's bot has proposed, newest first, and where each
@@ -569,6 +590,13 @@ const MAX_SHARED_ROWS = 15
  * requests on `export/…` branches are the record, no marketplace bookkeeping.
  * A merged bundle is checked and gets its catalogue state, so the list can
  * offer the catalogue step without the form.
+ *
+ * Asked the way that keeps the page quick (it took about half a minute with
+ * nine merged packages, Ewa 2026-10-14): what every row shares - the
+ * project, the base branch with its package folders, the catalogue's open
+ * merge requests and index - is read once per visit; the rows are then
+ * checked side by side; and what a commit or a merged request holds is kept
+ * in memory (`SHARE_READS`), because it cannot change.
  */
 export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; error?: string }> {
     await requireSession()
@@ -576,22 +604,25 @@ export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; 
     if (exportReadiness(config) !== 'ready') return { rows: [] }
     const token = config.token as string
 
+    // One lookup per project and visit: target and catalogue are often the same repository.
+    const projects = new Map<string, Promise<GitLabProject>>()
+    const projectOf: ProjectOf = (client, url) => {
+        const key = `${client.apiBase}|${parseProjectUrl(url).projectPath}`
+        let project = projects.get(key)
+        if (!project) {
+            project = getProject(client, parseProjectUrl(url).projectPath)
+            projects.set(key, project)
+        }
+        return project
+    }
+
+    // Started at once, awaited by the rows that need it; a failure there is reported per row.
+    const catalog = readCatalogContext(config.catalog, token, projectOf)
+    catalog.catch(() => {})
+
     try {
         const rows: SharedPackageRow[] = []
-        for (const target of config.targets) {
-            const client = clientFor(target.url, token)
-            const project = await getProject(client, parseProjectUrl(target.url).projectPath)
-            const bot = await currentUser(client)
-            const seen = new Set<string>()
-            for (const mr of await listMergeRequestsBy(client, project.id, bot.id)) {
-                const parsed = parseBundleBranch(mr.source_branch)
-                // Newest first: the first request per branch is the one that counts.
-                if (!parsed || seen.has(mr.source_branch)) continue
-                seen.add(mr.source_branch)
-                rows.push(await sharedPackageRow(config, target, client, token, mr, parsed))
-                if (seen.size >= MAX_SHARED_ROWS) break
-            }
-        }
+        for (const target of config.targets) rows.push(...(await sharedRowsOf(target, token, projectOf, catalog)))
         return { rows }
     } catch (error) {
         if (error instanceof GitLabError) return { rows: [], error: gitlabMessage(error) }
@@ -599,14 +630,47 @@ export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; 
     }
 }
 
+/**
+ * One target's shared packages. The bot's merge requests and the base branch
+ * with its package folders are asked once, side by side; then the rows.
+ */
+async function sharedRowsOf(
+    target: ExportTarget,
+    token: string,
+    projectOf: ProjectOf,
+    catalog: Promise<CatalogContext | undefined>,
+): Promise<SharedPackageRow[]> {
+    const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS }
+    const [project, bot] = await Promise.all([projectOf(client, target.url), currentUser(client)])
+    const base = readBaseTrees(client, project.id, target)
+    base.catch(() => {})
+    const requests = await listMergeRequestsBy(client, project.id, bot.id)
+
+    // Newest first, so a branch's first request is the one that counts. The bot
+    // names the export branches, so its own requests are all there are from
+    // them: asking GitLab once more per branch would add nothing.
+    const byBranch = new Map<string, MergeRequestRef[]>()
+    for (const mr of requests) {
+        if (!parseBundleBranch(mr.source_branch)) continue
+        const known = byBranch.get(mr.source_branch)
+        if (known) known.push(mr)
+        else if (byBranch.size < MAX_SHARED_ROWS) byBranch.set(mr.source_branch, [mr])
+    }
+    return mapWithLimit([...byBranch.values()], ROW_CONCURRENCY, (branchRequests) =>
+        sharedPackageRow(target, client, project.id, base, branchRequests, catalog),
+    )
+}
+
 async function sharedPackageRow(
-    config: ExportConfig,
     target: ExportTarget,
     client: GitLabClient,
-    token: string,
-    mr: MergeRequestRef,
-    parsed: { slug: string; version: string },
+    projectId: number,
+    base: Promise<{ head: string | undefined; trees: Map<string, string> }>,
+    requests: MergeRequestRef[],
+    catalog: Promise<CatalogContext | undefined>,
 ): Promise<SharedPackageRow> {
+    const mr = requests[0]
+    const parsed = parseBundleBranch(mr.source_branch) as { slug: string; version: string }
     const row: SharedPackageRow = {
         key: `${target.key}#${mr.source_branch}`,
         targetKey: target.key,
@@ -618,16 +682,42 @@ async function sharedPackageRow(
     }
     if (mr.state !== 'merged') return row
 
-    const bundle = await readBundleStatus(client, target, parsed.slug, parsed.version)
-    if (!bundle.packageId) return { ...row, bundle }
-    const catalog = await readCatalogStatus(
-        config.catalog ? clientFor(config.catalog.url, token) : client,
-        config.catalog,
-        parsed.slug,
-        parsed.version,
-        bundle.packageId,
-    )
-    return { ...row, bundle, catalog }
+    try {
+        const { head, trees } = await base
+        const { status: bundle } = await inspectBundleIn(client, target, parsed.slug, parsed.version, undefined, {
+            projectId,
+            requests,
+            head,
+            treeOnBase: async () => trees.get(packageFolder(target, parsed.slug).name),
+        })
+        if (!bundle.packageId) return { ...row, bundle }
+        const context = await catalog
+        return {
+            ...row,
+            bundle,
+            catalog: context ? catalogStatusIn(context, parsed.slug, parsed.version, bundle.packageId) : { state: 'unconfigured' },
+        }
+    } catch (error) {
+        // One package GitLab cannot answer for does not take the list down with it.
+        if (error instanceof GitLabError) return { ...row, problem: gitlabMessage(error) }
+        throw error
+    }
+}
+
+/** The catalogue repository's open merge requests and its index, for every row of a listing at once. */
+async function readCatalogContext(
+    repo: CatalogRepo | undefined,
+    token: string,
+    projectOf: ProjectOf,
+): Promise<CatalogContext | undefined> {
+    if (!repo) return undefined
+    const client: GitLabClient = { ...clientFor(repo.url, token), cache: SHARE_READS }
+    const project = await projectOf(client, repo.url)
+    const [openRequests, index] = await Promise.all([
+        listOpenMergeRequests(client, project.id),
+        readFile(client, project.id, 'index.json', repo.baseBranch),
+    ])
+    return { openRequests, index }
 }
 
 /** The display name inside the bundle request's title, as `exportAction` writes it. */
