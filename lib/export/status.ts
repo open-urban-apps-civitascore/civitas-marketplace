@@ -2,6 +2,7 @@ import { isListed } from '@/lib/export/catalog-entry'
 import { bundleBranch, catalogBranch, packageDir, type CatalogRepo, type ExportTarget } from '@/lib/export/config'
 import {
     branchHead,
+    directoryTrees,
     findMergeRequests,
     getProject,
     mergeRequestCommits,
@@ -79,20 +80,20 @@ async function readTrees(
     client: GitLabClient,
     projectId: number,
     dir: string,
-    head: string,
+    treeOnBase: () => Promise<string | undefined>,
     merged: MergeRequestRef | undefined,
 ): Promise<BundleTrees> {
     if (!merged?.sha) return {}
-    const commits = await mergeRequestCommits(client, projectId, merged.iid).catch(() => [])
+    // Only the exported tree waits for the commits; the other two are asked alongside.
+    const [commits, onBase, mergedTree] = await Promise.all([
+        mergeRequestCommits(client, projectId, merged.iid, true).catch(() => []),
+        treeOnBase(),
+        treeIdOf(client, projectId, dir, merged.sha),
+    ])
     // GitLab lists newest first, so the oldest is the commit the export made.
     const exportedSha = commits.at(-1)?.id
-    const [onBase, mergedTree, exported] = await Promise.all([
-        treeIdOf(client, projectId, dir, head),
-        treeIdOf(client, projectId, dir, merged.sha),
-        exportedSha && exportedSha !== merged.sha
-            ? treeIdOf(client, projectId, dir, exportedSha)
-            : Promise.resolve(undefined),
-    ])
+    const exported =
+        exportedSha && exportedSha !== merged.sha ? await treeIdOf(client, projectId, dir, exportedSha) : undefined
     // An unreadable export commit claims no change: the note must not cry wolf.
     return { onBase, merged: mergedTree, exported: exported ?? mergedTree }
 }
@@ -101,6 +102,43 @@ async function readTrees(
 export interface BundleInspection {
     status: BundleStatus
     manifestRaw?: string
+}
+
+/**
+ * What checking one package needs that a listing reads once for all of its
+ * packages: where they live, the merge requests from the package's branch,
+ * the base branch head, and the package folder's tree id there.
+ */
+export interface BundleContext {
+    projectId: number
+    /** Merge requests from the package's branch, newest first, any state. */
+    requests: MergeRequestRef[]
+    /** The base branch head; undefined when the branch does not exist. */
+    head: string | undefined
+    /** The package folder's tree id at `head`. */
+    treeOnBase: () => Promise<string | undefined>
+}
+
+/** The folder all of a target's packages sit in, and a package's name inside it. */
+export function packageFolder(target: Pick<ExportTarget, 'pathPrefix'>, slug: string): { parent: string; name: string } {
+    const parts = packageDir(target, slug).split('/')
+    const name = parts.pop() as string
+    return { parent: parts.join('/'), name }
+}
+
+/**
+ * The base branch head and the tree ids of every package folder there: what
+ * all packages of a listing share. One branch request and one folder listing,
+ * where asking per package cost two of each.
+ */
+export async function readBaseTrees(
+    client: GitLabClient,
+    projectId: number,
+    target: ExportTarget,
+): Promise<{ head: string | undefined; trees: Map<string, string> }> {
+    const head = await branchHead(client, projectId, target.baseBranch)
+    if (!head) return { head, trees: new Map() }
+    return { head, trees: await directoryTrees(client, projectId, packageFolder(target, 'x').parent, head) }
 }
 
 /**
@@ -117,13 +155,33 @@ export async function inspectBundle(
 ): Promise<BundleInspection> {
     const project = await getProject(client, parseProjectUrl(target.url).projectPath)
     const requests = await findMergeRequests(client, project.id, bundleBranch(slug, version))
+    // An open request answers on its own, so the base branch is only asked without one.
+    const head = requests.some((mr) => mr.state === 'opened') ? undefined : await branchHead(client, project.id, target.baseBranch)
+    const dir = packageDir(target, slug)
+    return inspectBundleIn(client, target, slug, version, expectedId, {
+        projectId: project.id,
+        requests,
+        head,
+        treeOnBase: () => (head ? treeIdOf(client, project.id, dir, head) : Promise.resolve(undefined)),
+    })
+}
+
+/** {@link inspectBundle} on what a caller has read already, so a listing asks each shared question once. */
+export async function inspectBundleIn(
+    client: GitLabClient,
+    target: ExportTarget,
+    slug: string,
+    version: string,
+    expectedId: string | undefined,
+    context: BundleContext,
+): Promise<BundleInspection> {
+    const { projectId, requests, head } = context
     const open = requests.find((mr) => mr.state === 'opened')
     if (open) return { status: { state: 'mr-open', mrUrl: open.web_url } }
 
-    const head = await branchHead(client, project.id, target.baseBranch)
     if (!head) return { status: { state: 'none', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}` } }
     const dir = packageDir(target, slug)
-    const manifestRaw = await readFile(client, project.id, `${dir}/core-ir/manifest.json`, head)
+    const manifestRaw = await readFile(client, projectId, `${dir}/core-ir/manifest.json`, head)
     if (!manifestRaw) return { status: { state: 'none' } }
 
     let manifest: { id?: unknown; version?: unknown }
@@ -146,7 +204,7 @@ export async function inspectBundle(
     }
 
     const merged = requests.find((mr) => mr.state === 'merged')
-    const verification = judgeBundle(merged, await readTrees(client, project.id, dir, head, merged))
+    const verification = judgeBundle(merged, await readTrees(client, projectId, dir, context.treeOnBase, merged))
     return {
         status: { state: 'on-base', sha: head, packageId: String(manifest.id), verification },
         manifestRaw,
@@ -172,11 +230,27 @@ export async function readCatalogStatus(
 ): Promise<CatalogStatus> {
     if (!catalog) return { state: 'unconfigured' }
     const project = await getProject(client, parseProjectUrl(catalog.url).projectPath)
-    const open = (await findMergeRequests(client, project.id, catalogBranch(slug, version))).find(
+    const openRequests = (await findMergeRequests(client, project.id, catalogBranch(slug, version))).filter(
         (mr) => mr.state === 'opened',
     )
+    // As above: with an open request the index is not needed.
+    const index = openRequests.length > 0 ? undefined : await readFile(client, project.id, 'index.json', catalog.baseBranch)
+    return catalogStatusIn({ openRequests, index }, slug, version, id)
+}
+
+/** What the catalogue step needs from the catalogue repository, read once for a whole listing. */
+export interface CatalogContext {
+    /** Open merge requests into the catalogue repository, any author. */
+    openRequests: MergeRequestRef[]
+    /** `index.json` on the catalogue's base branch; undefined when it does not exist. */
+    index: string | undefined
+}
+
+/** Where a package stands in the catalogue, from what was read. Pure, so every outcome is testable. */
+export function catalogStatusIn(context: CatalogContext, slug: string, version: string, id: string): CatalogStatus {
+    const branch = catalogBranch(slug, version)
+    const open = context.openRequests.find((mr) => mr.source_branch === branch && mr.state === 'opened')
     if (open) return { state: 'mr-open', mrUrl: open.web_url }
-    const index = await readFile(client, project.id, 'index.json', catalog.baseBranch)
-    if (index && isListed(index, id, version)) return { state: 'listed' }
+    if (context.index && isListed(context.index, id, version)) return { state: 'listed' }
     return { state: 'none' }
 }

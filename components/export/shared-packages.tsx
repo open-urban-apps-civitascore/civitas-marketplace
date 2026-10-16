@@ -6,7 +6,7 @@ import { ExternalLink, GitMerge, RefreshCw } from 'lucide-react'
 
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/layout'
-import { Notice, Pending } from '@/components/ui/notice'
+import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 
 import {
     listSharedPackages,
@@ -22,8 +22,8 @@ import { resultTone } from '@/lib/export/result-tone'
  * The catalogue step lives here too, one click per merged and verified
  * package: it reads the merged manifest, so nobody fills in the export form
  * again days after the merge. Loaded after the page, because it asks GitLab
- * several questions per package. The page around it (/export/shared) carries
- * the heading.
+ * a few questions per package (see `listSharedPackages`). The page around it
+ * (/export/shared) carries the heading.
  */
 export function SharedPackages() {
     const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
@@ -161,6 +161,9 @@ function SharedRow({
                     </Button>
                 )}
             </div>
+
+            {/* The rest of the list is fine; only this package's state is unknown for now. */}
+            {row.problem && <InlineNotice tone="error">Stand nicht vollständig geprüft: {row.problem}</InlineNotice>}
 
             {/* Smaller than a page-level notice: it answers one row, inside that row. */}
             {outcome && (

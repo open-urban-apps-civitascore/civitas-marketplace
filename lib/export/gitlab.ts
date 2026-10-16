@@ -28,6 +28,89 @@ export interface GitLabClient {
     token: string
     /** Injected for tests; defaults to the global fetch. */
     fetchImpl?: typeof fetch
+    /**
+     * Keeps the answers that cannot change (see {@link GitLabReadCache}). Opt-in:
+     * the list of shared packages sets one, single reads go without.
+     */
+    cache?: GitLabReadCache
+    /** How long a read may take; {@link READ_TIMEOUT_MS} unless a test shortens it. */
+    timeoutMs?: number
+}
+
+/**
+ * A read that takes longer is given up. Without a limit, one request GitLab
+ * never answers held up the whole list of shared packages. Writes have none:
+ * giving up on a commit or a merge request would not undo it, only hide
+ * whether it happened.
+ */
+export const READ_TIMEOUT_MS = 10_000
+
+const COMMIT_SHA = /^[0-9a-f]{40}$/i
+
+/**
+ * Answers that cannot change, kept in the server's memory: what a repository
+ * holds at a commit (a file, a folder listing) and the commits of a merged
+ * merge request. A commit is immutable, so these never go stale; anything
+ * read at a branch name can, and is never kept.
+ *
+ * A failed read is not kept, so the next visit asks again. The oldest entries
+ * leave first once `limit` is reached; the token is not part of the key,
+ * because one deployment has one token.
+ */
+export class GitLabReadCache {
+    private readonly entries = new Map<string, Promise<unknown>>()
+
+    constructor(private readonly limit = 1000) {}
+
+    read<T>(key: string, load: () => Promise<T>): Promise<T> {
+        const known = this.entries.get(key)
+        if (known) return known as Promise<T>
+        const pending: Promise<T> = load().catch((error: unknown) => {
+            // Only this attempt leaves; a newer one under the same key stays.
+            if (this.entries.get(key) === pending) this.entries.delete(key)
+            throw error
+        })
+        this.entries.set(key, pending)
+        while (this.entries.size > this.limit) {
+            const oldest = this.entries.keys().next().value
+            if (oldest === undefined) break
+            this.entries.delete(oldest)
+        }
+        return pending
+    }
+
+    get size(): number {
+        return this.entries.size
+    }
+
+    /** Forgets everything; for tests. */
+    clear(): void {
+        this.entries.clear()
+    }
+}
+
+/** Through the client's cache when the answer cannot change, straight to GitLab otherwise. */
+export function readOnce<T>(client: GitLabClient, key: string, immutable: boolean, load: () => Promise<T>): Promise<T> {
+    return client.cache && immutable ? client.cache.read(`${client.apiBase}|${key}`, load) : load()
+}
+
+/** The signal for a read, or none for a write (see {@link READ_TIMEOUT_MS}). */
+function readSignal(client: GitLabClient, method: string): AbortSignal | undefined {
+    return method === 'GET' ? AbortSignal.timeout(client.timeoutMs ?? READ_TIMEOUT_MS) : undefined
+}
+
+const isTimeout = (cause: unknown) => cause instanceof Error && cause.name === 'TimeoutError'
+
+/** The body arrived only in part: a time limit becomes a GitLab error, anything else stays what it was. */
+function bodyFailure(client: GitLabClient, cause: unknown): unknown {
+    return isTimeout(cause) ? unreachable(client, cause) : cause
+}
+
+function unreachable(client: GitLabClient, cause: unknown): GitLabError {
+    if (isTimeout(cause)) {
+        return new GitLabError(`GitLab hat nicht innerhalb von ${Math.round((client.timeoutMs ?? READ_TIMEOUT_MS) / 1000)} s geantwortet`, 0)
+    }
+    return new GitLabError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
 }
 
 export interface GitLabProject {
@@ -77,19 +160,21 @@ async function gl<T>(
     init?: { method: string; body?: unknown },
 ): Promise<T> {
     const doFetch = client.fetchImpl ?? fetch
+    const method = init?.method ?? 'GET'
     let response: Response
     try {
         response = await doFetch(`${client.apiBase}${path}`, {
-            method: init?.method ?? 'GET',
+            method,
             headers: {
                 'PRIVATE-TOKEN': client.token,
                 ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
             },
             body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
             cache: 'no-store',
+            signal: readSignal(client, method),
         })
     } catch (cause) {
-        throw new GitLabError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
+        throw unreachable(client, cause)
     }
     if (response.status === 404) {
         throw new GitLabError(`nicht gefunden: ${path}`, 404)
@@ -107,7 +192,12 @@ async function gl<T>(
         throw new GitLabError(message, response.status)
     }
     if (response.status === 204) return undefined as T
-    return (await response.json()) as T
+    try {
+        return (await response.json()) as T
+    } catch (cause) {
+        // The time limit also covers the body, which can stall after the headers arrived.
+        throw bodyFailure(client, cause)
+    }
 }
 
 const encode = (value: string) => encodeURIComponent(value)
@@ -200,27 +290,34 @@ export async function listTree(
     return files
 }
 
-export async function readFile(
+/** A file's content at `ref`, undefined where it does not exist. Kept when `ref` is a commit. */
+export function readFile(
     client: GitLabClient,
     projectId: number,
     path: string,
     ref: string,
 ): Promise<string | undefined> {
-    const doFetch = client.fetchImpl ?? fetch
-    let response: Response
-    try {
-        response = await doFetch(
-            `${client.apiBase}/projects/${projectId}/repository/files/${encode(path)}/raw?ref=${encode(ref)}`,
-            { headers: { 'PRIVATE-TOKEN': client.token }, cache: 'no-store' },
-        )
-    } catch (cause) {
-        throw new GitLabError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
-    }
-    if (response.status === 404) return undefined
-    if (!response.ok) {
-        throw new GitLabError(`Datei ${path} konnte nicht gelesen werden (${response.status})`, response.status)
-    }
-    return response.text()
+    return readOnce(client, `file|${projectId}|${path}|${ref}`, COMMIT_SHA.test(ref), async () => {
+        const doFetch = client.fetchImpl ?? fetch
+        let response: Response
+        try {
+            response = await doFetch(
+                `${client.apiBase}/projects/${projectId}/repository/files/${encode(path)}/raw?ref=${encode(ref)}`,
+                { headers: { 'PRIVATE-TOKEN': client.token }, cache: 'no-store', signal: readSignal(client, 'GET') },
+            )
+        } catch (cause) {
+            throw unreachable(client, cause)
+        }
+        if (response.status === 404) return undefined
+        if (!response.ok) {
+            throw new GitLabError(`Datei ${path} konnte nicht gelesen werden (${response.status})`, response.status)
+        }
+        try {
+            return await response.text()
+        } catch (cause) {
+            throw bodyFailure(client, cause)
+        }
+    })
 }
 
 /** Merge requests into `targetProjectId` from `sourceBranch`, newest first, any state. */
@@ -233,6 +330,22 @@ export async function findMergeRequests(
         client,
         `/projects/${targetProjectId}/merge_requests?source_branch=${encode(sourceBranch)}&state=all&order_by=updated_at&sort=desc&per_page=20`,
     )
+}
+
+/**
+ * Every open merge request into a project, any author: one request for a
+ * whole list, where asking per branch would cost one per package.
+ */
+export async function listOpenMergeRequests(client: GitLabClient, projectId: number): Promise<MergeRequestRef[]> {
+    const requests: MergeRequestRef[] = []
+    for (let page = 1; ; page++) {
+        const batch = await gl<MergeRequestRef[]>(
+            client,
+            `/projects/${projectId}/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100&page=${page}`,
+        )
+        requests.push(...batch)
+        if (batch.length < 100 || page >= 10) return requests
+    }
 }
 
 /** The account the token belongs to: the bot every export is proposed by. */
@@ -252,13 +365,50 @@ export async function listMergeRequestsBy(
     )
 }
 
-/** The commits of a merge request, newest first, as GitLab lists them. */
-export async function mergeRequestCommits(
+/**
+ * The commits of a merge request, newest first, as GitLab lists them. Kept
+ * for a merged one (`merged`): its commits can no longer change.
+ */
+export function mergeRequestCommits(
     client: GitLabClient,
     projectId: number,
     iid: number,
+    merged = false,
 ): Promise<{ id: string }[]> {
-    return gl<{ id: string }[]>(client, `/projects/${projectId}/merge_requests/${iid}/commits?per_page=100`)
+    return readOnce(client, `mr-commits|${projectId}|${iid}`, merged, () =>
+        gl<{ id: string }[]>(client, `/projects/${projectId}/merge_requests/${iid}/commits?per_page=100`),
+    )
+}
+
+/**
+ * The directories directly inside `parent` at `ref`, name to tree id; empty
+ * when `parent` or `ref` does not exist. One listing serves every package of
+ * a folder, and it is kept when `ref` is a commit.
+ */
+export function directoryTrees(
+    client: GitLabClient,
+    projectId: number,
+    parent: string,
+    ref: string,
+): Promise<Map<string, string>> {
+    return readOnce(client, `trees|${projectId}|${parent}|${ref}`, COMMIT_SHA.test(ref), async () => {
+        const trees = new Map<string, string>()
+        for (let page = 1; ; page++) {
+            let batch: { id: string; name: string; type: string }[]
+            try {
+                batch = await gl(
+                    client,
+                    `/projects/${projectId}/repository/tree?per_page=100&page=${page}&ref=${encode(ref)}` +
+                        (parent ? `&path=${encode(parent)}` : ''),
+                )
+            } catch (error) {
+                if (error instanceof GitLabError && error.status === 404) return trees
+                throw error
+            }
+            for (const entry of batch) if (entry.type === 'tree') trees.set(entry.name, entry.id)
+            if (batch.length < 100) return trees
+        }
+    })
 }
 
 /**
@@ -278,23 +428,7 @@ export async function treeIdOf(
     const parts = dir.split('/').filter(Boolean)
     const name = parts.pop()
     if (!name) return undefined
-    const parent = parts.join('/')
-    for (let page = 1; ; page++) {
-        let batch: { id: string; name: string; type: string }[]
-        try {
-            batch = await gl(
-                client,
-                `/projects/${projectId}/repository/tree?per_page=100&page=${page}&ref=${encode(ref)}` +
-                    (parent ? `&path=${encode(parent)}` : ''),
-            )
-        } catch (error) {
-            if (error instanceof GitLabError && error.status === 404) return undefined
-            throw error
-        }
-        const entry = batch.find((candidate) => candidate.name === name && candidate.type === 'tree')
-        if (entry) return entry.id
-        if (batch.length < 100) return undefined
-    }
+    return (await directoryTrees(client, projectId, parts.join('/'), ref)).get(name)
 }
 
 export type MergeRequestOutcome =
