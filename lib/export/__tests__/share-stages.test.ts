@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'vitest'
+
+import { isNewerVersion, shareProgress, turnLabel } from '@/lib/export/share-stages'
+
+const verified = { state: 'verified' as const, mergedMrUrl: 'https://gitlab.example/mr/1' }
+
+describe('shareProgress', () => {
+    it('starts with the person proposing the package', () => {
+        const progress = shareProgress({})
+        expect(progress.states).toEqual({ propose: 'current', review: 'later', catalog: 'later', listing: 'later' })
+        expect(turnLabel(progress)).toBe('Du bist dran')
+        expect(progress.finished).toBe(false)
+    })
+
+    it('waits for the repository reviewers once the package is proposed', () => {
+        for (const facts of [{ bundle: { state: 'mr-open' as const } }, { bundleMrState: 'opened' }]) {
+            const progress = shareProgress(facts)
+            expect(progress.states.review).toBe('waiting')
+            expect(progress.active).toBe('review')
+            expect(turnLabel(progress)).toBe('Prüfende im Repository')
+        }
+    })
+
+    it('hands back to the person after the merge, for the catalogue entry', () => {
+        const progress = shareProgress({ bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'none' } })
+        expect(progress.states).toEqual({ propose: 'done', review: 'done', catalog: 'current', listing: 'later' })
+        expect(progress.summary).toBe('Paket gemergt - jetzt in den Katalog eintragen')
+        expect(turnLabel(progress)).toBe('Du bist dran')
+    })
+
+    it('waits for the catalogue reviewers, then is finished', () => {
+        const waiting = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'mr-open', mrUrl: 'u' } })
+        expect(waiting.states.listing).toBe('waiting')
+        expect(turnLabel(waiting)).toBe('Prüfende im Katalog')
+        const listed = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'listed' } })
+        expect(listed.finished).toBe(true)
+        expect(listed.active).toBeUndefined()
+        expect(turnLabel(listed)).toBeUndefined()
+    })
+
+    it('stops at the catalogue step, with the reason, when the merged state cannot be confirmed', () => {
+        const progress = shareProgress({ bundle: { state: 'on-base', verification: { state: 'changed-after-merge' } }, catalog: { state: 'none' } })
+        expect(progress.states.catalog).toBe('blocked')
+        expect(progress.blockedBy).toContain('nach dem Merge geändert')
+        expect(turnLabel(progress)).toBe('Du bist dran')
+    })
+
+    it('blames nobody on the page when no catalogue is set up', () => {
+        const progress = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'unconfigured' } })
+        expect(progress.states.catalog).toBe('blocked')
+        expect(turnLabel(progress)).toBeUndefined()
+    })
+
+    it('counts a version replaced by a NEWER one, or closed, as finished', () => {
+        const replaced = shareProgress({
+            version: '1.0.0',
+            bundleMrState: 'merged',
+            bundle: { state: 'none', reason: 'other-version', onBase: { id: 'urn:x:usecase:a', version: '1.1.0' } },
+        })
+        expect(replaced.finished).toBe(true)
+        expect(replaced.summary).toBe('Durch Version 1.1.0 ersetzt')
+        expect(shareProgress({ bundleMrState: 'closed' }).finished).toBe(true)
+    })
+
+    it('asks for a look when a merged package is missing or older on the base branch', () => {
+        const missing = shareProgress({ version: '1.0.0', bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-package' } })
+        expect(missing.finished).toBe(false)
+        expect(missing.states.catalog).toBe('blocked')
+        expect(missing.blockedBy).toContain('nicht mehr im Repository')
+        expect(turnLabel(missing)).toBe('Du bist dran')
+
+        const older = shareProgress({
+            version: '1.1.0',
+            bundleMrState: 'merged',
+            bundle: { state: 'none', reason: 'other-version', onBase: { id: 'urn:x:usecase:a', version: '1.0.0' } },
+        })
+        expect(older.finished).toBe(false)
+        expect(older.blockedBy).toContain('1.0.0 statt 1.1.0')
+
+        const noBranch = shareProgress({ bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-base-branch', detail: 'Branch main existiert nicht' } })
+        expect(noBranch.blockedBy).toBe('Branch main existiert nicht')
+    })
+
+    it('compares plain versions only', () => {
+        expect(isNewerVersion('1.10.0', '1.9.3')).toBe(true)
+        expect(isNewerVersion('1.0.0', '1.0.0')).toBe(false)
+        expect(isNewerVersion('0.9.9', '1.0.0')).toBe(false)
+        expect(isNewerVersion('2.0.0-rc.1', '1.0.0')).toBe(false)
+    })
+})

@@ -4,18 +4,14 @@ import { useCallback, useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { ExternalLink, GitMerge, RefreshCw } from 'lucide-react'
 
-import { Button, ExternalAnchor } from '@/components/ui/button'
+import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/layout'
 import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 
-import {
-    listSharedPackages,
-    proposeSharedCatalogEntry,
-    type ExportActionResult,
-    type SharedPackageRow,
-} from '@/lib/export-actions'
+import { listSharedPackages, type ExportActionResult, type SharedPackageRow } from '@/lib/export-actions'
 import { catalogStateLabel, mergeRequestStateLabel, verificationLabel } from '@/lib/export/labels'
-import { resultTone } from '@/lib/export/result-tone'
+import { shareProgress, turnLabel } from '@/lib/export/share-stages'
 
 /**
  * Everything shared through this marketplace, and where each package stands.
@@ -29,8 +25,6 @@ export function SharedPackages() {
     const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
     const [error, setError] = useState<string>()
     const [loading, startLoading] = useTransition()
-    const [proposing, setProposing] = useState<string | null>(null)
-    const [outcome, setOutcome] = useState<{ key: string; result: ExportActionResult } | null>(null)
 
     const load = useCallback(() => {
         startLoading(async () => {
@@ -48,22 +42,7 @@ export function SharedPackages() {
         load()
     }, [load])
 
-    async function propose(row: SharedPackageRow) {
-        setProposing(row.key)
-        setOutcome(null)
-        try {
-            const result = await proposeSharedCatalogEntry(row.targetKey, row.slug, row.version)
-            setOutcome({ key: row.key, result })
-            if (result.status === 'ok' || result.status === 'already-open') load()
-        } catch {
-            setOutcome({
-                key: row.key,
-                result: { intent: 'catalog', status: 'error', detail: 'Die Anfrage ist fehlgeschlagen. Bitte erneut versuchen.' },
-            })
-        } finally {
-            setProposing(null)
-        }
-    }
+    const { proposing, propose, outcomeFor } = useCatalogProposal(load)
 
     return (
         <div className="flex flex-col gap-4">
@@ -101,7 +80,7 @@ export function SharedPackages() {
                             row={row}
                             proposing={proposing === row.key}
                             disabled={proposing !== null || loading}
-                            outcome={outcome?.key === row.key ? outcome.result : undefined}
+                            outcome={outcomeFor(row.key)}
                             onPropose={() => void propose(row)}
                         />
                     ))}
@@ -127,6 +106,9 @@ function SharedRow({
     const verification = row.bundle?.verification
     const canPropose =
         row.bundle?.state === 'on-base' && verification?.state === 'verified' && row.catalog?.state === 'none'
+    // The same words as "In Arbeit" and the last step of "Teilen": where it stands, and whose move it is.
+    const progress = shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog })
+    const turn = row.problem ? undefined : turnLabel(progress)
 
     return (
         <li className="flex flex-col gap-2 px-4 py-3">
@@ -135,6 +117,12 @@ function SharedRow({
                 <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">v{row.version}</span>
                 <span className="text-xs text-muted-foreground">{row.targetLabel}</span>
             </div>
+            {!row.problem && (
+                <p className="text-xs text-muted-foreground">
+                    {progress.summary}
+                    {turn && <span className="font-medium text-foreground"> · {turn}</span>}
+                </p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Chip label={`Paket: ${mergeRequestStateLabel(row.bundleMr.state)}`} url={row.bundleMr.url} />
@@ -165,17 +153,7 @@ function SharedRow({
             {/* The rest of the list is fine; only this package's state is unknown for now. */}
             {row.problem && <InlineNotice tone="error">Stand nicht vollständig geprüft: {row.problem}</InlineNotice>}
 
-            {/* Smaller than a page-level notice: it answers one row, inside that row. */}
-            {outcome && (
-                <Notice
-                    tone={resultTone(outcome.status)}
-                    live
-                    className="rounded-md px-3 py-2"
-                    action={outcome.mrUrl ? <ExternalAnchor href={outcome.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}
-                >
-                    {outcome.detail}
-                </Notice>
-            )}
+            {outcome && <ProposalOutcome result={outcome} />}
         </li>
     )
 }

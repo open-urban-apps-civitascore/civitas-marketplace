@@ -49,6 +49,14 @@ export interface BundleStatus {
     /** Set for a package on the base branch. */
     verification?: BundleVerification
     detail?: string
+    /**
+     * Why the version is not on the base branch, for state `none`: there is no
+     * such branch, no package, an unreadable manifest, or another version.
+     * Absent for a version simply never proposed.
+     */
+    reason?: 'no-base-branch' | 'no-package' | 'bad-manifest' | 'other-version'
+    /** What the base branch carries instead, for reason `other-version`. */
+    onBase?: { id: string; version: string }
 }
 
 export interface CatalogStatus {
@@ -179,16 +187,18 @@ export async function inspectBundleIn(
     const open = requests.find((mr) => mr.state === 'opened')
     if (open) return { status: { state: 'mr-open', mrUrl: open.web_url } }
 
-    if (!head) return { status: { state: 'none', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}` } }
+    if (!head) {
+        return { status: { state: 'none', reason: 'no-base-branch', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}` } }
+    }
     const dir = packageDir(target, slug)
     const manifestRaw = await readFile(client, projectId, `${dir}/core-ir/manifest.json`, head)
-    if (!manifestRaw) return { status: { state: 'none' } }
+    if (!manifestRaw) return { status: { state: 'none', reason: 'no-package' } }
 
     let manifest: { id?: unknown; version?: unknown }
     try {
         manifest = JSON.parse(manifestRaw) as { id?: unknown; version?: unknown }
     } catch {
-        return { status: { state: 'none', detail: 'manifest.json auf dem Basisbranch ist kein gültiges JSON' } }
+        return { status: { state: 'none', reason: 'bad-manifest', detail: 'manifest.json auf dem Basisbranch ist kein gültiges JSON' } }
     }
     const idMatches =
         expectedId !== undefined
@@ -198,6 +208,8 @@ export async function inspectBundleIn(
         return {
             status: {
                 state: 'none',
+                reason: 'other-version',
+                onBase: { id: String(manifest.id), version: String(manifest.version) },
                 detail: `Auf ${target.baseBranch} liegt ${String(manifest.id)} ${String(manifest.version)}, nicht ${expectedId ?? slug} ${version}`,
             },
         }

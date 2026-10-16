@@ -8,8 +8,15 @@ import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { exportSources } from '@/lib/export/sources'
+import { draftOwnerTag } from '@/lib/export/share-drafts'
 import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
 import { getAccessToken, requireSession } from '@/lib/session'
+
+/** Whose drafts these are, as a tag; none without e-mail or name (see the panel's drafts). */
+function draftOwner(user: { email?: string | null; name?: string | null } | undefined): string | undefined {
+    const owner = user?.email?.trim() || user?.name?.trim()
+    return owner ? draftOwnerTag(owner) : undefined
+}
 
 /**
  * Sharing starts at the instance's INVENTORY, not at an installation: what a
@@ -97,6 +104,10 @@ export default async function ExportPage() {
                         // The name only: the maintainer goes into the public package.
                         maintainer: session.user?.name ?? '',
                     }}
+                    // A tag, not the address: drafts are filed under it in the browser. Without
+                    // e-mail or name there is nothing to keep two people apart, so no drafts.
+                    draftOwner={draftOwner(session.user)}
+                    canListShares={readiness === 'ready' && right === 'allowed'}
                 />
             )}
         </div>
