@@ -370,6 +370,27 @@ export async function exportAction(
         }
 
         if (form.intent === 'bundle') {
+            // A version that is already proposed or merged is not proposed again: a second merge
+            // request would carry the same version with other content, or the same content twice.
+            // Asked before the package is built, which is the expensive part.
+            const current = await readBundleStatus(client, target, form.options.slug, form.options.version, id)
+            if (current.state === 'on-base') {
+                return {
+                    intent: 'bundle',
+                    status: 'unchanged',
+                    detail: `Version ${form.options.version} ist schon im Repository - Änderungen gehen jetzt nur noch mit einer neuen Version.`,
+                    bundle: current,
+                }
+            }
+            if (current.state === 'mr-open') {
+                return {
+                    intent: 'bundle',
+                    status: 'already-open',
+                    detail: `Für Version ${form.options.version} ist schon ein Merge Request offen.`,
+                    mrUrl: current.mrUrl,
+                    bundle: current,
+                }
+            }
             const accessToken = await getAccessToken()
             const pkg = await buildPackage(accessToken, form, requestedBy)
             const preview = summarise(pkg, target, form)

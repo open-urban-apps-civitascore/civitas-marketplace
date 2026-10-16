@@ -94,6 +94,7 @@ describe('listSharedPackages', () => {
         // The base branch carries 1.1.0, so the older version is no longer there.
         expect(older.bundle?.state).toBe('none')
         expect(older.bundle?.detail).toContain('1.1.0')
+        expect(older.bundle).toMatchObject({ reason: 'other-version', onBase: { id: 'urn:stadt:usecase:baeume', version: '1.1.0' } })
     })
 
     it('asks what all packages share once per visit, and no question per branch', async () => {
