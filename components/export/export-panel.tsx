@@ -58,7 +58,8 @@ export function ExportPanel(props: PanelProps) {
     const source = active ? props.sources.find((row) => row.id === active.id) : undefined
     if (source) return <ExportEditor key={source.id} {...props} source={source} draft={active?.draft}
         onChoose={() => setActive(null)} onProposed={shared.reload} />
-    const inProgress = <InProgress drafts={drafts} sources={props.sources} rows={shared.rows} error={shared.error} onReload={shared.reload}
+    const inProgress = <InProgress drafts={drafts} sources={props.sources} rows={shared.rows} error={shared.error}
+        loaded={shared.loaded} onReload={shared.reload}
         onContinue={(draft) => setActive({ id: draft.datasetId, draft })} onDiscard={discard} />
     if (!props.sources.length) return <div className="flex flex-col gap-6">{inProgress}<EmptyState>Diese Instanz hat noch keinen Use Case, auf den du zugreifen kannst.</EmptyState></div>
     const selectedDraft = drafts.find((draft) => draft.datasetId === selection)
@@ -350,6 +351,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 canCheck={forgeReady}
                 bundleMrUrl={known.bundle?.mrUrl}
                 catalogMrUrl={known.catalog?.mrUrl}
+                removalMrUrl={known.bundle?.removal?.mrUrl}
                 onPropose={() => run('bundle')}
                 onCheck={() => run('status')}
                 onCatalog={() => run('catalog')}

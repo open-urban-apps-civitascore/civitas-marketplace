@@ -62,23 +62,64 @@ describe('shareProgress', () => {
         expect(shareProgress({ bundleMrState: 'closed' }).finished).toBe(true)
     })
 
-    it('asks for a look when a merged package is missing or older on the base branch', () => {
+    it('asks nobody for a move when a merged package is missing or older on the base branch, and says why', () => {
         const missing = shareProgress({ version: '1.0.0', bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-package' } })
-        expect(missing.finished).toBe(false)
+        expect(missing.finished).toBe(true)
         expect(missing.states.catalog).toBe('blocked')
         expect(missing.blockedBy).toContain('nicht mehr im Repository')
-        expect(turnLabel(missing)).toBe('Du bist dran')
+        expect(missing.summary).toBe('Paket gemergt, aber nicht im Repository')
+        expect(turnLabel(missing)).toBeUndefined()
 
         const older = shareProgress({
             version: '1.1.0',
             bundleMrState: 'merged',
             bundle: { state: 'none', reason: 'other-version', onBase: { id: 'urn:x:usecase:a', version: '1.0.0' } },
         })
-        expect(older.finished).toBe(false)
+        expect(older.finished).toBe(true)
         expect(older.blockedBy).toContain('1.0.0 statt 1.1.0')
 
         const noBranch = shareProgress({ bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-base-branch', detail: 'Branch main existiert nicht' } })
         expect(noBranch.blockedBy).toBe('Branch main existiert nicht')
+    })
+
+    it('names a merge request the marketplace closed itself as withdrawn', () => {
+        expect(shareProgress({ bundleMrState: 'closed', withdrawn: true })).toMatchObject({ finished: true, summary: 'Zurückgezogen' })
+        expect(shareProgress({ bundleMrState: 'closed' }).summary).toBe('Merge Request ohne Merge geschlossen')
+    })
+
+    it('waits for the repository reviewers while a removal is proposed, instead of asking for the catalogue entry', () => {
+        const progress = shareProgress({
+            bundleMrState: 'merged',
+            bundle: { state: 'on-base', verification: verified, removal: { state: 'opened', mrUrl: 'u/remove' } },
+            catalog: { state: 'none' },
+        })
+        expect(progress).toMatchObject({ removal: 'pending', finished: false, summary: 'Entfernen wartet auf Prüfung' })
+        expect(progress.active).toBeUndefined()
+        expect(progress.states.catalog).toBe('later')
+        expect(turnLabel(progress)).toBe('Prüfende im Repository')
+    })
+
+    it('is finished once the removal is merged and the version gone, and back when it was shared again', () => {
+        const removed = shareProgress({
+            version: '1.0.0',
+            bundleMrState: 'merged',
+            bundle: { state: 'none', reason: 'no-package', removal: { state: 'merged', mrUrl: 'u/remove' } },
+        })
+        expect(removed).toMatchObject({ removal: 'done', finished: true, summary: 'Aus dem Repository entfernt' })
+        expect(turnLabel(removed)).toBeUndefined()
+
+        const back = shareProgress({
+            bundleMrState: 'merged',
+            bundle: { state: 'on-base', verification: verified, removal: { state: 'merged', mrUrl: 'u/remove' } },
+            catalog: { state: 'none' },
+        })
+        expect(back.states.catalog).toBe('current')
+        expect(back.removal).toBeUndefined()
+
+        // A new proposal of the version: the removal is history, whatever its state.
+        const proposedAgain = shareProgress({ bundle: { state: 'mr-open' } })
+        expect(proposedAgain.active).toBe('review')
+        expect(proposedAgain.removal).toBeUndefined()
     })
 
     it('compares plain versions only', () => {

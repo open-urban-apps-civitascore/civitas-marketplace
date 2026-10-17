@@ -20,10 +20,11 @@ import { STAGES, type ShareProgress, type Stage, type StageState } from '@/lib/e
  * the form, and two numbered lists on one page read as one.
  */
 
-/** Who the stage belongs to, and whether it is theirs now. */
-function whoLine(stage: Stage, state: StageState): string {
+/** Who the stage belongs to, and whether it is theirs now. A stage nobody can move on is nobody's turn. */
+function whoLine(stage: Stage, state: StageState, progress: ShareProgress): string {
     if (state === 'done') return `${stage.who} - erledigt`
-    if (state === 'current' || state === 'blocked') return stage.turn === 'you' ? 'Du bist dran' : `${stage.who} sind dran`
+    if (state === 'blocked') return progress.turn === 'you' ? 'Du bist dran' : stage.who
+    if (state === 'current') return stage.turn === 'you' ? 'Du bist dran' : `${stage.who} sind dran`
     if (state === 'waiting') return `${stage.who} sind dran`
     return stage.who
 }
@@ -45,6 +46,7 @@ export function ShareSteps({
     canCheck,
     bundleMrUrl,
     catalogMrUrl,
+    removalMrUrl,
     onPropose,
     onCheck,
     onCatalog,
@@ -62,6 +64,8 @@ export function ShareSteps({
     canCheck: boolean
     bundleMrUrl?: string
     catalogMrUrl?: string
+    /** The merge request that proposes taking the version out again, when there is one. */
+    removalMrUrl?: string
     onPropose: () => void
     onCheck: () => void
     onCatalog: () => void
@@ -112,8 +116,27 @@ export function ShareSteps({
         return undefined
     }
 
+    const removalRef = mergeRequestRef(removalMrUrl)
     return (
         <Panel title="So geht es weiter">
+            {/* Outside the four stages: it undoes them. Said first, because it decides what the stages below still mean. */}
+            {progress.removal && (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <InlineNotice tone="neutral">
+                        {progress.removal === 'pending'
+                            ? 'Das Entfernen dieser Version aus dem Repository ist vorgeschlagen - jetzt entscheiden die Prüfenden im Repository.'
+                            : 'Diese Version ist aus dem Repository entfernt.'}{' '}
+                        {removalMrUrl && (
+                            <ExternalAnchor href={removalMrUrl}>{removalRef ? `Merge Request ${removalRef} öffnen` : 'Merge Request öffnen'}</ExternalAnchor>
+                        )}
+                    </InlineNotice>
+                    {progress.removal === 'pending' && canCheck && (
+                        <Button icon={RefreshCw} pending={pendingIntent === 'status'} disabled={busy} onClick={onCheck} className="shrink-0">
+                            Stand prüfen
+                        </Button>
+                    )}
+                </div>
+            )}
             <ol className="flex flex-col">
                 {STAGES.map((stage) => {
                     const state = progress.states[stage.key]
@@ -133,7 +156,7 @@ export function ShareSteps({
                                 <Mark aria-hidden className={`mt-0.5 size-4 shrink-0 ${state === 'current' || state === 'blocked' ? 'text-primary' : 'text-muted-foreground'}`} />
                                 <div className="min-w-0">
                                     <p className={`text-sm ${quiet ? 'text-muted-foreground' : 'font-medium text-foreground'}`}>{stage.title}</p>
-                                    <p className="text-xs text-muted-foreground">{whoLine(stage, state)}</p>
+                                    <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress)}</p>
                                     {reason && (
                                         <div className="mt-1.5">
                                             <InlineNotice tone="warn">{reason}</InlineNotice>
@@ -160,7 +183,7 @@ export function ShareSteps({
             </Disclosure>
 
             {/* Said at the moment someone might leave: the way back has to be known before it is needed. */}
-            {progress.states.propose === 'done' && !progress.finished && (
+            {progress.states.propose === 'done' && !progress.finished && !progress.removal && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                     Du kannst diese Seite jetzt verlassen. Das Paket findest du jederzeit unter „Teilen“ oben bei „In Arbeit“
                     und unter{' '}

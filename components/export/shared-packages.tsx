@@ -10,8 +10,9 @@ import { EmptyState } from '@/components/ui/layout'
 import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 
 import { listSharedPackages, type ExportActionResult, type SharedPackageRow } from '@/lib/export-actions'
+import { rowProgress } from '@/lib/export/in-progress-items'
 import { catalogStateLabel, mergeRequestStateLabel, verificationLabel } from '@/lib/export/labels'
-import { shareProgress, turnLabel } from '@/lib/export/share-stages'
+import { turnLabel } from '@/lib/export/share-stages'
 
 /**
  * Everything shared through this marketplace, and where each package stands.
@@ -104,11 +105,11 @@ function SharedRow({
     onPropose: () => void
 }) {
     const verification = row.bundle?.verification
-    const canPropose =
-        row.bundle?.state === 'on-base' && verification?.state === 'verified' && row.catalog?.state === 'none'
     // The same words as "In Arbeit" and the last step of "Teilen": where it stands, and whose move it is.
-    const progress = shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog })
+    const progress = rowProgress(row)
     const turn = row.problem ? undefined : turnLabel(progress)
+    // Merged, verified, not in the catalogue - and not on its way out of the repository.
+    const canPropose = progress.active === 'catalog' && progress.states.catalog === 'current'
 
     return (
         <li className="flex flex-col gap-2 px-4 py-3">
@@ -125,7 +126,8 @@ function SharedRow({
             )}
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Chip label={`Paket: ${mergeRequestStateLabel(row.bundleMr.state)}`} url={row.bundleMr.url} />
+                <Chip label={`Paket: ${row.withdrawn ? 'zurückgezogen' : mergeRequestStateLabel(row.bundleMr.state)}`} url={row.bundleMr.url} />
+                {row.bundle?.removal && <Chip label={`Entfernen: ${mergeRequestStateLabel(row.bundle.removal.state)}`} url={row.bundle.removal.mrUrl} />}
                 {row.bundle && row.bundle.state !== 'on-base' && (
                     <Chip label={`Prüfung: ${row.bundle.detail ?? 'nicht auf dem Basisbranch'}`} />
                 )}

@@ -33,7 +33,11 @@ const ROWS = [
     row('waiting', { bundleMr: { url: 'u-waiting', state: 'opened' } }),
     row('catalogue', { bundle: onBase, catalog: { state: 'none' } }),
     row('listed', { bundle: onBase, catalog: { state: 'listed' } }),
-    row('closed', { bundleMr: { url: 'u-closed', state: 'closed' } }),
+    row('withdrawn', { bundleMr: { url: 'u-withdrawn', state: 'closed' }, withdrawn: true }),
+    row('removing', { bundle: { ...onBase, removal: { state: 'opened', mrUrl: 'u-removal' } }, catalog: { state: 'none' } }),
+    row('removed', { bundle: { state: 'none', reason: 'no-package', removal: { state: 'merged', mrUrl: 'u-removed' } } }),
+    // Merged, then gone from the base branch by hand: nothing anyone here can move on.
+    row('vanished', { bundle: { state: 'none', reason: 'no-package' } }),
     row('broken', { problem: 'GitLab-Fehler (500)' }),
 ]
 
@@ -45,6 +49,7 @@ describe('inProgressItems', () => {
             'catalogue',
             'broken',
             'waiting',
+            'removing',
         ])
         expect(items.filter(isMine)).toHaveLength(3)
     })

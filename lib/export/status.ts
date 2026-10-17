@@ -1,5 +1,5 @@
 import { isListed } from '@/lib/export/catalog-entry'
-import { bundleBranch, catalogBranch, packageDir, type CatalogRepo, type ExportTarget } from '@/lib/export/config'
+import { bundleBranch, catalogBranch, packageDir, removalBranch, type CatalogRepo, type ExportTarget } from '@/lib/export/config'
 import {
     branchHead,
     directoryTrees,
@@ -57,6 +57,12 @@ export interface BundleStatus {
     reason?: 'no-base-branch' | 'no-package' | 'bad-manifest' | 'other-version'
     /** What the base branch carries instead, for reason `other-version`. */
     onBase?: { id: string; version: string }
+    /**
+     * The newest proposal to take this version out of the repository again
+     * ("Löschen" in "In Arbeit"), whatever became of it. Not read while the
+     * version has an open merge request: a new proposal comes first.
+     */
+    removal?: { state: string; mrUrl: string }
 }
 
 export interface CatalogStatus {
@@ -125,6 +131,10 @@ export interface BundleContext {
     head: string | undefined
     /** The package folder's tree id at `head`. */
     treeOnBase: () => Promise<string | undefined>
+    /** The newest merge request from the version's removal branch, if there is one. */
+    removal?: MergeRequestRef
+    /** Check the package against its merge (default); a deletion only needs to know it is there. */
+    verify?: boolean
 }
 
 /** The folder all of a target's packages sit in, and a package's name inside it. */
@@ -162,7 +172,10 @@ export async function inspectBundle(
     expectedId?: string,
 ): Promise<BundleInspection> {
     const project = await getProject(client, parseProjectUrl(target.url).projectPath)
-    const requests = await findMergeRequests(client, project.id, bundleBranch(slug, version))
+    const [requests, removals] = await Promise.all([
+        findMergeRequests(client, project.id, bundleBranch(slug, version)),
+        findMergeRequests(client, project.id, removalBranch(slug, version)),
+    ])
     // An open request answers on its own, so the base branch is only asked without one.
     const head = requests.some((mr) => mr.state === 'opened') ? undefined : await branchHead(client, project.id, target.baseBranch)
     const dir = packageDir(target, slug)
@@ -171,6 +184,7 @@ export async function inspectBundle(
         requests,
         head,
         treeOnBase: () => (head ? treeIdOf(client, project.id, dir, head) : Promise.resolve(undefined)),
+        removal: removals[0],
     })
 }
 
@@ -187,18 +201,19 @@ export async function inspectBundleIn(
     const open = requests.find((mr) => mr.state === 'opened')
     if (open) return { status: { state: 'mr-open', mrUrl: open.web_url } }
 
+    const removal = context.removal ? { removal: { state: context.removal.state, mrUrl: context.removal.web_url } } : {}
     if (!head) {
-        return { status: { state: 'none', reason: 'no-base-branch', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}` } }
+        return { status: { state: 'none', reason: 'no-base-branch', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}`, ...removal } }
     }
     const dir = packageDir(target, slug)
     const manifestRaw = await readFile(client, projectId, `${dir}/core-ir/manifest.json`, head)
-    if (!manifestRaw) return { status: { state: 'none', reason: 'no-package' } }
+    if (!manifestRaw) return { status: { state: 'none', reason: 'no-package', ...removal } }
 
     let manifest: { id?: unknown; version?: unknown }
     try {
         manifest = JSON.parse(manifestRaw) as { id?: unknown; version?: unknown }
     } catch {
-        return { status: { state: 'none', reason: 'bad-manifest', detail: 'manifest.json auf dem Basisbranch ist kein gültiges JSON' } }
+        return { status: { state: 'none', reason: 'bad-manifest', detail: 'manifest.json auf dem Basisbranch ist kein gültiges JSON', ...removal } }
     }
     const idMatches =
         expectedId !== undefined
@@ -211,14 +226,18 @@ export async function inspectBundleIn(
                 reason: 'other-version',
                 onBase: { id: String(manifest.id), version: String(manifest.version) },
                 detail: `Auf ${target.baseBranch} liegt ${String(manifest.id)} ${String(manifest.version)}, nicht ${expectedId ?? slug} ${version}`,
+                ...removal,
             },
         }
     }
 
+    if (context.verify === false) {
+        return { status: { state: 'on-base', sha: head, packageId: String(manifest.id), ...removal }, manifestRaw }
+    }
     const merged = requests.find((mr) => mr.state === 'merged')
     const verification = judgeBundle(merged, await readTrees(client, projectId, dir, context.treeOnBase, merged))
     return {
-        status: { state: 'on-base', sha: head, packageId: String(manifest.id), verification },
+        status: { state: 'on-base', sha: head, packageId: String(manifest.id), verification, ...removal },
         manifestRaw,
     }
 }

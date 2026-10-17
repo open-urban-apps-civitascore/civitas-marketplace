@@ -1,0 +1,441 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/lib/session', () => ({ requireSession: vi.fn(async () => ({ user: { name: 'Test' } })), getAccessToken: vi.fn(async () => 't') }))
+vi.mock('@/lib/export/share-permission', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/lib/export/share-permission')>()),
+    fetchShareRight: vi.fn(async () => 'allowed'),
+}))
+
+import { deleteShare, listSharedPackages, planShareDeletion, proposeSharedCatalogEntry } from '@/lib/export-actions'
+import { SHARE_READS } from '@/lib/export/share-cache'
+import { fetchShareRight } from '@/lib/export/share-permission'
+
+const WEB = 'https://gitlab.example/group/catalog'
+const HEAD = 'f'.repeat(40)
+/** The merge commit of the version's export, and its first parent: the base branch before it. */
+const MERGE = 'e'.repeat(40)
+const BEFORE = 'b'.repeat(40)
+const MERGED_HEAD = 'c'.repeat(40)
+/** A second merge of the same branch, and the base branch before that one. */
+const MERGE_AGAIN = 'd'.repeat(40)
+const BEFORE_AGAIN = 'a'.repeat(40)
+const DIR = 'packages/baeume'
+
+const mr = (iid: number, state: string, branch: string, extra: Record<string, unknown> = {}) => ({
+    iid,
+    state,
+    source_branch: branch,
+    source_project_id: 7,
+    web_url: `${WEB}/-/merge_requests/${iid}`,
+    author: { id: 42 },
+    description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n## Bäume',
+    ...extra,
+})
+
+/** A catalogue proposal as `proposeCatalog` writes it: it names the repository and folder it pins. */
+const catalogMr = (iid: number, repo = WEB, dir = DIR) =>
+    mr(iid, 'opened', 'catalog/baeume-1.1.0', { description: `Proposed by ...\n\nAdds \`urn:stadt:usecase:baeume\` in \`useCases\`, pinned to\n\`${HEAD}\` of ${repo} (path \`${dir}\`).` })
+
+const MERGED_EXPORT = mr(3, 'merged', 'export/baeume-1.1.0', { sha: MERGED_HEAD, merge_commit_sha: MERGE, title: 'Export use case: Bäume 1.1.0' })
+const manifest = (version: string) => JSON.stringify({ id: 'urn:stadt:usecase:baeume', version })
+const index = (useCases: unknown[] = []) => JSON.stringify({ version: '1.0.0', useCases })
+
+interface World {
+    exportMrs: unknown[]
+    removalMrs: unknown[]
+    catalogMrs: unknown[]
+    /** Blob ids under the package folder, by ref. */
+    blobs: Record<string, Record<string, string>>
+    /** File contents by `<ref>|<path>`. */
+    files: Record<string, string>
+    /** Commit parents, first parent first. */
+    parents: Record<string, string[]>
+    /** `<METHOD> <path>` parts that answer 500. */
+    failing?: string[]
+}
+
+function world(overrides: Partial<World> = {}): World {
+    return {
+        exportMrs: [MERGED_EXPORT],
+        removalMrs: [],
+        catalogMrs: [],
+        blobs: { [HEAD]: { [`${DIR}/README.md`]: 'readme', [`${DIR}/core-ir/manifest.json`]: 'm-new' } },
+        files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index() },
+        parents: { [MERGE]: [BEFORE, MERGED_HEAD] },
+        ...overrides,
+    }
+}
+
+interface Call {
+    method: string
+    path: string
+    body?: Record<string, unknown>
+}
+
+/** A GitLab with one project (7) that is target and catalogue at once; it writes down every request. */
+function fakeGitLab(state: World) {
+    const calls: Call[] = []
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        const path = url.pathname.replace(/^\/api\/v4/, '')
+        const query = url.searchParams
+        const method = init?.method ?? 'GET'
+        const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
+        calls.push({ method, path: `${path}${url.search}`, body })
+        const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status })
+        if (state.failing?.some((part) => `${method} ${path}`.includes(part))) return json({ message: 'boom' }, 500)
+
+        if (method === 'GET') {
+            if (path === '/projects/group%2Fcatalog') {
+                return json({ id: 7, path_with_namespace: 'group/catalog', web_url: WEB, default_branch: 'main', permissions: { project_access: { access_level: 40 } } })
+            }
+            if (path === '/user') return json({ id: 42, username: 'bot' })
+            if (path === '/projects/7/merge_requests') {
+                const branch = query.get('source_branch')
+                if (branch?.startsWith('export/')) return json(state.exportMrs)
+                if (branch?.startsWith('remove/')) return json(state.removalMrs)
+                if (branch?.startsWith('catalog/')) return json(state.catalogMrs)
+                if (query.get('author_id') === '42') return json([...state.removalMrs, ...state.catalogMrs, ...state.exportMrs])
+                if (query.get('state') === 'opened') {
+                    return json([...state.exportMrs, ...state.removalMrs, ...state.catalogMrs].filter((request) => (request as { state: string }).state === 'opened'))
+                }
+            }
+            if (path === '/projects/7/repository/branches/main') return json({ commit: { id: HEAD } })
+            if (path.startsWith('/projects/7/repository/branches/')) return json({ message: '404 Branch Not Found' }, 404)
+            if (path === '/projects/7/repository/tree') {
+                const ref = query.get('ref') ?? ''
+                if (query.get('recursive') === 'true') {
+                    return json(Object.entries(state.blobs[ref] ?? {}).map(([file, id]) => ({ id, path: file, type: 'blob' })))
+                }
+                if (query.get('path') === 'packages' && (ref === HEAD || ref === MERGED_HEAD)) return json([{ id: 'T1', name: 'baeume', type: 'tree' }])
+                return json({ message: '404 Tree Not Found' }, 404)
+            }
+            if (path.startsWith('/projects/7/repository/files/')) {
+                const file = decodeURIComponent(path.slice('/projects/7/repository/files/'.length).replace(/\/raw$/, ''))
+                const content = state.files[`${query.get('ref')}|${file}`]
+                return content === undefined ? new Response('', { status: 404 }) : new Response(content, { status: 200 })
+            }
+            const commit = path.match(/^\/projects\/7\/repository\/commits\/([0-9a-f]{40})$/)?.[1]
+            if (commit && state.parents[commit]) return json({ id: commit, parent_ids: state.parents[commit] })
+            if (/^\/projects\/7\/merge_requests\/\d+\/commits$/.test(path)) return json([{ id: MERGED_HEAD }])
+        }
+        if (method === 'POST' && /^\/projects\/7\/merge_requests\/\d+\/notes$/.test(path)) return json({ id: 1 })
+        if (method === 'PUT' && /^\/projects\/7\/merge_requests\/\d+$/.test(path)) return json({ state: 'closed' })
+        if (method === 'DELETE' && path.startsWith('/projects/7/repository/branches/')) return new Response(null, { status: 204 })
+        if (method === 'POST' && path === '/projects/7/repository/commits') return json({ id: 'new' })
+        if (method === 'POST' && path === '/projects/7/merge_requests') {
+            return json({ iid: 30, state: 'opened', source_branch: body?.source_branch, web_url: `${WEB}/-/merge_requests/30` })
+        }
+        return json({ message: `unrouted ${method} ${path}` }, 404)
+    }) as typeof fetch
+    return { fetchImpl, calls }
+}
+
+const writes = (calls: Call[]) => calls.filter((call) => call.method !== 'GET')
+const sent = (calls: Call[]) => writes(calls).map((call) => `${call.method} ${call.path}`)
+
+/** Plans, then deletes with the plan's own fingerprint, as the dialog does. */
+async function planAndDelete(state: World, slug = 'baeume', version = '1.1.0') {
+    const gitlab = fakeGitLab(state)
+    vi.stubGlobal('fetch', gitlab.fetchImpl)
+    const { plan, error } = await planShareDeletion(WEB, slug, version)
+    expect(error).toBeUndefined()
+    gitlab.calls.length = 0
+    const result = await deleteShare(WEB, slug, version, plan!.fingerprint)
+    return { plan: plan!, result, calls: gitlab.calls }
+}
+
+async function planOf(state: World, slug = 'baeume', version = '1.1.0') {
+    const gitlab = fakeGitLab(state)
+    vi.stubGlobal('fetch', gitlab.fetchImpl)
+    const { plan, error } = await planShareDeletion(WEB, slug, version)
+    expect(error).toBeUndefined()
+    return plan!
+}
+
+beforeEach(() => {
+    vi.stubEnv('EXPORT_TARGET_REPOS', JSON.stringify([{ label: 'Katalog-Repo', url: WEB, baseBranch: 'main', pathPrefix: 'packages' }]))
+    vi.stubEnv('EXPORT_REPO_TOKEN', 'token')
+    vi.stubEnv('REPO_LIST_URL', `${WEB}/-/raw/main/index.json`)
+    vi.stubEnv('CATALOG_REPO_URL', '')
+    SHARE_READS.clear()
+})
+
+afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.mocked(fetchShareRight).mockResolvedValue('allowed')
+})
+
+describe('deleting a version that waits for review', () => {
+    const waiting = () => world({ exportMrs: [mr(4, 'opened', 'export/pegel-1.0.0', { title: 'Export use case: Pegelkarte 1.0.0' })] })
+
+    it('withdraws the merge request: the close first, then a note on whose behalf, then its branch', async () => {
+        const { plan, result, calls } = await planAndDelete(waiting(), 'pegel', '1.0.0')
+        expect(plan).toMatchObject({ kind: 'withdraw', closes: [{ what: 'bundle', ref: '!4', url: `${WEB}/-/merge_requests/4` }], proposedBy: 'Ewa' })
+        expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/4` })
+        expect(result.detail).toBe('Merge Request !4 ist geschlossen - das Teilen ist zurückgezogen.')
+
+        expect(sent(calls)).toEqual([
+            'PUT /projects/7/merge_requests/4',
+            'POST /projects/7/merge_requests/4/notes',
+            'DELETE /projects/7/repository/branches/export%2Fpegel-1.0.0',
+        ])
+        expect(writes(calls)[0].body).toEqual({ state_event: 'close' })
+        expect(writes(calls)[1].body?.body).toContain('on behalf of **Test**')
+    })
+
+    it('says when the share is someone else’s, outside the fingerprint', async () => {
+        const plan = await planOf(waiting(), 'pegel', '1.0.0')
+        expect(plan).toMatchObject({ proposedBy: 'Ewa', byOther: true })
+        const own = await planOf(world({ exportMrs: [mr(4, 'opened', 'export/pegel-1.0.0', { description: 'Proposed by the Open Urban Apps marketplace on behalf of **Test**.' })] }), 'pegel', '1.0.0')
+        expect(own.byOther).toBeUndefined()
+        // The same plan for everyone: who asks does not change what is confirmed.
+        expect(own.fingerprint).toBe(plan.fingerprint)
+    })
+
+    it('closes nothing it did not open itself', async () => {
+        const gitlab = fakeGitLab(world({ exportMrs: [mr(4, 'opened', 'export/pegel-1.0.0', { author: { id: 99 } })] }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { plan } = await planShareDeletion(WEB, 'pegel', '1.0.0')
+        expect(plan).toMatchObject({ kind: 'none', closes: [], mrUrl: `${WEB}/-/merge_requests/4` })
+        expect(plan?.reason).toContain('nicht über diesen Marktplatz')
+        const result = await deleteShare(WEB, 'pegel', '1.0.0', plan!.fingerprint)
+        expect(result.status).toBe('unchanged')
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('does nothing when GitLab changed since the person was shown the plan', async () => {
+        const gitlab = fakeGitLab(waiting())
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await deleteShare(WEB, 'pegel', '1.0.0', 'what-the-dialog-showed-earlier')
+        expect(result.status).toBe('changed')
+        expect(result.plan?.kind).toBe('withdraw')
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('needs the right to share, like proposing', async () => {
+        vi.mocked(fetchShareRight).mockResolvedValue('refused')
+        const gitlab = fakeGitLab(waiting())
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await deleteShare(WEB, 'pegel', '1.0.0', 'any')
+        expect(result.status).toBe('forbidden')
+        expect(gitlab.calls).toEqual([])
+    })
+
+    it('refuses arguments no shared version could have', async () => {
+        expect((await planShareDeletion(WEB, '../etc', '1.0.0')).error).toContain('Ungültig')
+        expect((await deleteShare('https://elsewhere.example/x/y', 'baeume', '1.0.0', 'any')).status).toBe('unconfigured')
+    })
+})
+
+describe('deleting a merged version', () => {
+    it('proposes removing a first version, after withdrawing its open catalogue proposal', async () => {
+        const { plan, result, calls } = await planAndDelete(world({ catalogMrs: [catalogMr(9)] }))
+        expect(plan).toMatchObject({
+            kind: 'remove',
+            closes: [{ what: 'catalog', ref: '!9' }],
+            removal: { folder: DIR, previous: false, files: 2, mergedUrl: `${WEB}/-/merge_requests/3` },
+        })
+
+        expect(sent(calls)).toEqual([
+            'PUT /projects/7/merge_requests/9',
+            'POST /projects/7/merge_requests/9/notes',
+            'DELETE /projects/7/repository/branches/catalog%2Fbaeume-1.1.0',
+            'POST /projects/7/repository/commits',
+            'POST /projects/7/merge_requests',
+        ])
+        const commit = writes(calls)[3].body as { branch: string; actions: unknown[] }
+        expect(commit.branch).toBe('remove/baeume-1.1.0')
+        expect(commit.actions).toEqual([
+            { action: 'delete', file_path: `${DIR}/README.md` },
+            { action: 'delete', file_path: `${DIR}/core-ir/manifest.json` },
+        ])
+        const opened = writes(calls)[4].body as { title: string; description: string }
+        expect(opened.title).toBe('Remove use case: Bäume 1.1.0')
+        expect(opened.description).toContain(`removes \`${DIR}/\` (2 files)`)
+        expect(opened.description).toContain('is not listed in the catalogue')
+        expect(opened.description).toContain(`Withdrawn with it: ${WEB}/-/merge_requests/9`)
+
+        expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/30` })
+        expect(result.detail).toBe('Entfernen vorgeschlagen: Merge Request !30 wartet auf die Prüfenden im Repository. Merge Request !9 ist geschlossen.')
+    })
+
+    it('withdraws an open proposal of a merged version together with the rest, in one go', async () => {
+        // Bodenfeuchte on the demo: proposed again after the merge, and its catalogue proposal open.
+        const state = world({
+            exportMrs: [mr(21, 'opened', 'export/baeume-1.1.0'), MERGED_EXPORT],
+            catalogMrs: [catalogMr(20)],
+        })
+        const { plan, result, calls } = await planAndDelete(state)
+        expect(plan).toMatchObject({ kind: 'remove', closes: [{ what: 'bundle', ref: '!21' }, { what: 'catalog', ref: '!20' }] })
+        expect(sent(calls).filter((call) => call.startsWith('PUT'))).toEqual(['PUT /projects/7/merge_requests/21', 'PUT /projects/7/merge_requests/20'])
+        expect(sent(calls).at(-1)).toBe('POST /projects/7/merge_requests')
+        expect(result.detail).toContain('Die Merge Requests !21 und !20 sind geschlossen.')
+    })
+
+    it('hands the folder back to the version it replaced, writing only what differs', async () => {
+        const state = world({
+            blobs: {
+                [HEAD]: { [`${DIR}/README.md`]: 'same', [`${DIR}/core-ir/manifest.json`]: 'm-new', [`${DIR}/core-ir/new.json`]: 'n' },
+                [BEFORE]: { [`${DIR}/README.md`]: 'same', [`${DIR}/core-ir/manifest.json`]: 'm-old', [`${DIR}/core-ir/old.json`]: 'o' },
+            },
+            files: {
+                [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'),
+                [`${BEFORE}|${DIR}/core-ir/manifest.json`]: manifest('1.0.0'),
+                [`${BEFORE}|${DIR}/core-ir/old.json`]: '{"old":true}',
+                'main|index.json': index(),
+            },
+        })
+        const { plan, result, calls } = await planAndDelete(state)
+        expect(plan).toMatchObject({ kind: 'remove', closes: [], removal: { previous: true, restores: '1.0.0', files: 3 } })
+        expect(result.status).toBe('ok')
+
+        const commit = writes(calls).find((call) => call.path === '/projects/7/repository/commits')?.body as { actions: unknown[] }
+        expect(commit.actions).toEqual([
+            { action: 'update', file_path: `${DIR}/core-ir/manifest.json`, content: manifest('1.0.0') },
+            { action: 'create', file_path: `${DIR}/core-ir/old.json`, content: '{"old":true}' },
+            { action: 'delete', file_path: `${DIR}/core-ir/new.json` },
+        ])
+        // The unchanged README is not read at all.
+        expect(calls.some((call) => call.path.includes('README.md'))).toBe(false)
+        const opened = writes(calls).find((call) => call.path === '/projects/7/merge_requests')?.body as { description: string }
+        expect(opened.description).toContain('back to version 1.0.0')
+    })
+
+    it('undoes the merge that brought the version in: shared again after a newer one, it gives the folder back to that one', async () => {
+        // 1.1.0 merged first (MERGE), replaced by 1.2.0, then shared again (MERGE_AGAIN): before that, 1.2.0 was there.
+        const state = world({
+            exportMrs: [
+                mr(8, 'merged', 'export/baeume-1.1.0', { merge_commit_sha: MERGE_AGAIN, title: 'Export use case: Bäume 1.1.0' }),
+                MERGED_EXPORT,
+            ],
+            parents: { [MERGE]: [BEFORE], [MERGE_AGAIN]: [BEFORE_AGAIN] },
+            blobs: {
+                [HEAD]: { [`${DIR}/core-ir/manifest.json`]: 'm-110' },
+                [BEFORE]: {},
+                [BEFORE_AGAIN]: { [`${DIR}/core-ir/manifest.json`]: 'm-120' },
+            },
+            files: {
+                [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'),
+                [`${BEFORE_AGAIN}|${DIR}/core-ir/manifest.json`]: manifest('1.2.0'),
+                'main|index.json': index(),
+            },
+        })
+        const plan = await planOf(state)
+        expect(plan).toMatchObject({ kind: 'remove', removal: { previous: true, restores: '1.2.0', mergedUrl: `${WEB}/-/merge_requests/8` } })
+    })
+
+    it('goes back to before the first merge of a version merged twice', async () => {
+        const state = world({
+            exportMrs: [
+                mr(8, 'merged', 'export/baeume-1.1.0', { merge_commit_sha: MERGE_AGAIN, title: 'Export use case: Bäume 1.1.0' }),
+                MERGED_EXPORT,
+            ],
+            parents: { [MERGE]: [BEFORE], [MERGE_AGAIN]: [BEFORE_AGAIN] },
+            blobs: {
+                [HEAD]: { [`${DIR}/core-ir/manifest.json`]: 'm-110b' },
+                [BEFORE]: {},
+                [BEFORE_AGAIN]: { [`${DIR}/core-ir/manifest.json`]: 'm-110a' },
+            },
+            files: {
+                [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'),
+                [`${BEFORE_AGAIN}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'),
+                'main|index.json': index(),
+            },
+        })
+        const plan = await planOf(state)
+        expect(plan).toMatchObject({ kind: 'remove', removal: { previous: false, files: 1, mergedUrl: `${WEB}/-/merge_requests/3` } })
+    })
+
+    it('leaves a catalogue proposal alone that pins another repository', async () => {
+        const plan = await planOf(world({ catalogMrs: [catalogMr(9, 'https://gitlab.example/other/repo')] }))
+        expect(plan).toMatchObject({ kind: 'remove', closes: [] })
+    })
+
+    it('says what already happened when the removal fails after a proposal was closed', async () => {
+        const { result } = await planAndDelete(world({ catalogMrs: [catalogMr(9)], failing: ['POST /projects/7/repository/commits'] }))
+        expect(result.status).toBe('error')
+        expect(result.partial).toBe(true)
+        expect(result.detail).toContain('Merge Request !9 ist geschlossen.')
+        expect(result.detail).toContain('500')
+    })
+
+    it('leaves a listed version in the catalogue and withdraws only what is still proposed', async () => {
+        const state = world({
+            catalogMrs: [catalogMr(9)],
+            files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index([{ id: 'urn:stadt:usecase:baeume', version: '1.1.0' }]) },
+        })
+        const { plan, result, calls } = await planAndDelete(state)
+        expect(plan).toMatchObject({ kind: 'withdraw', listed: true, closes: [{ what: 'catalog', ref: '!9' }] })
+        expect(result.detail).toBe('Merge Request !9 ist geschlossen. Die Version bleibt im Katalog, wie sie ist.')
+        expect(writes(calls).map((call) => call.method)).toEqual(['PUT', 'POST', 'DELETE'])
+        expect(writes(calls)[1].body?.body).toContain('listed version stays')
+    })
+
+    it('does not delete a listed version at all', async () => {
+        const plan = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index([{ id: 'urn:stadt:usecase:baeume', version: '1.1.0' }]) } }))
+        expect(plan).toMatchObject({ kind: 'none', closes: [] })
+        expect(plan.reason).toContain('Katalog-Pflege')
+    })
+
+    it('points at a removal that is already proposed', async () => {
+        const plan = await planOf(world({ removalMrs: [mr(12, 'opened', 'remove/baeume-1.1.0')] }))
+        expect(plan).toMatchObject({ kind: 'none', mrUrl: `${WEB}/-/merge_requests/12` })
+    })
+
+    it('has nothing to delete for a version that is no longer on the base branch', async () => {
+        const gone = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.2.0'), 'main|index.json': index() } }))
+        expect(gone).toMatchObject({ kind: 'none' })
+        expect(gone.reason).toContain('nicht (mehr) im Repository')
+    })
+
+    it('does not call a broken package folder gone', async () => {
+        const broken = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: '{not json', 'main|index.json': index() } }))
+        expect(broken).toMatchObject({ kind: 'none' })
+        expect(broken.reason).toContain('kein gültiges JSON')
+        expect(broken.reason).not.toContain('nicht (mehr) im Repository')
+    })
+
+    it('does not claim the version is unlisted when no catalogue is configured, and counts one file as one', async () => {
+        vi.stubEnv('REPO_LIST_URL', '')
+        const state = world({ blobs: { [HEAD]: { [`${DIR}/core-ir/manifest.json`]: 'm-new' } } })
+        const { plan, calls } = await planAndDelete(state)
+        expect(plan.removal?.files).toBe(1)
+        const opened = writes(calls).find((call) => call.path === '/projects/7/merge_requests')?.body as { description: string }
+        expect(opened.description).toContain('(1 file)')
+        expect(opened.description).toContain('no catalogue is configured')
+        expect(opened.description).not.toContain('is not listed in the catalogue')
+    })
+})
+
+describe('the catalogue step while a removal is pending', () => {
+    it('is refused, with the removal to look at, and proposes nothing', async () => {
+        const gitlab = fakeGitLab(world({ removalMrs: [mr(12, 'opened', 'remove/baeume-1.1.0')] }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({ intent: 'catalog', status: 'not-merged', mrUrl: `${WEB}/-/merge_requests/12` })
+        expect(result.detail).toContain('Entfernen')
+        expect(result.bundle?.removal).toEqual({ state: 'opened', mrUrl: `${WEB}/-/merge_requests/12` })
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+})
+
+describe('the list after a deletion', () => {
+    it('names a withdrawn version as such, keeps a merge over a newer closed duplicate, and carries the removal', async () => {
+        const state = world({
+            exportMrs: [
+                mr(5, 'closed', 'export/baeume-1.1.0', { closed_by: { id: 42 } }),
+                MERGED_EXPORT,
+                mr(4, 'closed', 'export/pegel-1.0.0', { closed_by: { id: 42 }, title: 'Export use case: Pegelkarte 1.0.0' }),
+            ],
+            removalMrs: [mr(12, 'opened', 'remove/baeume-1.1.0')],
+        })
+        vi.stubGlobal('fetch', fakeGitLab(state).fetchImpl)
+        const { rows } = await listSharedPackages()
+        const baeume = rows.find((row) => row.slug === 'baeume')
+        expect(baeume).toMatchObject({ bundleMr: { state: 'merged' }, bundle: { state: 'on-base', removal: { state: 'opened', mrUrl: `${WEB}/-/merge_requests/12` } } })
+        expect(baeume?.withdrawn).toBeUndefined()
+        expect(rows.find((row) => row.slug === 'pegel')).toMatchObject({ bundleMr: { state: 'closed' }, withdrawn: true })
+    })
+})
