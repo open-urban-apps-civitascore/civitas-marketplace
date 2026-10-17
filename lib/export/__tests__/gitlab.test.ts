@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { canPush, clientFor, openMergeRequest, parseProjectUrl, type GitLabProject } from '@/lib/export/gitlab'
+import { canPush, clientFor, commitBefore, openMergeRequest, parseProjectUrl, withdrawMergeRequest, type GitLabProject, type MergeRequestRef } from '@/lib/export/gitlab'
 
 interface Call {
     method: string
@@ -160,5 +160,86 @@ describe('openMergeRequest', () => {
         })
         expect(outcome.status).toBe('created')
         expect(commitAttempts).toBe(2)
+    })
+
+    it('removes what it is told to remove, next to what it writes', async () => {
+        const gl = fakeGitLab([
+            ['GET', '/projects/10/merge_requests', []],
+            ['GET', '/projects/10/repository/branches/remove%2Fx-1.0.0', new Response('', { status: 404 })],
+            ['GET', '/projects/10/repository/branches/main', { commit: { id: 'abc' } }],
+            ['POST', '/projects/10/repository/commits', { id: 'def' }],
+            ['POST', '/projects/10/merge_requests', { iid: 7, web_url: 'https://gitlab.example/mr/7', state: 'opened', source_branch: 'remove/x-1.0.0' }],
+        ])
+        const client = clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl)
+        await openMergeRequest(client, {
+            upstream: upstream(40),
+            baseBranch: 'main',
+            branch: 'remove/x-1.0.0',
+            title: 'Remove',
+            description: 'body',
+            files: { 'packages/x/README.md': '# old\n' },
+            existingPaths: new Set(['packages/x/README.md', 'packages/x/core-ir/new.json']),
+            deletedPaths: ['packages/x/core-ir/new.json'],
+        })
+        const commit = gl.calls.find((c) => c.method === 'POST' && c.path.startsWith('/projects/10/repository/commits'))
+        expect((commit?.body as { actions: unknown[] }).actions).toEqual([
+            { action: 'update', file_path: 'packages/x/README.md', content: '# old\n' },
+            { action: 'delete', file_path: 'packages/x/core-ir/new.json' },
+        ])
+    })
+})
+
+describe('withdrawMergeRequest', () => {
+    const fromFork: MergeRequestRef = { iid: 5, web_url: 'https://gitlab.example/mr/5', state: 'opened', source_branch: 'export/x-1.0.0', source_project_id: 99 }
+
+    it('closes, then leaves a note, then deletes the branch where it lives - in the fork', async () => {
+        const gl = fakeGitLab([
+            ['PUT', '/projects/10/merge_requests/5', { state: 'closed' }],
+            ['POST', '/projects/10/merge_requests/5/notes', { id: 1 }],
+            ['DELETE', '/projects/99/repository/branches/export%2Fx-1.0.0', new Response(null, { status: 204 })],
+        ])
+        await withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), 10, fromFork, 'Withdrawn.')
+        expect(gl.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+            'PUT /projects/10/merge_requests/5',
+            'POST /projects/10/merge_requests/5/notes',
+            'DELETE /projects/99/repository/branches/export%2Fx-1.0.0',
+        ])
+        expect(gl.calls[0].body).toEqual({ state_event: 'close' })
+        expect(gl.calls[1].body).toEqual({ body: 'Withdrawn.' })
+    })
+
+    it('still closes when the note or the branch fail, and writes nothing more when the close does', async () => {
+        const forbidden = () => new Response(JSON.stringify({ message: '403 Forbidden' }), { status: 403 })
+        const tolerant = fakeGitLab([
+            ['PUT', '/projects/10/merge_requests/5', { state: 'closed' }],
+            ['POST', '/projects/10/merge_requests/5/notes', forbidden()],
+            ['DELETE', '/projects/99/repository/branches/export%2Fx-1.0.0', forbidden()],
+        ])
+        await expect(withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', tolerant.fetchImpl), 10, fromFork, 'n')).resolves.toBeUndefined()
+
+        const refused = fakeGitLab([
+            ['PUT', '/projects/10/merge_requests/5', forbidden()],
+            ['POST', '/projects/10/merge_requests/5/notes', { id: 1 }],
+        ])
+        await expect(withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', refused.fetchImpl), 10, fromFork, 'n')).rejects.toMatchObject({ status: 403 })
+        // No note claims a withdrawal that did not happen, and the branch stays.
+        expect(refused.calls.map((c) => c.method)).toEqual(['PUT'])
+    })
+})
+
+describe('commitBefore', () => {
+    const merged = (extra: Partial<MergeRequestRef>): MergeRequestRef => ({ iid: 3, web_url: 'u', state: 'merged', source_branch: 'export/x-1.0.0', ...extra })
+    const gl = fakeGitLab([
+        ['GET', '/projects/10/repository/commits/merge', { id: 'merge', parent_ids: ['base-before', 'branch-head'] }],
+        ['GET', '/projects/10/repository/commits/squash', { id: 'squash', parent_ids: ['base-before-squash'] }],
+        ['GET', '/projects/10/repository/commits/first', { id: 'first', parent_ids: ['base-before-ff'] }],
+        ['GET', '/projects/10/merge_requests/3/commits', [{ id: 'second' }, { id: 'first' }]],
+    ])
+    const client = clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl)
+
+    it('takes the first parent of what landed: the merge commit, the squashed one, or the oldest own commit', async () => {
+        expect(await commitBefore(client, 10, merged({ merge_commit_sha: 'merge' }))).toBe('base-before')
+        expect(await commitBefore(client, 10, merged({ merge_commit_sha: null, squash_commit_sha: 'squash' }))).toBe('base-before-squash')
+        expect(await commitBefore(client, 10, merged({}))).toBe('base-before-ff')
     })
 })

@@ -6,15 +6,18 @@ import { cn } from '@/lib/utils'
 /**
  * One button recipe. `primary` is the one main action of a surface - never
  * two next to each other; `secondary` is every other action; `ghost` is a
- * quiet text action ("Erneut prüfen", "Anderen Datensatz wählen").
+ * quiet text action ("Erneut prüfen", "Anderen Datensatz wählen"); `danger`
+ * confirms something that cannot be taken back, in the red outline the
+ * uninstall button wears.
  */
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost'
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const BASE = 'inline-flex items-center gap-1.5 rounded-md text-sm font-medium transition-opacity disabled:opacity-50'
 const VARIANTS: Record<ButtonVariant, string> = {
     primary: 'bg-primary px-3 py-1.5 text-primary-foreground hover:opacity-90',
     secondary: 'border px-3 py-1.5 text-foreground hover:bg-muted',
     ghost: 'px-0 py-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline',
+    danger: 'border border-error/40 px-3 py-1.5 text-error hover:bg-error/5 disabled:cursor-not-allowed disabled:hover:bg-transparent dark:hover:bg-error/20 dark:disabled:hover:bg-transparent',
 }
 
 /** The classes, for a link that has to look like a button. */

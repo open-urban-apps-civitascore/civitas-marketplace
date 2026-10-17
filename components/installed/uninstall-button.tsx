@@ -3,7 +3,9 @@
 import { useActionState } from 'react'
 import { Loader2, Trash2 } from 'lucide-react'
 
+import { buttonClass } from '@/components/ui/button'
 import { uninstallInstallation, type UninstallResult } from '@/lib/install-actions'
+import { cn } from '@/lib/utils'
 
 const FEEDBACK_STYLES: Record<UninstallResult['status'], string> = {
     uninstalled: 'text-success',
@@ -75,7 +77,7 @@ export function UninstallButton({
                     type="submit"
                     disabled={pending || disabled}
                     aria-describedby={describedBy}
-                    className={`inline-flex items-center gap-1.5 rounded-md border border-error/40 font-medium text-error transition-colors hover:bg-error/5 dark:hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent ${size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs'}`}
+                    className={cn(buttonClass('danger'), size === 'sm' && 'px-2.5 py-1 text-xs')}
                 >
                     {pending ? (
                         <Loader2 className={`${iconClass} animate-spin`} />

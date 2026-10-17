@@ -10,7 +10,7 @@ export type InProgressItem =
 
 /** Where a listed version stands, from everything the list read about it. */
 export function rowProgress(row: SharedPackageRow): ShareProgress {
-    return shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog })
+    return shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog, withdrawn: row.withdrawn })
 }
 
 /** The person's own move: a draft, a version whose state could not be read, or a stage that is theirs. */
@@ -20,14 +20,15 @@ export function isMine(item: InProgressItem): boolean {
 
 /**
  * The drafts, and the shared versions someone can still move on - waiting
- * for a review, for the catalogue entry. What is in the catalogue, replaced
- * or closed stays in "Geteilte Pakete". The person's own moves first, then
- * what waits on others; within each, the order given (newest first).
+ * for a review, for the catalogue entry, for a removal. What is in the
+ * catalogue, replaced, withdrawn, removed or out of anyone's reach here stays
+ * in "Geteilte Pakete". The person's own moves first, then what waits on
+ * others; within each, the order given (newest first).
  */
 export function inProgressItems(drafts: ShareDraft[], available: ReadonlySet<string>, rows: SharedPackageRow[]): InProgressItem[] {
     const shared = rows.flatMap((row): InProgressItem[] => {
         const progress = rowProgress(row)
-        const open = !progress.finished && progress.active !== undefined
+        const open = !progress.finished && (progress.active !== undefined || progress.removal === 'pending')
         return row.problem || open ? [{ kind: 'shared', key: row.key, row, progress }] : []
     })
     return [

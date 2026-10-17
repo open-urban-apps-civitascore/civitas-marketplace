@@ -9,6 +9,7 @@ import {
     exportReadiness,
     packageDir,
     parseBundleBranch,
+    parseRemovalBranch,
     type CatalogRepo,
     type ExportConfig,
     type ExportTarget,
@@ -29,6 +30,9 @@ import {
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
 import { SHARE_READS } from '@/lib/export/share-cache'
+import { readDeletion, runDeletion, type DeletionPlan, type DeletionResult } from '@/lib/export/share-deletion'
+import { displayNameOf } from '@/lib/export/merge-request-text'
+import { mergeRequestRef } from '@/lib/export/share-state'
 import { mapWithLimit } from '@/lib/concurrency'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -491,6 +495,16 @@ async function proposeCatalog(
             bundle,
         }
     }
+    // A version someone asked to take out again is not listed meanwhile: the reviewers decide on the removal first.
+    if (bundle.removal?.state === 'opened') {
+        return {
+            intent: 'catalog',
+            status: 'not-merged',
+            detail: `Für diese Version ist das Entfernen aus dem Repository vorgeschlagen (${mergeRequestRef(bundle.removal.mrUrl) ?? 'Merge Request'}). Einen Katalog-Eintrag gibt es erst, wenn die Prüfenden das Entfernen ablehnen.`,
+            mrUrl: bundle.removal.mrUrl,
+            bundle,
+        }
+    }
     if (bundle.verification?.state !== 'verified') {
         return {
             intent: 'catalog',
@@ -585,8 +599,11 @@ export interface SharedPackageRow {
     slug: string
     version: string
     displayName: string
+    /** The version's open merge request, else its merged one, else its newest. */
     bundleMr: { url: string; state: string }
-    /** Read for a merged bundle only. */
+    /** Closed by the marketplace's own account: withdrawn through "Löschen", not turned down. */
+    withdrawn?: boolean
+    /** Read for a merged bundle only; with the version's removal, if one was proposed. */
     bundle?: BundleStatus
     catalog?: CatalogStatus
     /** Why the state could not be read completely; the row then shows its merge request only. */
@@ -667,18 +684,26 @@ async function sharedRowsOf(
     base.catch(() => {})
     const requests = await listMergeRequestsBy(client, project.id, bot.id)
 
-    // Newest first, so a branch's first request is the one that counts. The bot
-    // names the export branches, so its own requests are all there are from
-    // them: asking GitLab once more per branch would add nothing.
+    // Newest first, so a branch's first request is the newest. The bot names
+    // the export branches, so its own requests are all there are from them:
+    // asking GitLab once more per branch would add nothing. The same holds for
+    // the removals "Löschen" proposes, which belong to the row of their version.
     const byBranch = new Map<string, MergeRequestRef[]>()
+    const removals = new Map<string, MergeRequestRef>()
     for (const mr of requests) {
+        const removal = parseRemovalBranch(mr.source_branch)
+        if (removal) {
+            const version = `${removal.slug}@${removal.version}`
+            if (!removals.has(version)) removals.set(version, mr)
+            continue
+        }
         if (!parseBundleBranch(mr.source_branch)) continue
         const known = byBranch.get(mr.source_branch)
         if (known) known.push(mr)
         else if (byBranch.size < MAX_SHARED_ROWS) byBranch.set(mr.source_branch, [mr])
     }
     return mapWithLimit([...byBranch.values()], ROW_CONCURRENCY, (branchRequests) =>
-        sharedPackageRow(target, client, project.id, base, branchRequests, catalog),
+        sharedPackageRow(target, client, project.id, base, branchRequests, catalog, { removals, botId: bot.id }),
     )
 }
 
@@ -689,8 +714,10 @@ async function sharedPackageRow(
     base: Promise<{ head: string | undefined; trees: Map<string, string> }>,
     requests: MergeRequestRef[],
     catalog: Promise<CatalogContext | undefined>,
+    { removals, botId }: { removals: Map<string, MergeRequestRef>; botId: number },
 ): Promise<SharedPackageRow> {
-    const mr = requests[0]
+    // An open request is the version's present; else a merge, which a later closed duplicate does not undo.
+    const mr = requests.find((request) => request.state === 'opened') ?? requests.find((request) => request.state === 'merged') ?? requests[0]
     const parsed = parseBundleBranch(mr.source_branch) as { slug: string; version: string }
     const row: SharedPackageRow = {
         key: `${target.key}#${mr.source_branch}`,
@@ -700,6 +727,7 @@ async function sharedPackageRow(
         version: parsed.version,
         displayName: displayNameOf(mr.title, parsed.version) ?? parsed.slug,
         bundleMr: { url: mr.web_url, state: mr.state },
+        ...(mr.state === 'closed' && mr.closed_by?.id === botId ? { withdrawn: true } : {}),
     }
     if (mr.state !== 'merged') return row
 
@@ -710,6 +738,7 @@ async function sharedPackageRow(
             requests,
             head,
             treeOnBase: async () => trees.get(packageFolder(target, parsed.slug).name),
+            removal: removals.get(`${parsed.slug}@${parsed.version}`),
         })
         if (!bundle.packageId) return { ...row, bundle }
         const context = await catalog
@@ -741,12 +770,6 @@ async function readCatalogContext(
     return { openRequests, index }
 }
 
-/** The display name inside the bundle request's title, as `exportAction` writes it. */
-function displayNameOf(title: string | undefined, version: string): string | undefined {
-    const match = title?.match(/^Export use case: (.+) (\d+\.\d+\.\d+)$/)
-    return match && match[2] === version ? match[1] : undefined
-}
-
 /**
  * The catalogue step from the list of shared packages: no form, the merged
  * manifest is the source. Arguments are re-checked here, since a server
@@ -773,6 +796,57 @@ export async function proposeSharedCatalogEntry(
         return await proposeCatalog(config, target, config.token as string, slug, version, undefined, requestedBy)
     } catch (error) {
         if (error instanceof GitLabError) return { intent: 'catalog', status: 'error', detail: gitlabMessage(error) }
+        throw error
+    }
+}
+
+/** The target a deletion acts in, or why there is none. Arguments are checked again: a server action answers any caller. */
+function deletionTarget(targetKey: string, slug: string, version: string): { config: ExportConfig; target: ExportTarget; token: string } | DeletionResult {
+    const config = exportConfig()
+    const target = config.targets.find((candidate) => candidate.key === targetKey)
+    if (exportReadiness(config) !== 'ready' || !target) {
+        return { status: 'unconfigured', detail: 'Zielrepository oder GitLab-Zugang ist nicht konfiguriert.' }
+    }
+    if (!SLUG.test(slug) || !VERSION.test(version)) return { status: 'invalid', detail: 'Ungültiger Paket-Slug oder ungültige Version.' }
+    return { config, target, token: config.token as string }
+}
+
+/**
+ * What "Löschen" would do to one shared version now, for the dialog to show
+ * before anything happens (see `share-deletion.ts`). Reads only.
+ */
+export async function planShareDeletion(targetKey: string, slug: string, version: string): Promise<{ plan?: DeletionPlan; error?: string }> {
+    const session = await requireSession()
+    const resolved = deletionTarget(targetKey, slug, version)
+    if ('status' in resolved) return { error: resolved.detail }
+    try {
+        return { plan: (await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, proposerName(session.user))).plan }
+    } catch (error) {
+        if (error instanceof GitLabError) return { error: gitlabMessage(error) }
+        throw error
+    }
+}
+
+/**
+ * Deletes one shared version the way the confirmed plan said: GitLab is read
+ * again, and the deletion runs only while that reading is still the plan with
+ * `fingerprint`. Otherwise the new plan comes back, to be confirmed in turn.
+ */
+export async function deleteShare(targetKey: string, slug: string, version: string, fingerprint: string): Promise<DeletionResult> {
+    const session = await requireSession()
+    const refusal = shareRefusal(await fetchShareRight())
+    if (refusal) return { status: 'forbidden', detail: refusal }
+    const resolved = deletionTarget(targetKey, slug, version)
+    if ('status' in resolved) return resolved
+    try {
+        const requestedBy = proposerName(session.user)
+        const { plan, work } = await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, requestedBy)
+        if (plan.fingerprint !== fingerprint) {
+            return { status: 'changed', detail: 'Bei GitLab hat sich der Stand gerade geändert. Bitte noch einmal ansehen, was Löschen jetzt bedeutet.', plan }
+        }
+        return await runDeletion(plan, work, requestedBy, gitlabMessage)
+    } catch (error) {
+        if (error instanceof GitLabError) return { status: 'error', detail: gitlabMessage(error) }
         throw error
     }
 }

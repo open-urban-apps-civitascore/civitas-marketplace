@@ -9,7 +9,8 @@
  * create a branch with all its files in ONE commits request, which is why
  * this file is shorter than the GitHub one.
  *
- * Everything here only ever PROPOSES. No code path merges.
+ * Everything here only ever PROPOSES, or takes back what the bot itself
+ * proposed (`withdrawMergeRequest`). No code path merges.
  */
 
 export class GitLabError extends Error {
@@ -131,11 +132,17 @@ export interface MergeRequestRef {
     web_url: string
     state: 'opened' | 'merged' | 'closed' | 'locked' | string
     source_branch: string
+    /** Where the source branch lives: the target project itself, or the bot's fork of it. */
+    source_project_id?: number
     /** The head of the source branch; after the merge still reachable in the target project. */
     sha?: string
     merge_commit_sha?: string | null
     squash_commit_sha?: string | null
     title?: string
+    description?: string | null
+    author?: { id: number; username?: string } | null
+    /** Who closed it, for a closed one. */
+    closed_by?: { id: number; username?: string } | null
     merged_at?: string | null
     updated_at?: string
 }
@@ -268,26 +275,63 @@ export async function listTree(
     path: string,
     ref: string,
 ): Promise<string[]> {
-    const files: string[] = []
-    for (let page = 1; ; page++) {
-        let batch: { path: string; type: string }[]
-        try {
-            batch = await gl(
-                client,
-                `/projects/${projectId}/repository/tree?recursive=true&per_page=100&page=${page}` +
-                    `&ref=${encode(ref)}${path && path !== '.' ? `&path=${encode(path)}` : ''}`,
-            )
-        } catch (error) {
-            if (error instanceof GitLabError && error.status === 404) return files
-            throw error
+    return [...(await listBlobs(client, projectId, path, ref)).keys()]
+}
+
+/**
+ * Every file under `path` at `ref` with its blob id, git's hash of its
+ * content: equal ids mean equal files, so two states of a folder can be
+ * compared without reading a single file. Empty when the path does not
+ * exist; kept when `ref` is a commit.
+ */
+export function listBlobs(
+    client: GitLabClient,
+    projectId: number,
+    path: string,
+    ref: string,
+): Promise<Map<string, string>> {
+    return readOnce(client, `blobs|${projectId}|${path}|${ref}`, COMMIT_SHA.test(ref), async () => {
+        const files = new Map<string, string>()
+        for (let page = 1; ; page++) {
+            let batch: { id: string; path: string; type: string }[]
+            try {
+                batch = await gl(
+                    client,
+                    `/projects/${projectId}/repository/tree?recursive=true&per_page=100&page=${page}` +
+                        `&ref=${encode(ref)}${path && path !== '.' ? `&path=${encode(path)}` : ''}`,
+                )
+            } catch (error) {
+                if (error instanceof GitLabError && error.status === 404) return files
+                throw error
+            }
+            for (const entry of batch) if (entry.type === 'blob') files.set(entry.path, entry.id)
+            if (batch.length < 100) break
+            if (files.size > 5000) {
+                throw new GitLabError('Das Zielverzeichnis enthält mehr als 5000 Dateien — das ist kein Paketordner', 413)
+            }
         }
-        files.push(...batch.filter((entry) => entry.type === 'blob').map((entry) => entry.path))
-        if (batch.length < 100) break
-        if (files.length > 5000) {
-            throw new GitLabError('Das Zielverzeichnis enthält mehr als 5000 Dateien — das ist kein Paketordner', 413)
-        }
-    }
-    return files
+        return files
+    })
+}
+
+/** The parents of a commit, first parent first. Kept: a commit never changes. */
+export async function commitParents(client: GitLabClient, projectId: number, sha: string): Promise<string[]> {
+    const commit = await readOnce(client, `commit|${projectId}|${sha}`, COMMIT_SHA.test(sha), () =>
+        gl<{ parent_ids?: string[] }>(client, `/projects/${projectId}/repository/commits/${encode(sha)}`),
+    )
+    return commit.parent_ids ?? []
+}
+
+/**
+ * The base branch as it was just before a merged request landed: the first
+ * parent of the commit that brought it - the merge commit, the squashed
+ * commit, or for a fast-forward the request's own oldest commit. Undefined
+ * when GitLab names none of them.
+ */
+export async function commitBefore(client: GitLabClient, projectId: number, merged: MergeRequestRef): Promise<string | undefined> {
+    const landed =
+        merged.merge_commit_sha ?? merged.squash_commit_sha ?? (await mergeRequestCommits(client, projectId, merged.iid, true)).at(-1)?.id
+    return landed ? (await commitParents(client, projectId, landed))[0] : undefined
 }
 
 /** A file's content at `ref`, undefined where it does not exist. Kept when `ref` is a commit. */
@@ -431,13 +475,35 @@ export async function treeIdOf(
     return (await directoryTrees(client, projectId, parts.join('/'), ref)).get(name)
 }
 
+/**
+ * Takes back a merge request the bot opened: the close, then a note on whose
+ * behalf, then its branch. Withdrawing one's own proposal needs no review on
+ * any forge, which is why this is the one write besides proposing. Closing
+ * is what counts and comes first, so no note claims a withdrawal that did
+ * not happen; the note and the branch are courtesies, whose failure does not
+ * fail it - a leftover branch is replaced by the next proposal anyway (see
+ * `openMergeRequest`).
+ */
+export async function withdrawMergeRequest(
+    client: GitLabClient,
+    projectId: number,
+    mr: MergeRequestRef,
+    note: string,
+): Promise<void> {
+    await gl(client, `/projects/${projectId}/merge_requests/${mr.iid}`, { method: 'PUT', body: { state_event: 'close' } })
+    await gl(client, `/projects/${projectId}/merge_requests/${mr.iid}/notes`, { method: 'POST', body: { body: note } }).catch(() => undefined)
+    await gl(client, `/projects/${mr.source_project_id ?? projectId}/repository/branches/${encode(mr.source_branch)}`, {
+        method: 'DELETE',
+    }).catch(() => undefined)
+}
+
 export type MergeRequestOutcome =
     | { status: 'created'; url: string; iid: number }
     | { status: 'already-open'; url: string; iid: number }
 
 /**
  * Opens a merge request that adds or updates `files` (keyed by repository
- * path) on top of the target's base branch.
+ * path), and removes `deletedPaths`, on top of the target's base branch.
  *
  * Direct when the token may push to the target; otherwise the branch lives in
  * the bot's fork and the merge request targets the upstream project. The
@@ -456,6 +522,8 @@ export async function openMergeRequest(
         files: Record<string, string>
         /** Paths that already exist on the base branch — committed as updates, not creates. */
         existingPaths: Set<string>
+        /** Paths on the base branch the merge request removes. */
+        deletedPaths?: string[]
     },
 ): Promise<MergeRequestOutcome> {
     const open = (await findMergeRequests(client, input.upstream.id, input.branch)).find(
@@ -474,11 +542,14 @@ export async function openMergeRequest(
         })
     }
 
-    const actions = Object.entries(input.files).map(([path, content]) => ({
-        action: input.existingPaths.has(path) ? 'update' : 'create',
-        file_path: path,
-        content,
-    }))
+    const actions: { action: 'create' | 'update' | 'delete'; file_path: string; content?: string }[] = [
+        ...Object.entries(input.files).map(([path, content]) => ({
+            action: input.existingPaths.has(path) ? ('update' as const) : ('create' as const),
+            file_path: path,
+            content,
+        })),
+        ...(input.deletedPaths ?? []).map((path) => ({ action: 'delete' as const, file_path: path })),
+    ]
     const upstreamHead = await branchHead(client, input.upstream.id, input.baseBranch)
     const commitBody = {
         branch: input.branch,

@@ -1,15 +1,16 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, BookCheck, ChevronDown, ChevronUp, FilePen, GitMerge, GitPullRequest, TriangleAlert, type LucideIcon } from 'lucide-react'
+import { ArrowRight, BookCheck, ChevronDown, ChevronUp, FilePen, GitMerge, GitPullRequest, Trash2, TriangleAlert, type LucideIcon } from 'lucide-react'
 
 import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
+import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete-share-dialog'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Panel } from '@/components/ui/layout'
-import { InlineNotice, Pending } from '@/components/ui/notice'
+import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 import type { SharedPackageRow } from '@/lib/export-actions'
-import { compactList, inProgressItems, isMine } from '@/lib/export/in-progress-items'
+import { compactList, inProgressItems, isMine, type InProgressItem } from '@/lib/export/in-progress-items'
 import { draftTime, type ShareDraft } from '@/lib/export/share-drafts'
 import { turnLabel, type ShareProgress } from '@/lib/export/share-stages'
 import type { ExportSource } from '@/lib/export/sources'
@@ -29,6 +30,11 @@ const VISIBLE = 3
 
 const linkClass = 'inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline'
 
+/** The name a row shows: a draft by the name typed so far, a shared version with its number. */
+function itemTitle(item: InProgressItem): string {
+    return item.kind === 'draft' ? item.draft.basics.displayName?.trim() || item.draft.datasetName : `${item.row.displayName} ${item.row.version}`
+}
+
 /**
  * "In Arbeit": everything someone started sharing and has not finished, at
  * the top of "Neu teilen" - the start-or-resume screen the patterns for long
@@ -38,16 +44,16 @@ const linkClass = 'inline-flex items-center gap-1 text-sm font-medium text-prima
  * a use case and back does not ask GitLab again.
  *
  * Only what is open (see `inProgressItems`), the person's own moves first,
- * and only the first few until "Alle anzeigen". What is in the catalogue,
- * replaced or closed stays in "Geteilte Pakete". Every row has one action.
- * None is a primary button, because several rows can offer one at the same
- * time.
+ * and only the first few until "Alle anzeigen". Every row has one action and
+ * "Löschen", which means at each stage what `share-deletion.ts` says. None
+ * is a primary button, because several rows can offer one at the same time.
  */
 export function InProgress({
     drafts,
     sources,
     rows,
     error,
+    loaded,
     onReload,
     onContinue,
     onDiscard,
@@ -57,20 +63,42 @@ export function InProgress({
     /** The bot's shared packages; null while GitLab is asked. */
     rows: SharedPackageRow[] | null
     error?: string
-    /** Reads the shared packages again, after a proposal from here changed them. */
+    /** How many readings of them came back so far (`useSharedListing`). */
+    loaded: number
+    /** Reads the shared packages again, after something here changed them. */
     onReload: () => void
     onContinue: (draft: ShareDraft) => void
     onDiscard: (datasetId: string) => void
 }) {
     const { proposing, propose, outcomeFor } = useCatalogProposal(onReload)
     const [expanded, setExpanded] = useState(false)
+    const [deleting, setDeleting] = useState<InProgressItem | null>(null)
+    const [deleted, setDeleted] = useState<DeletionDone | null>(null)
+    // The row just deleted at GitLab, until the next reading comes back (answer or failure): no stale buttons meanwhile.
+    const [settling, setSettling] = useState<{ key: string; loaded: number } | null>(null)
     const listId = useId()
+    const doneRef = useRef<HTMLDivElement>(null)
+
+    // The row and its button may be gone: the answer is where focus goes on.
+    useEffect(() => {
+        if (deleted) doneRef.current?.focus()
+    }, [deleted])
 
     const items = inProgressItems(drafts, new Set(sources.map((source) => source.id)), rows ?? [])
+    const settlingKey = settling && settling.loaded === loaded ? settling.key : undefined
 
     // Nothing to show yet, or nothing open: no block. A list that pops in empty would only say "nothing".
-    if (items.length === 0 && !error) return null
+    if (items.length === 0 && !error && !deleted) return null
     const { shown, more, moreMine } = compactList(items, expanded, VISIBLE, isMine)
+
+    const finish = (item: InProgressItem, done: DeletionDone) => {
+        setDeleting(null)
+        setDeleted(done)
+        if (done.remote) {
+            setSettling({ key: item.key, loaded })
+            onReload()
+        }
+    }
 
     return (
         <Panel
@@ -82,24 +110,39 @@ export function InProgress({
                 </Link>
             }
         >
+            {deleted && (
+                <div ref={doneRef} tabIndex={-1} className="outline-none">
+                    <Notice tone="success" live action={deleted.mrUrl ? <ExternalAnchor href={deleted.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
+                        {deleted.detail}
+                    </Notice>
+                </div>
+            )}
             {shown.length > 0 && (
                 <ul id={listId} className="flex flex-col">
-                    {shown.map((item) => (
-                        <li key={item.key} className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0">
-                            {item.kind === 'draft' ? (
-                                <DraftRow draft={item.draft} available={item.available} onContinue={onContinue} onDiscard={onDiscard} />
-                            ) : (
-                                <SharedRow
-                                    row={item.row}
-                                    progress={item.progress}
-                                    proposing={proposing === item.row.key}
-                                    disabled={proposing !== null}
-                                    onPropose={() => void propose(item.row)}
-                                />
-                            )}
-                            {item.kind === 'shared' && outcomeFor(item.row.key) && <ProposalOutcome result={outcomeFor(item.row.key)!} />}
-                        </li>
-                    ))}
+                    {shown.map((item) => {
+                        const remove = () => {
+                            setDeleted(null)
+                            setDeleting(item)
+                        }
+                        return (
+                            <li key={item.key} className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0">
+                                {item.kind === 'draft' ? (
+                                    <DraftRow draft={item.draft} available={item.available} onContinue={onContinue} onDelete={remove} />
+                                ) : (
+                                    <SharedRow
+                                        row={item.row}
+                                        progress={item.progress}
+                                        settling={item.key === settlingKey}
+                                        proposing={proposing === item.row.key}
+                                        disabled={proposing !== null}
+                                        onPropose={() => void propose(item.row)}
+                                        onDelete={remove}
+                                    />
+                                )}
+                                {item.kind === 'shared' && outcomeFor(item.row.key) && <ProposalOutcome result={outcomeFor(item.row.key)!} />}
+                            </li>
+                        )
+                    })}
                 </ul>
             )}
             {items.length > VISIBLE && (
@@ -126,6 +169,19 @@ export function InProgress({
                     </Link>
                 </InlineNotice>
             )}
+
+            {deleting && (
+                <DeleteShareDialog
+                    item={deleting}
+                    title={itemTitle(deleting)}
+                    onCancel={(reload) => {
+                        setDeleting(null)
+                        if (reload) onReload()
+                    }}
+                    onDiscardDraft={onDiscard}
+                    onDone={(done) => finish(deleting, done)}
+                />
+            )}
         </Panel>
     )
 }
@@ -145,16 +201,25 @@ function Row({ icon: Icon, title, meta, children }: { icon: LucideIcon; title: R
     )
 }
 
+/** Quiet, and before the row's own action: deleting is offered everywhere, but nowhere first. */
+function DeleteButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
+    return (
+        <Button variant="ghost" icon={Trash2} disabled={disabled} onClick={onClick}>
+            Löschen
+        </Button>
+    )
+}
+
 function DraftRow({
     draft,
     available,
     onContinue,
-    onDiscard,
+    onDelete,
 }: {
     draft: ShareDraft
     available: boolean
     onContinue: (draft: ShareDraft) => void
-    onDiscard: (datasetId: string) => void
+    onDelete: () => void
 }) {
     const title = draft.basics.displayName?.trim() || draft.datasetName
     return (
@@ -167,16 +232,8 @@ function DraftRow({
                     : `Entwurf vom ${draftTime(draft.savedAt)} - der Datensatz „${draft.datasetName}“ ist nicht mehr verfügbar`
             }
         >
-            {available ? (
-                <>
-                    <Button variant="ghost" className="text-xs" onClick={() => onDiscard(draft.datasetId)}>
-                        Entwurf löschen
-                    </Button>
-                    <Button onClick={() => onContinue(draft)}>Fortsetzen</Button>
-                </>
-            ) : (
-                <Button onClick={() => onDiscard(draft.datasetId)}>Entwurf löschen</Button>
-            )}
+            <DeleteButton onClick={onDelete} />
+            {available && <Button onClick={() => onContinue(draft)}>Fortsetzen</Button>}
         </Row>
     )
 }
@@ -184,25 +241,34 @@ function DraftRow({
 function SharedRow({
     row,
     progress,
+    settling,
     proposing,
     disabled,
     onPropose,
+    onDelete,
 }: {
     row: SharedPackageRow
     progress: ShareProgress
+    /** Just deleted; the list is being read again. */
+    settling: boolean
     proposing: boolean
     disabled: boolean
     onPropose: () => void
+    onDelete: () => void
 }) {
     const title = (
         <>
             {row.displayName} <span className="font-normal text-muted-foreground">{row.version}</span>
         </>
     )
+    if (settling) {
+        return <Row icon={Trash2} title={title} meta="Der Stand wird neu abgefragt …" />
+    }
     if (row.problem) {
+        // No "Löschen": what it would mean depends on the stage, and the stage is what could not be read.
         return (
             <Row icon={TriangleAlert} title={title} meta={`Stand nicht vollständig geprüft: ${row.problem}`}>
-                <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
+                <Link href="/export/shared" className={linkClass}>
                     In „Geteilte Pakete“ ansehen
                 </Link>
             </Row>
@@ -210,8 +276,18 @@ function SharedRow({
     }
     const turn = turnLabel(progress)
     const meta = turn ? `${progress.summary} · ${turn}` : progress.summary
-    const icon = progress.states.catalog === 'blocked' ? TriangleAlert : (STAGE_ICON[progress.active ?? ''] ?? GitPullRequest)
 
+    // On its way out already: the removal's merge request is the one thing to look at.
+    const removal = row.bundle?.removal
+    if (progress.removal === 'pending' && removal) {
+        return (
+            <Row icon={Trash2} title={title} meta={meta}>
+                <ExternalAnchor href={removal.mrUrl}>Merge Request ansehen</ExternalAnchor>
+            </Row>
+        )
+    }
+
+    const icon = progress.states.catalog === 'blocked' ? TriangleAlert : (STAGE_ICON[progress.active ?? ''] ?? GitPullRequest)
     let action: React.ReactNode
     if (progress.active === 'catalog' && progress.states.catalog === 'current') {
         action = (
@@ -225,13 +301,14 @@ function SharedRow({
         action = <ExternalAnchor href={row.catalog.mrUrl}>Merge Request ansehen</ExternalAnchor>
     } else {
         action = (
-            <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
+            <Link href="/export/shared" className={linkClass}>
                 In „Geteilte Pakete“ ansehen
             </Link>
         )
     }
     return (
         <Row icon={icon} title={title} meta={meta}>
+            <DeleteButton disabled={disabled} onClick={onDelete} />
             {action}
         </Row>
     )
