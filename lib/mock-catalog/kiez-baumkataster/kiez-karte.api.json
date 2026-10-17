@@ -1,0 +1,6 @@
+{
+  "name": "Kiez-Bäume Karte",
+  "slug": "karte",
+  "standard": "OWS",
+  "description": "Die Straßenbäume des Kiezes als Kartendienst (WMS und WFS)."
+}

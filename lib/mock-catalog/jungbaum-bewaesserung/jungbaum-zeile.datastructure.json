@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:jungbaumzeile:5tzfr2fcdq",
+  "title": "Jungbaum-Zeile (Fachverfahren)",
+  "description": "Eine Zeile des Baumkatasters, so wie sie im Fachverfahren steht: snake_case, Koordinaten als zwei Spalten, Sensorkennung nur bei den überwachten Jungbäumen. Quellformat — das Zielformat ist 'Jungbaum'.",
+  "$ref": "#/$defs/JungbaumZeile",
+  "$defs": {
+    "JungbaumZeile": {
+      "type": "object",
+      "title": "JungbaumZeile",
+      "required": ["baum_id", "lon", "lat"],
+      "properties": {
+        "baum_id": { "type": "string", "description": "Kataster-Nummer, z. B. 'KB-014'." },
+        "gattung": { "type": "string", "description": "Botanische Gattung, z. B. 'Tilia'." },
+        "art_deutsch": { "type": "string", "description": "Deutscher Artname, z. B. 'Winterlinde'." },
+        "pflanzjahr": { "type": "integer", "description": "Pflanzjahr — entscheidet, ob ein Baum als Jungbaum gilt." },
+        "standort": { "type": "string", "description": "Straße und Hausnummer." },
+        "lon": { "type": "number", "description": "Längengrad (WGS84)." },
+        "lat": { "type": "number", "description": "Breitengrad (WGS84)." },
+        "sensor_id": { "type": "string", "description": "Kennung des Bodenfeuchte-Sensors — leer bei Bäumen ohne Sensorik." }
+      }
+    }
+  }
+}

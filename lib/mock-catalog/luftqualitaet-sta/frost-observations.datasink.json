@@ -1,0 +1,8 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:environment:frostobservations:s53sq3rtwj",
+  "title": "Sensordaten-Speicher",
+  "description": "Legt Station und Messreihe im SensorThings-Speicher (FROST-Server) der Instanz an und hängt die Beobachtungen an (find-or-create).",
+  "connectionType": "frost",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:luftstation:v6lve8eqmu"
+}

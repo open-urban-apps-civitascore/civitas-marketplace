@@ -1,0 +1,20 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:environment:katasterzukiezbaum:jd1uf7qtd1",
+  "name": "Kataster → Kiez-Baum",
+  "description": "Übersetzt die Kataster-Zeile ins Zielformat: snake_case wird camelCase, Zahlen bekommen echte Typen, und lon/lat werden mit geoPoint zur Point-Geometrie zusammengesetzt.",
+  "document": {
+    "title": "Kataster → Kiez-Baum",
+    "source": "urn:core:standard:openurbanapps:datastructure:environment:baumkatasterzeile:ny4qd9zowt",
+    "target": "urn:core:standard:openurbanapps:datastructure:environment:kiezbaum:f1i2sjhgvq",
+    "fields": {
+      "$.baumId": "$.baum_id",
+      "$.gattung": "$.gattung",
+      "$.artDeutsch": "$.art_deutsch",
+      "$.pflanzjahr": { "op": "toInt", "input": "$.pflanzjahr" },
+      "$.kronendurchmesserM": { "op": "toFloat", "input": "$.kronendurchmesser_m" },
+      "$.stammumfangCm": { "op": "toFloat", "input": "$.stammumfang_cm" },
+      "$.standort": "$.standort",
+      "$.position": { "op": "geoPoint", "lon": "$.lon", "lat": "$.lat" }
+    }
+  }
+}

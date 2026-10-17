@@ -1,0 +1,14 @@
+{
+  "layerName": "baeume",
+  "title": "Kiez-Bäume",
+  "description": "Straßenbäume des Kiezes aus dem Baumkataster.",
+  "keywords": ["baum", "stadtgruen"],
+  "sinkRef": "Kiez-Bäume-Tabelle",
+  "attribute": ["baumId", "gattung", "artDeutsch", "pflanzjahr", "kronendurchmesserM", "stammumfangCm", "standort", "position"],
+  "geometryColumnRef": "position",
+  "defaultStyleRef": "baeume-gruen",
+  "alternativeStyleRefs": ["baeume-orange"],
+  "crs": "EPSG:4326",
+  "nativeBoundingBox": { "minX": 7.625, "minY": 51.95, "maxX": 7.645, "maxY": 51.972 },
+  "latLonBoundingBox": { "minX": 7.625, "minY": 51.95, "maxX": 7.645, "maxY": 51.972 }
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:environment:bodenfeuchtetabelle:lwjsjwznqx",
+  "title": "Bodenfeuchte-Tabelle",
+  "description": "Hängt jede Messung an eine PostGIS-Tabelle an — die Datenbasis des Dashboards. Ohne Primärschlüssel: eine Messreihe wächst, sie wird nicht überschrieben.",
+  "connectionType": "postgis",
+  "tableName": "bodenfeuchte",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtewert:g3b4znbtw9"
+}

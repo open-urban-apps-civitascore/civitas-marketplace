@@ -1,0 +1,9 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasink/v1",
+  "id": "urn:core:standard:openurbanapps:datasink:environment:kiezbaeumetabelle:x9dj5i0jl2",
+  "title": "Kiez-Bäume-Tabelle",
+  "description": "Schreibt die Bäume per UPSERT (Schlüssel baumId) in eine PostGIS-Tabelle mit Geometriespalte — die Datenbasis des Karten-Layers.",
+  "connectionType": "postgis",
+  "tableName": "kiez_baeume",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:kiezbaum:f1i2sjhgvq"
+}

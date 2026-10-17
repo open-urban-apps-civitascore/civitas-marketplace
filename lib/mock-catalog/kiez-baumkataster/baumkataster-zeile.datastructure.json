@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:core:standard:openurbanapps:datastructure:environment:baumkatasterzeile:ny4qd9zowt",
+  "title": "Baumkataster-Zeile (Rohformat)",
+  "description": "Eine Zeile der Kataster-Tabelle des Fachverfahrens: snake_case-Spalten, Koordinaten als getrennte lon/lat-Werte (WGS84). Die Pipeline liest die Tabelle per Cron vollständig — Dedup übernimmt der UPSERT der Senke.",
+  "$defs": {
+    "BaumkatasterZeile": {
+      "type": "object",
+      "properties": {
+        "baum_id": { "type": "string", "description": "Eindeutige Kataster-Nummer" },
+        "gattung": { "type": "string", "description": "Botanische Gattung, z. B. Tilia" },
+        "art_deutsch": { "type": "string", "description": "Deutscher Artname, z. B. Winterlinde" },
+        "pflanzjahr": { "type": "integer", "description": "Pflanzjahr" },
+        "kronendurchmesser_m": { "type": "number", "description": "Kronendurchmesser in Metern" },
+        "stammumfang_cm": { "type": "number", "description": "Stammumfang in Zentimetern" },
+        "standort": { "type": "string", "description": "Straße / Lagebeschreibung" },
+        "lon": { "type": "number", "description": "Längengrad (WGS84)" },
+        "lat": { "type": "number", "description": "Breitengrad (WGS84)" }
+      },
+      "required": ["baum_id", "lon", "lat"]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://civitasconnect.digital/core/datasource/v1",
+  "id": "urn:core:standard:openurbanapps:datasource:environment:jungbaumkatasterdb:g78vxt1dwo",
+  "title": "Jungbaumkataster-DB",
+  "description": "Liest das Baumkataster per Cron aus der PostgreSQL-Datenbank des Fachverfahrens (Vollabzug je Lauf; Dedup übernimmt der UPSERT der Senke). Adresse und Zugangsdaten gehören der Instanz und werden bei der Installation abgefragt.",
+  "connectionType": "sql",
+  "element": "urn:core:standard:openurbanapps:datastructure:environment:jungbaumzeile:5tzfr2fcdq",
+  "driver": "postgres",
+  "dsn": "postgres://localhost:5432/fachverfahren",
+  "table": "kataster.jungbaeume",
+  "columns": ["baum_id", "gattung", "art_deutsch", "pflanzjahr", "standort", "lon", "lat", "sensor_id"],
+  "user": "kataster"
+}
