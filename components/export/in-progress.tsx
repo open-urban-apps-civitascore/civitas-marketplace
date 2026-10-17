@@ -1,26 +1,33 @@
 'use client'
 
+import { useId, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, BookCheck, FilePen, GitMerge, GitPullRequest, TriangleAlert, type LucideIcon } from 'lucide-react'
+import { ArrowRight, BookCheck, ChevronDown, ChevronUp, FilePen, GitMerge, GitPullRequest, TriangleAlert, type LucideIcon } from 'lucide-react'
 
 import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Panel } from '@/components/ui/layout'
 import { InlineNotice, Pending } from '@/components/ui/notice'
 import type { SharedPackageRow } from '@/lib/export-actions'
+import { compactList, inProgressItems, isMine } from '@/lib/export/in-progress-items'
 import { draftTime, type ShareDraft } from '@/lib/export/share-drafts'
-import { shareProgress, turnLabel, type ShareProgress } from '@/lib/export/share-stages'
+import { turnLabel, type ShareProgress } from '@/lib/export/share-stages'
 import type { ExportSource } from '@/lib/export/sources'
-
-type Item =
-    | { kind: 'draft'; key: string; draft: ShareDraft; available: boolean }
-    | { kind: 'shared'; key: string; row: SharedPackageRow; progress: ShareProgress }
 
 const STAGE_ICON: Record<string, LucideIcon> = {
     review: GitPullRequest,
     catalog: GitMerge,
     listing: BookCheck,
 }
+
+/**
+ * How many rows show before "Alle anzeigen": enough for what waits on the
+ * person, few enough that "Welchen Use Case möchtest du teilen?" stays in
+ * sight below (Ewa, 2026-10-17).
+ */
+const VISIBLE = 3
+
+const linkClass = 'inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline'
 
 /**
  * "In Arbeit": everything someone started sharing and has not finished, at
@@ -30,11 +37,11 @@ const STAGE_ICON: Record<string, LucideIcon> = {
  * The panel around the form reads them (`useSharedListing`), so going into
  * a use case and back does not ask GitLab again.
  *
- * Only what is open: a draft, a package waiting for review, a merged package
- * waiting for its catalogue entry, an entry waiting for review. What is in
- * the catalogue, replaced or closed stays in "Geteilte Pakete". Every row has
- * one action. None is a primary button, because several rows can offer one
- * at the same time.
+ * Only what is open (see `inProgressItems`), the person's own moves first,
+ * and only the first few until "Alle anzeigen". What is in the catalogue,
+ * replaced or closed stays in "Geteilte Pakete". Every row has one action.
+ * None is a primary button, because several rows can offer one at the same
+ * time.
  */
 export function InProgress({
     drafts,
@@ -56,35 +63,28 @@ export function InProgress({
     onDiscard: (datasetId: string) => void
 }) {
     const { proposing, propose, outcomeFor } = useCatalogProposal(onReload)
+    const [expanded, setExpanded] = useState(false)
+    const listId = useId()
 
-    const available = new Set(sources.map((source) => source.id))
-    const shared: Item[] = (rows ?? []).flatMap((row): Item[] => {
-        const progress = shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog })
-        return row.problem || (!progress.finished && progress.active) ? [{ kind: 'shared', key: row.key, row, progress }] : []
-    })
-    // The person's own moves first, then what waits on others.
-    const mine = (item: Item) => item.kind === 'draft' || item.row.problem !== undefined || item.progress.turn === 'you'
-    const items: Item[] = [
-        ...drafts.map((draft): Item => ({ kind: 'draft', key: `draft:${draft.datasetId}`, draft, available: available.has(draft.datasetId) })),
-        ...shared,
-    ].sort((a, b) => Number(mine(b)) - Number(mine(a)))
+    const items = inProgressItems(drafts, new Set(sources.map((source) => source.id)), rows ?? [])
 
     // Nothing to show yet, or nothing open: no block. A list that pops in empty would only say "nothing".
     if (items.length === 0 && !error) return null
+    const { shown, more, moreMine } = compactList(items, expanded, VISIBLE, isMine)
 
     return (
         <Panel
             title="In Arbeit"
             aside={
-                <Link href="/export/shared" className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline">
+                <Link href="/export/shared" className={linkClass}>
                     Alle geteilten Pakete
                     <ArrowRight aria-hidden className="size-3.5" />
                 </Link>
             }
         >
-            {items.length > 0 && (
-                <ul className="flex flex-col">
-                    {items.map((item) => (
+            {shown.length > 0 && (
+                <ul id={listId} className="flex flex-col">
+                    {shown.map((item) => (
                         <li key={item.key} className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0">
                             {item.kind === 'draft' ? (
                                 <DraftRow draft={item.draft} available={item.available} onContinue={onContinue} onDiscard={onDiscard} />
@@ -101,6 +101,20 @@ export function InProgress({
                         </li>
                     ))}
                 </ul>
+            )}
+            {items.length > VISIBLE && (
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <button type="button" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(!expanded)} className={linkClass}>
+                        {expanded ? 'Weniger anzeigen' : `Alle ${items.length} anzeigen`}
+                        {expanded ? <ChevronUp aria-hidden className="size-3.5" /> : <ChevronDown aria-hidden className="size-3.5" />}
+                    </button>
+                    {/* Own moves come first, so this only says something when more of them than fit wait below. */}
+                    {!expanded && moreMine > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                            {more === moreMine ? `bei allen ${more} weiteren bist du dran` : `bei ${moreMine} der ${more} weiteren bist du dran`}
+                        </span>
+                    )}
+                </div>
             )}
             {rows === null && !error && <Pending>Stand bei GitLab wird abgefragt …</Pending>}
             {/* Neutral: nothing on this page can fix it, and the list page tries again. */}
