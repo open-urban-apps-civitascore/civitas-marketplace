@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, BookCheck, ChevronDown, ChevronUp, FilePen, GitMerge, GitPullRequest, Trash2, TriangleAlert, type LucideIcon } from 'lucide-react'
+import { ArrowRight, BookCheck, ChevronDown, ChevronUp, FilePen, GitMerge, GitPullRequest, Trash2, TriangleAlert, Undo2, type LucideIcon } from 'lucide-react'
 
 import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
 import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete-share-dialog'
@@ -283,6 +283,18 @@ function SharedRow({
         return (
             <Row icon={Trash2} title={title} meta={meta}>
                 <ExternalAnchor href={removal.mrUrl}>Merge Request ansehen</ExternalAnchor>
+            </Row>
+        )
+    }
+
+    // It would bring back what the catalogue team took out: withdrawing it is the move, in the same dialog as "Löschen".
+    if (row.catalog?.state === 'mr-open' && row.catalog.bringsBack) {
+        return (
+            <Row icon={TriangleAlert} title={title} meta={meta}>
+                {row.catalog.mrUrl && <ExternalAnchor href={row.catalog.mrUrl}>In GitLab ansehen</ExternalAnchor>}
+                <Button icon={Undo2} disabled={disabled} onClick={onDelete}>
+                    Zurückziehen
+                </Button>
             </Row>
         )
     }

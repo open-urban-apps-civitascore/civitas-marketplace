@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyCatalogEntry, buildCatalogEntry, isListed } from '@/lib/export/catalog-entry'
+import { applyCatalogEntry, buildCatalogEntry, indexRowOf, isListed } from '@/lib/export/catalog-entry'
 
 const SHA = 'b95660bc21b90c67f13bae25ef8452c9a8293227'
 
@@ -70,5 +70,23 @@ describe('applyCatalogEntry', () => {
         // which refuses a re-share onto a withdrawn id outright.
         const withdrawn = index([{ ...entry(), revoked: true }])
         expect(isListed(withdrawn, 'urn:musterstadt:usecase:kiez-baumkataster', '1.0.0')).toBe(false)
+    })
+})
+
+describe('indexRowOf', () => {
+    const ID = 'urn:musterstadt:usecase:kiez-baumkataster'
+
+    it('reads the version of a row, and whether and why it was withdrawn', () => {
+        expect(indexRowOf(index([entry()]), ID)).toEqual({ version: '1.0.0', revoked: false })
+        expect(indexRowOf(index([{ ...entry(), revoked: true, revokedReason: '  Datenquelle abgeschaltet ' }]), ID)).toEqual({
+            version: '1.0.0',
+            revoked: true,
+            reason: 'Datenquelle abgeschaltet',
+        })
+    })
+
+    it('tells a missing row from an index nobody can read', () => {
+        expect(indexRowOf(index([]), ID)).toBeUndefined()
+        expect(indexRowOf('not json', ID)).toBeNull()
     })
 })

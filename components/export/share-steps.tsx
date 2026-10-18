@@ -159,7 +159,8 @@ export function ShareSteps({
                                     <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress)}</p>
                                     {reason && (
                                         <div className="mt-1.5">
-                                            <InlineNotice tone="warn">{reason}</InlineNotice>
+                                            {/* Neutral once nothing is left to do: nobody on this page can change it. */}
+                                            <InlineNotice tone={progress.finished ? 'neutral' : 'warn'}>{reason}</InlineNotice>
                                         </div>
                                     )}
                                 </div>

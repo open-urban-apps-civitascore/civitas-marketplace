@@ -425,6 +425,23 @@ export function mergeRequestCommits(
 }
 
 /**
+ * The newest comments on a merge request, newest first, GitLab's own
+ * ("closed") among them. Kept per `updatedAt`: a new comment, a reopen or
+ * any other change moves it, so the key changes with the answer. Without
+ * `updatedAt` nothing is kept.
+ */
+export function mergeRequestNotes(
+    client: GitLabClient,
+    projectId: number,
+    iid: number,
+    updatedAt: string | undefined,
+): Promise<{ body: string }[]> {
+    return readOnce(client, `mr-notes|${projectId}|${iid}|${updatedAt}`, Boolean(updatedAt), () =>
+        gl<{ body: string }[]>(client, `/projects/${projectId}/merge_requests/${iid}/notes?sort=desc&order_by=created_at&per_page=100`),
+    )
+}
+
+/**
  * The directories directly inside `parent` at `ref`, name to tree id; empty
  * when `parent` or `ref` does not exist. One listing serves every package of
  * a folder, and it is kept when `ref` is a commit.

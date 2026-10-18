@@ -183,6 +183,15 @@ function closeLines(plan: DeletionPlan): ReactNode[] {
 function planWords(plan: DeletionPlan): { lead: ReactNode; happens: ReactNode[]; stays: ReactNode[]; confirm?: string } {
     switch (plan.kind) {
         case 'withdraw':
+            // The catalogue team's decision: only what would undo it is withdrawn, the package stays.
+            if (plan.takenOut) {
+                return {
+                    lead: 'Das Katalog-Team hat diese Version aus dem Katalog genommen. Offen ist noch ein Vorschlag, der sie zurückbringen würde - Zurückziehen schließt ihn.',
+                    happens: closeLines(plan),
+                    stays: [USE_CASE_STAYS, 'Das angenommene Paket, so wie es ist. Eine neue Version kannst du teilen - frag vorher beim Katalog-Team nach.'],
+                    confirm: 'Zurückziehen',
+                }
+            }
             if (plan.listed) {
                 return {
                     lead: 'Diese Version steht schon im Katalog. Offen ist nur noch ein Vorschlag dazu - Löschen zieht ihn zurück.',

@@ -22,7 +22,7 @@ import {
 import { displayNameOf, proposerOf } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { inspectBundleIn, type BundleStatus } from '@/lib/export/status'
+import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/status'
 
 /**
  * What "Löschen" in "In Arbeit" does to one shared version, by how far it got
@@ -38,7 +38,9 @@ import { inspectBundleIn, type BundleStatus } from '@/lib/export/status'
  *   for a first version.
  * - listed: never deleted from here. The catalogue withdraws entries as
  *   tombstones (`revoked`), and that is a curation decision; only what is
- *   still proposed is withdrawn.
+ *   still proposed is withdrawn. The same holds for a version the catalogue
+ *   team took out again (see `takenOutIn`): it was in the catalogue, and a
+ *   proposal that would bring it back is all there is to withdraw.
  *
  * The marketplace still only proposes, and takes back what it proposed: no
  * code path merges, and no code path deletes on a branch anyone reviews.
@@ -61,6 +63,8 @@ export interface DeletionPlan {
     closes: { what: 'bundle' | 'catalog'; ref: string; url: string }[]
     /** For `withdraw`: the version is in the catalogue, and stays there. */
     listed?: boolean
+    /** For `withdraw`: the catalogue team took the version out; what is open would bring it back, and the package stays. */
+    takenOut?: boolean
     /** For `remove`: the folder, whether something was there before the merge (and which version), how many files change. */
     removal?: { folder: string; previous: boolean; restores?: string; files: number; mergedUrl: string }
     /** For `none`: why nothing is deleted from here. */
@@ -137,11 +141,16 @@ async function readCatalogSide(
         findMergeRequests(client, project.id, catalogBranch(slug, version)),
         readFile(client, project.id, 'index.json', repo.baseBranch),
     ])
+    const opened = requests.filter((mr) => mr.state === 'opened')
+    const merged = requests.filter((mr) => mr.state === 'merged')
+    // Exactly this version was in the catalogue: a withdrawn entry of another version leaves this one the repository's to remove.
+    const out = packageId ? takenOutIn({ openRequests: opened, index, merged }, packageId, version) : undefined
     return {
         client,
         projectId: project.id,
-        opened: requests.filter((mr) => mr.state === 'opened'),
+        opened,
         listed: Boolean(index && packageId && isListed(index, packageId, version)),
+        takenOut: Boolean(out?.thisVersion && out.version === version),
     }
 }
 
@@ -221,7 +230,8 @@ export async function readDeletion(
     }
     const nothing = (reason: string, mrUrl?: string) => planned({ kind: 'none', closes: [], reason, ...(mrUrl ? { mrUrl } : {}) }, { closes: [] })
     // What is still proposed goes in any case; nothing else, when the rest is not the marketplace's to undo.
-    const withdrawOnly = (listed = false) => planned({ kind: 'withdraw', closes: shown(), ...(listed ? { listed } : {}) })
+    const withdrawOnly = (listed = false, takenOut = false) =>
+        planned({ kind: 'withdraw', closes: shown(), ...(listed ? { listed } : {}), ...(takenOut ? { takenOut } : {}) })
 
     const open = requests.find((mr) => mr.state === 'opened')
     if (open && !ours(open)) {
@@ -263,6 +273,10 @@ export async function readDeletion(
         if (catalog.listed) {
             if (closes.length) return withdrawOnly(true)
             return nothing(`Version ${version} steht im Katalog. Herausnehmen kann sie nur die Katalog-Pflege, als zurückgezogenen Eintrag - gelöscht wird im Katalog nichts.`)
+        }
+        if (catalog.takenOut) {
+            if (closes.length) return withdrawOnly(false, true)
+            return nothing(`Das Katalog-Team hat Version ${version} aus dem Katalog genommen, und offen ist dazu nichts mehr. Das angenommene Paket bleibt, wie es ist.`)
         }
     }
 
@@ -315,6 +329,9 @@ function withdrawalNote(what: 'bundle' | 'catalog', plan: DeletionPlan, requeste
     const who = `Withdrawn through the Open Urban Apps marketplace on behalf of **${requestedBy}**.`
     if (plan.kind === 'remove') return `${who} The version's merged package is proposed for removal from the repository as well.`
     if (plan.listed) return `${who} The listed version stays as it is.`
+    if (plan.takenOut && what === 'catalog') {
+        return `${who} The catalogue team took this version out of the catalogue; this proposal would have brought it back. The package stays in the repository as it is.`
+    }
     if (what === 'catalog') return `${who} The package stays in the repository as it is.`
     return `${who} Sharing the use case again opens a new merge request.`
 }

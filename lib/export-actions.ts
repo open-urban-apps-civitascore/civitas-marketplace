@@ -9,6 +9,7 @@ import {
     exportReadiness,
     packageDir,
     parseBundleBranch,
+    parseCatalogBranch,
     parseRemovalBranch,
     type CatalogRepo,
     type ExportConfig,
@@ -22,6 +23,7 @@ import {
     listMergeRequestsBy,
     listOpenMergeRequests,
     listTree,
+    mergeRequestNotes,
     openMergeRequest,
     parseProjectUrl,
     readFile,
@@ -31,7 +33,8 @@ import {
 } from '@/lib/export/gitlab'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { readDeletion, runDeletion, type DeletionPlan, type DeletionResult } from '@/lib/export/share-deletion'
-import { displayNameOf } from '@/lib/export/merge-request-text'
+import { displayNameOf, withdrawerOf } from '@/lib/export/merge-request-text'
+import { isNewerVersion, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { mapWithLimit } from '@/lib/concurrency'
 import { parseExportMetadata } from '@/lib/export/metadata'
@@ -43,13 +46,16 @@ import {
     catalogStatusIn,
     inspectBundle,
     inspectBundleIn,
+    inspectCatalog,
     packageFolder,
     readBaseTrees,
     readBundleStatus,
     readCatalogStatus,
+    readVersionCatalog,
     type BundleStatus,
     type BundleVerification,
     type CatalogContext,
+    type CatalogInspection,
     type CatalogStatus,
 } from '@/lib/export/status'
 import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
@@ -231,6 +237,8 @@ function mergeRequestBody(
     form: ExportForm,
     requestedBy: string,
     catalogConfigured: boolean,
+    /** Files of the previous version below `core-ir/` that this one no longer has, removed with it. */
+    removed: string[],
 ): string {
     const identityRows = preview.identities
         .map((i) => `| ${i.kind} | ${i.title} | \`${i.to}\` | ${i.kept ? 'kept' : 'derived'} |`)
@@ -250,6 +258,9 @@ function mergeRequestBody(
         '',
         `- \`${preview.packageDir}/\` (${preview.files.length} files) — a CORE-IR use-case package exported from a running instance`,
         `- id \`${preview.manifest.id}\`, license ${preview.manifest.license}, maintained by ${preview.manifest.maintainer}`,
+        ...(removed.length
+            ? [`- removes ${removed.length === 1 ? '1 file' : `${removed.length} files`} below \`core-ir/\` that version ${preview.manifest.version} no longer contains: ${removed.map((path) => `\`${path}\``).join(', ')}`]
+            : []),
         '',
         '## Identities',
         '',
@@ -395,6 +406,14 @@ export async function exportAction(
                     bundle: current,
                 }
             }
+            const folderRefusal = folderRefusalOf(current, id, form.options.slug, form.options.version)
+            if (folderRefusal) return { intent: 'bundle', status: 'invalid', detail: folderRefusal, bundle: current }
+            // What reached the catalogue is used up as well, also after it was taken out again.
+            const catalogue = config.catalog
+                ? await inspectCatalog(clientFor(config.catalog.url, token), config.catalog, form.options.slug, form.options.version, id)
+                : undefined
+            const usedUp = catalogue && catalogRefusalOf(form.options.version, catalogue)
+            if (usedUp) return { intent: 'bundle', status: 'invalid', detail: usedUp, bundle: current, catalog: catalogue.status }
             const accessToken = await getAccessToken()
             const pkg = await buildPackage(accessToken, form, requestedBy)
             const preview = summarise(pkg, target, form)
@@ -412,14 +431,19 @@ export async function exportAction(
             const files = Object.fromEntries(
                 Object.entries(pkg.files).map(([path, content]) => [`${dir}/${path}`, content]),
             )
+            // A new version replaces the package's own files. What it no longer contains would stay behind and
+            // fail the repository's check, so it goes - but only below core-ir/, which the export writes in full:
+            // the README, the check script and anything a reviewer put next to them stay.
+            const stale = [...existing].filter((path) => path.startsWith(`${dir}/core-ir/`) && !Object.hasOwn(files, path)).sort()
             const outcome = await openMergeRequest(client, {
                 upstream: project,
                 baseBranch: target.baseBranch,
                 branch: preview.branch,
                 title: `Export use case: ${form.options.displayName} ${form.options.version}`,
-                description: mergeRequestBody(preview, form, requestedBy, Boolean(config.catalog)),
+                description: mergeRequestBody(preview, form, requestedBy, Boolean(config.catalog), stale),
                 files,
                 existingPaths: existing,
+                ...(stale.length ? { deletedPaths: stale } : {}),
             })
             if (outcome.status === 'already-open') {
                 return {
@@ -436,6 +460,8 @@ export async function exportAction(
                 detail: `Merge Request !${outcome.iid} erstellt — nach dem Merge lässt sich der Katalog-Eintrag vorschlagen.`,
                 mrUrl: outcome.url,
                 preview,
+                // Read for the guard anyway; the page shows from it whether the catalogue team took a version out.
+                ...(catalogue ? { catalog: catalogue.status } : {}),
             }
         }
 
@@ -450,6 +476,46 @@ export async function exportAction(
         }
         throw error
     }
+}
+
+/** "1.0.3" after "1.0.2": the version to suggest instead of one that is used up. */
+function nextPatch(version: string): string {
+    const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+    return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : '1.0.0'
+}
+
+/**
+ * Why a package cannot go into its folder, from what the base branch holds
+ * there: another publisher's package, which the proposal would overwrite, or
+ * a version as high as this one or higher - versions only go up, so an
+ * installation can tell the newer one. The same version again is no reason:
+ * it never reached the base branch (`on-base` was refused before), so it may
+ * be proposed once more.
+ */
+function folderRefusalOf(onBranch: BundleStatus, id: string, slug: string, version: string): string | undefined {
+    if (onBranch.reason !== 'other-version' || !onBranch.onBase) return undefined
+    if (onBranch.onBase.id !== id) {
+        return `Unter dem Kurznamen „${slug}“ liegt im Ablageort schon ein anderes Paket. Bitte wähle einen anderen Kurznamen.`
+    }
+    const accepted = onBranch.onBase.version
+    if (VERSION.test(accepted) && !isNewerVersion(version, accepted)) {
+        return `Angenommen ist schon Version ${accepted}. Eine neue Version muss höher sein, zum Beispiel ${nextPatch(accepted)}.`
+    }
+    return undefined
+}
+
+/**
+ * Why a version cannot be proposed, from the catalogue: the version or a
+ * higher one is listed there, or was and the catalogue team took it out (see
+ * `takenOutIn`). Either way it is used up.
+ */
+function catalogRefusalOf(version: string, { status, floor }: CatalogInspection): string | undefined {
+    if (!floor || isNewerVersion(version, floor)) return undefined
+    const higher = `Eine neue Version muss höher sein als ${floor}, zum Beispiel ${nextPatch(floor)}.`
+    if (status.state === 'listed') return `Version ${version} steht schon im Katalog. ${higher}`
+    // Who took it out and why is said next to the form already, from the catalogue status sent along.
+    if (status.takenOut) return `Version ${floor} war schon im Katalog. ${higher}`
+    return `Im Katalog steht schon Version ${floor}. ${higher}`
 }
 
 /**
@@ -514,15 +580,33 @@ async function proposeCatalog(
         }
     }
 
+    const catalogClient = clientFor(config.catalog.url, token)
+    const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
+    const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, version, false)
+    // The catalogue team's decision is not undone from here: neither by a new proposal nor by pointing at an open one.
+    const catalog = catalogStatusIn(catalogue, slug, version, bundle.packageId ?? expectedId ?? '')
+    if (catalog.state === 'withdrawn' || catalog.bringsBack) {
+        const open = catalog.bringsBack ? mergeRequestRef(catalog.mrUrl) : undefined
+        return {
+            intent: 'catalog',
+            status: 'invalid',
+            detail:
+                `${takenOutFact(catalog.takenOut ?? { version })} ${takenOutBlocker(catalog.takenOut, version)}` +
+                (catalog.bringsBack
+                    ? ` Der offene Katalog-Vorschlag${open ? ` ${open}` : ''} würde den herausgenommenen Eintrag zurückbringen - zieh den Vorschlag unter „In Arbeit“ zurück.`
+                    : ''),
+            ...(catalog.mrUrl ? { mrUrl: catalog.mrUrl } : {}),
+            bundle,
+            catalog,
+        }
+    }
     const dir = packageDir(target, slug)
     const input = catalogInputFromManifest(manifestRaw, { repoUrl: target.url, path: dir, commitSha: bundle.sha })
     if (typeof input === 'string') {
         return { intent: 'catalog', status: 'invalid', detail: `Kein Katalog-Eintrag: ${input}`, bundle }
     }
 
-    const catalogClient = clientFor(config.catalog.url, token)
-    const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
-    const indexRaw = await readFile(catalogClient, catalogProject.id, 'index.json', config.catalog.baseBranch)
+    const indexRaw = catalogue.index
     if (!indexRaw) {
         return { intent: 'catalog', status: 'error', detail: `index.json fehlt auf ${config.catalog.baseBranch} in ${config.catalog.url}.` }
     }
@@ -601,7 +685,7 @@ export interface SharedPackageRow {
     displayName: string
     /** The version's open merge request, else its merged one, else its newest. */
     bundleMr: { url: string; state: string }
-    /** Closed by the marketplace's own account: withdrawn through "Löschen", not turned down. */
+    /** Closed through "Löschen", as the marketplace's withdrawal note on it says: taken back, not turned down. */
     withdrawn?: boolean
     /** Read for a merged bundle only; with the version's removal, if one was proposed. */
     bundle?: BundleStatus
@@ -620,7 +704,36 @@ const MAX_SHARED_ROWS = 15
 /** How many packages are checked at once: side by side, but not every request at the same moment. */
 const ROW_CONCURRENCY = 5
 
-type ProjectOf = (client: GitLabClient, url: string) => Promise<GitLabProject>
+/**
+ * What one visit of the list asks GitLab once, however many targets and the
+ * catalogue need it: the projects, the bot's account, and its merge requests
+ * per project - target and catalogue are often the same repository.
+ */
+interface Visit {
+    project: (client: GitLabClient, url: string) => Promise<GitLabProject>
+    bot: (client: GitLabClient) => Promise<{ id: number; username: string }>
+    /** The bot's merge requests into one project, newest first, any state. */
+    botRequests: (client: GitLabClient, projectId: number) => Promise<MergeRequestRef[]>
+}
+
+function newVisit(): Visit {
+    const asked = new Map<string, Promise<unknown>>()
+    const once = <T>(key: string, load: () => Promise<T>): Promise<T> => {
+        let answer = asked.get(key) as Promise<T> | undefined
+        if (!answer) {
+            answer = load()
+            asked.set(key, answer)
+        }
+        return answer
+    }
+    const visit: Visit = {
+        project: (client, url) => once(`${client.apiBase}|project|${parseProjectUrl(url).projectPath}`, () => getProject(client, parseProjectUrl(url).projectPath)),
+        bot: (client) => once(`${client.apiBase}|bot`, () => currentUser(client)),
+        botRequests: (client, projectId) =>
+            once(`${client.apiBase}|requests|${projectId}`, async () => listMergeRequestsBy(client, projectId, (await visit.bot(client)).id)),
+    }
+    return visit
+}
 
 /**
  * What this marketplace's bot has proposed, newest first, and where each
@@ -641,26 +754,15 @@ export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; 
     const config = exportConfig()
     if (exportReadiness(config) !== 'ready') return { rows: [] }
     const token = config.token as string
-
-    // One lookup per project and visit: target and catalogue are often the same repository.
-    const projects = new Map<string, Promise<GitLabProject>>()
-    const projectOf: ProjectOf = (client, url) => {
-        const key = `${client.apiBase}|${parseProjectUrl(url).projectPath}`
-        let project = projects.get(key)
-        if (!project) {
-            project = getProject(client, parseProjectUrl(url).projectPath)
-            projects.set(key, project)
-        }
-        return project
-    }
+    const visit = newVisit()
 
     // Started at once, awaited by the rows that need it; a failure there is reported per row.
-    const catalog = readCatalogContext(config.catalog, token, projectOf)
+    const catalog = readCatalogContext(config.catalog, token, visit)
     catalog.catch(() => {})
 
     try {
         const rows: SharedPackageRow[] = []
-        for (const target of config.targets) rows.push(...(await sharedRowsOf(target, token, projectOf, catalog)))
+        for (const target of config.targets) rows.push(...(await sharedRowsOf(target, token, visit, catalog)))
         return { rows }
     } catch (error) {
         if (error instanceof GitLabError) return { rows: [], error: gitlabMessage(error) }
@@ -675,14 +777,14 @@ export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; 
 async function sharedRowsOf(
     target: ExportTarget,
     token: string,
-    projectOf: ProjectOf,
+    visit: Visit,
     catalog: Promise<CatalogContext | undefined>,
 ): Promise<SharedPackageRow[]> {
     const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS }
-    const [project, bot] = await Promise.all([projectOf(client, target.url), currentUser(client)])
+    const [project, bot] = await Promise.all([visit.project(client, target.url), visit.bot(client)])
     const base = readBaseTrees(client, project.id, target)
     base.catch(() => {})
-    const requests = await listMergeRequestsBy(client, project.id, bot.id)
+    const requests = await visit.botRequests(client, project.id)
 
     // Newest first, so a branch's first request is the newest. The bot names
     // the export branches, so its own requests are all there are from them:
@@ -727,7 +829,10 @@ async function sharedPackageRow(
         version: parsed.version,
         displayName: displayNameOf(mr.title, parsed.version) ?? parsed.slug,
         bundleMr: { url: mr.web_url, state: mr.state },
-        ...(mr.state === 'closed' && mr.closed_by?.id === botId ? { withdrawn: true } : {}),
+    }
+    if (mr.state === 'closed') {
+        // Closed by the bot, which is also used by hand: withdrawn only with the marketplace's note.
+        return mr.closed_by?.id === botId && (await withdrawnThroughMarketplace(client, projectId, mr)) ? { ...row, withdrawn: true } : row
     }
     if (mr.state !== 'merged') return row
 
@@ -754,20 +859,40 @@ async function sharedPackageRow(
     }
 }
 
-/** The catalogue repository's open merge requests and its index, for every row of a listing at once. */
+/**
+ * Whether the marketplace withdrew a request the bot closed: its withdrawal
+ * note is there. Kept until the request changes again (`mergeRequestNotes`),
+ * so each closed request is read once. Unreadable counts as not withdrawn,
+ * which is what GitLab shows too, and the next visit asks again.
+ */
+async function withdrawnThroughMarketplace(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<boolean> {
+    try {
+        return (await mergeRequestNotes(client, projectId, mr.iid, mr.updated_at)).some((note) => withdrawerOf(note.body) !== undefined)
+    } catch (error) {
+        if (error instanceof GitLabError) return false
+        throw error
+    }
+}
+
+/**
+ * The catalogue repository's open merge requests, its index and the bot's
+ * merged catalogue proposals - what was listed once, to tell a version the
+ * catalogue team took out - for every row of a listing at once.
+ */
 async function readCatalogContext(
     repo: CatalogRepo | undefined,
     token: string,
-    projectOf: ProjectOf,
+    visit: Visit,
 ): Promise<CatalogContext | undefined> {
     if (!repo) return undefined
     const client: GitLabClient = { ...clientFor(repo.url, token), cache: SHARE_READS }
-    const project = await projectOf(client, repo.url)
-    const [openRequests, index] = await Promise.all([
+    const project = await visit.project(client, repo.url)
+    const [openRequests, index, byBot] = await Promise.all([
         listOpenMergeRequests(client, project.id),
         readFile(client, project.id, 'index.json', repo.baseBranch),
+        visit.botRequests(client, project.id),
     ])
-    return { openRequests, index }
+    return { openRequests, index, merged: byBot.filter((mr) => mr.state === 'merged' && parseCatalogBranch(mr.source_branch)) }
 }
 
 /**
@@ -865,7 +990,9 @@ function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
               ? 'Katalog-Merge-Request offen.'
               : catalog.state === 'unconfigured'
                 ? 'Katalog-Repo nicht konfiguriert.'
-                : 'Noch nicht im Katalog.'
+                : catalog.state === 'withdrawn'
+                  ? 'Aus dem Katalog genommen.'
+                  : 'Noch nicht im Katalog.'
     return `${first} ${second}`
 }
 
