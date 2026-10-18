@@ -5,7 +5,8 @@ import { Eye } from 'lucide-react'
 import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
-import { draftTime, type ShareDraft } from '@/lib/export/share-drafts'
+import { draftStart, draftStartedOn, draftStepAt, draftTime, type ShareDraft } from '@/lib/export/share-drafts'
+import { sourceOptions } from '@/lib/export/source-options'
 import { shareProgress, takenOutNotice } from '@/lib/export/share-stages'
 import { mergeRequestRef, rememberShareResult, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
@@ -25,7 +26,7 @@ import { resultTone } from '@/lib/export/result-tone'
 import { Select } from '@/components/ui/select'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
-const STEPS = ['Use Case auswählen', 'Bestand prüfen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
+const STEPS = ['Auswählen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
 interface PanelProps {
     sources: ExportSource[]
     sourceNotice?: string
@@ -41,55 +42,109 @@ interface PanelProps {
     canListShares: boolean
 }
 function Steps({ current }: { current: number }) {
-    return <ol aria-label="Fortschritt" className="grid gap-2 sm:grid-cols-4">
+    return <ol aria-label="Fortschritt" className="grid gap-2 sm:grid-cols-3">
         {STEPS.map((label, index) => <li key={label} aria-current={current === index + 1 ? 'step' : undefined}
             className={`rounded-lg border px-3 py-3 text-sm ${current === index + 1 ? 'border-primary bg-primary/5 font-semibold text-primary' : 'text-muted-foreground'}`}>
             <span className="mr-2">{index + 1}.</span>{label}
         </li>)}
     </ol>
 }
+/**
+ * The three steps of sharing. „Auswählen“ holds the dropdown and, once a
+ * dataset is chosen, what goes into its package, without a button in between
+ * (plan of 2026-10-18); the editor below does the rest.
+ *
+ * The dropdown lives here and the package contents in the editor, which is
+ * made anew for every dataset: so a new choice drops the old dataset's form
+ * and its pending answer, and focus stays in the dropdown.
+ */
 export function ExportPanel(props: PanelProps) {
     const [selection, setSelection] = useState('')
-    // The dataset being shared, and the draft it continues, if it continues one.
-    const [active, setActive] = useState<{ id: string; draft?: ShareDraft } | null>(null)
+    // The share being worked on, and the draft it continues, if it continues one. Unset while a chosen
+    // dataset's started share waits for „Weitermachen“ or „Neu beginnen“. `run` tells two openings of one
+    // dataset apart, so continuing a draft replaces the form that was open instead of keeping it.
+    const [active, setActive] = useState<{ id: string; draft?: ShareDraft; run: number } | null>(null)
+    const [step, setStep] = useState(1)
+    // The started share offered for the chosen dataset, as it was when chosen: discarded meanwhile in another
+    // tab, it stays on offer, so the choice does not end in an empty step without a button.
+    const [offered, setOffered] = useState<ShareDraft>()
+    const runs = useRef(0)
+    const pickerHeading = useRef<HTMLHeadingElement>(null)
+    const previousStep = useRef(step)
     const { drafts, discard } = useShareDrafts(props.draftOwner)
     // Read here, not in "In Arbeit": this panel stays while the form comes and goes.
     const shared = useSharedListing(props.canListShares)
     const source = active ? props.sources.find((row) => row.id === active.id) : undefined
-    if (source) return <ExportEditor key={source.id} {...props} source={source} draft={active?.draft}
-        onChoose={() => setActive(null)} onProposed={shared.reload} />
+    const current = source ? step : 1
+    // Back from the Steckbrief, focus goes to this step's heading, as the editor does for its own steps.
+    // Not on arrival and not after a choice: then it stays in the dropdown.
+    useEffect(() => {
+        if (current === 1 && previousStep.current > 1) {
+            pickerHeading.current?.focus()
+            pickerHeading.current?.scrollIntoView({ block: 'start' })
+        }
+        previousStep.current = current
+    }, [current])
+    const open = (id: string, draft?: ShareDraft) => {
+        runs.current += 1
+        setSelection(id)
+        setActive({ id, draft, run: runs.current })
+        setOffered(undefined)
+        setStep(draft?.step ?? 1)
+    }
+    const choose = (id: string) => {
+        // A started share is offered first; without one, the package contents load at once.
+        const draft = drafts.find((entry) => entry.datasetId === id)
+        if (draft) {
+            setSelection(id)
+            setActive(null)
+            setOffered(draft)
+        } else {
+            open(id)
+        }
+    }
+    const discardDraft = (id: string) => {
+        discard(id)
+        // The dataset on screen starts afresh: what it continued is gone.
+        if (id === selection) open(id)
+    }
+    // Opened from a button that goes away with it (the started share's notice) or sits far above („In Arbeit“):
+    // focus moves to this step's heading, not to the top of the page. On the Steckbrief the editor moves it on.
+    const openFromButton = (id: string, draft?: ShareDraft) => {
+        open(id, draft)
+        pickerHeading.current?.focus()
+    }
     const inProgress = <InProgress drafts={drafts} sources={props.sources} rows={shared.rows} error={shared.error}
         loaded={shared.loaded} onReload={shared.reload}
-        onContinue={(draft) => setActive({ id: draft.datasetId, draft })} onDiscard={discard} />
-    if (!props.sources.length) return <div className="flex flex-col gap-6">{inProgress}<EmptyState>Diese Instanz hat noch keinen Use Case, auf den du zugreifen kannst.</EmptyState></div>
-    const selectedDraft = drafts.find((draft) => draft.datasetId === selection)
-    const draftOf = new Set(drafts.map((draft) => draft.datasetId))
+        onContinue={(draft) => openFromButton(draft.datasetId, draft)} onDiscard={discardDraft} />
+    if (!props.sources.length) return <div className="flex flex-col gap-6">{inProgress}<EmptyState>Diese Instanz hat noch keinen Datensatz, den du lesen darfst.</EmptyState></div>
+    const started = active ? undefined : drafts.find((draft) => draft.datasetId === selection) ?? offered
     return <div className="flex flex-col gap-6">
         {/* What was started and is not finished comes before starting anew: the start-or-resume screen. */}
-        {inProgress}
-        <Steps current={1} />
-        <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
-            <h2 className="text-xl font-semibold">Welchen Use Case möchtest du teilen?</h2>
-            <p className="text-sm text-muted-foreground">Wähle einen installierten oder selbst erstellten Use Case dieser Instanz.</p>
+        {current === 1 && inProgress}
+        <Steps current={current} />
+        {current === 1 && <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
+            <h2 ref={pickerHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Welchen Datensatz möchtest du teilen?</h2>
             {props.sourceNotice && <Notice tone="neutral">{props.sourceNotice}</Notice>}
             <label className="flex flex-col gap-2 text-sm">
-                <span>Lokaler Use Case</span>
-                <Select value={selection} onValueChange={setSelection} placeholder="Bitte auswählen …"
-                    options={props.sources.map((row) => ({ value: row.id, label: `${row.catalog?.displayName ?? row.name} · ${row.catalog ? `installiert (${row.name})` : 'lokaler Bestand'}${draftOf.has(row.id) ? ' · Entwurf vorhanden' : ''}` }))} />
+                <span>Datensatz</span>
+                <Select value={selection} onValueChange={choose} placeholder="Bitte auswählen …" options={sourceOptions(props.sources, drafts)} />
             </label>
-            {selectedDraft ? (
-                // Neutral: a fact about this dataset, and a choice, not a warning.
-                <Notice tone="neutral" title={`Für diesen Use Case gibt es einen Entwurf vom ${draftTime(selectedDraft.savedAt)}.`}
+            {started && (
+                // Neutral: a fact about this dataset, and a choice, not a warning. Its primary stands in for „Weiter zum Steckbrief“.
+                <Notice tone="neutral" title={`Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.`}
                     action={<div className="flex flex-wrap gap-2">
-                        <Button variant="primary" onClick={() => setActive({ id: selection, draft: selectedDraft })}>Entwurf fortsetzen</Button>
-                        <Button onClick={() => { discard(selection); setActive({ id: selection }) }}>Neu beginnen</Button>
+                        <Button variant="primary" onClick={() => openFromButton(selection, started)}>Weitermachen</Button>
+                        <Button onClick={() => { discard(selection); openFromButton(selection) }}>Neu beginnen</Button>
                     </div>}>
-                    Gespeichert in diesem Browser. „Neu beginnen“ löscht den Entwurf.
+                    Gespeichert in diesem Browser. „Neu beginnen“ verwirft deine bisherigen Angaben.
                 </Notice>
-            ) : (
-                <Button variant="primary" disabled={!selection} className="self-start" onClick={() => setActive({ id: selection })}>Bestand prüfen</Button>
             )}
-        </section>
+            {/* Focus stays in the dropdown, so the offer appearing below it is said, as the package contents are. */}
+            <p role="status" className="sr-only">{started ? `Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.` : ''}</p>
+        </section>}
+        {active && source && <ExportEditor key={`${source.id}:${active.run}`} {...props} source={source} draft={active.draft}
+            step={current} onStep={setStep} onProposed={shared.reload} />}
     </div>
 }
 
@@ -97,16 +152,25 @@ export function ExportPanel(props: PanelProps) {
 function restoreMetadata(saved: MetadataDraft, defaults: MetadataDraft): MetadataDraft {
     return { fields: { ...defaults.fields, ...saved.fields }, themes: saved.themes, media: saved.media }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, onChoose, onProposed }: PanelProps & {
+/** A draft as saved now: the time of this save, and of the first one, which a new share sets here. */
+function stamped(payload: ShareDraft, startedAt: { current: string | undefined }): ShareDraft {
+    const at = new Date().toISOString()
+    startedAt.current ??= at
+    return { ...payload, savedAt: at, startedAt: startedAt.current }
+}
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, onStep, onProposed }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
-    onChoose: () => void
+    /** The wizard's step, kept by the panel: „Auswählen“ (1) shows its dropdown above this. */
+    step: number
+    onStep: (step: number) => void
     /** A merge request was opened or found: "In Arbeit" should read GitLab again. */
     onProposed: () => void
 }) {
-    const [step, setStep] = useState<number>(draft?.step ?? 2)
     const stepHeading = useRef<HTMLHeadingElement>(null)
     useEffect(() => {
+        // „Auswählen“ keeps focus in its dropdown while the package contents appear below it.
+        if (step === 1) return
         stepHeading.current?.focus()
         stepHeading.current?.scrollIntoView({ block: 'start' })
     }, [step])
@@ -146,6 +210,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // so a draft keeps the time of its last real change.
     const [dirty, setDirty] = useState(false)
     const [savedAt, setSavedAt] = useState<string | undefined>(draft?.savedAt)
+    // Whether this share is in the browser already, and since when: a new one is saved from the Steckbrief on (draftStepAt).
+    const stored = useRef(draft !== undefined)
+    const startedAt = useRef(draft ? draftStart(draft) : undefined)
     const [pendingIntent, setPendingIntent] = useState<ExportIntent>()
     const { save: saveDraft, discard: discardDraft } = useShareDraftActions(draftOwner)
     // The edits a pending save has not written yet; written at once when the page is left.
@@ -185,7 +252,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             setResult(next)
             setShareStates((previous) => rememberShareResult(previous, requestKey, next))
             if (next.preview) setPreview(next.preview)
-            if (intent === 'preview' && next.status === 'ok') setStep(4)
+            if (intent === 'preview' && next.status === 'ok') onStep(3)
             // From here on the merge request (or the repository) holds the content: the draft has done its job.
             const landed = next.status === 'ok' || next.status === 'already-open' || next.status === 'unchanged'
             if (intent === 'bundle' && landed) forgetDraft()
@@ -198,6 +265,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     })
     const forgetDraft = () => {
         unsaved.current = null
+        stored.current = false
+        startedAt.current = undefined
         discardDraft(source.id)
         setSavedAt(undefined)
         setDirty(false)
@@ -208,15 +277,20 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // Saved shortly after the typing stops, without a button and without validation:
     // a draft may be incomplete (patterns for long forms, 2026-10-16).
     useEffect(() => {
-        if (!dirty) return
+        // Not for a demo stream unticked in „Auswählen“ alone: looking at a dataset starts no share.
+        const resumeAt = draftStepAt(step, stored.current)
+        if (!dirty || !resumeAt) return
         const payload: ShareDraft = {
-            datasetId: source.id, datasetName: source.name, savedAt: '', step: step >= 3 ? 3 : 2,
+            datasetId: source.id, datasetName: source.name, savedAt: '', step: resumeAt,
             basics, metadata, targetKey, demoExcluded: [...demoExcluded],
         }
         unsaved.current = payload
         const timer = window.setTimeout(() => {
-            const at = new Date().toISOString()
-            if (saveDraft({ ...payload, savedAt: at })) setSavedAt(at)
+            const saving = stamped(payload, startedAt)
+            if (saveDraft(saving)) {
+                stored.current = true
+                setSavedAt(saving.savedAt)
+            }
             unsaved.current = null
         }, 600)
         return () => window.clearTimeout(timer)
@@ -225,7 +299,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     useEffect(() => {
         const flush = () => {
             if (!unsaved.current) return
-            saveDraft({ ...unsaved.current, savedAt: new Date().toISOString() })
+            saveDraft(stamped(unsaved.current, startedAt))
             unsaved.current = null
         }
         window.addEventListener('pagehide', flush)
@@ -262,47 +336,51 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // inventory says so before the author fills in the whole form - an empty inventory too,
     // since it has none either. Not while the inventory is loading or failed to load.
     const lacksStructure = !!inventory && !inventory.error && !inventory.artifacts.some((item) => item.type === 'structure')
-    // A refused preview stays on step 3 and never reaches the step-4 view, yet the export's
+    // A refused preview stays on the Steckbrief and never reaches the preview step, yet the export's
     // warnings there usually name the cause (a source without a structure, say), so they
     // are shown next to the errors - in place of the general answer, which would only
     // repeat that the check failed.
-    const refused = step === 3 && result?.preview?.errors.length ? result.preview : undefined
+    const refused = step === 2 && result?.preview?.errors.length ? result.preview : undefined
     // Why a step of the task cannot be taken from here, in the person's words.
     const previewBlocker = preview?.errors.length ? 'Die Paketprüfung meldet Fehler - Details in der Vorschau unten.' : undefined
     const setupBlocker = readiness !== 'ready' || targets.length === 0
         ? 'Teilen ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein. Die Vorschau geht trotzdem.'
         : mayShare ? undefined : 'Merge Requests darf hier nur anlegen, wer Datenstrukturen anlegen und Datensätze bearbeiten darf, zum Beispiel Data Owner, Data Architect oder Data Steward.'
+    // To „Auswählen“, with this dataset still chosen and the form kept; the preview is made again from the Steckbrief.
+    const backToChoice = () => { onStep(1); setResult(null); setPreview(undefined) }
     return <div className="flex flex-col gap-6">
-        <Steps current={step} />
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        {step >= 2 && <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm"><span className="text-muted-foreground">Ausgewählt: </span><strong>{source.name}</strong></p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {/* Quiet proof that nothing is lost by leaving; the draft stays in this browser. */}
                 {savedAt && <span className="text-xs text-muted-foreground">Entwurf gespeichert, {draftTime(savedAt)} ·{' '}
                     <Button variant="ghost" className="text-xs" onClick={forgetDraft}>Entwurf löschen</Button></span>}
-                <Button variant="ghost" disabled={pending} onClick={onChoose}>Anderen Use Case wählen</Button>
+                {/* In the Steckbrief the same move is its footer's secondary button. */}
+                {step === 3 && <Button variant="ghost" disabled={pending} onClick={backToChoice}>Zurück zur Auswahl</Button>}
             </div>
-        </div>
-        {step === 2 && <Section title="Was kommt ins Paket?" headingRef={stepHeading}
+        </div>}
+        {step === 1 && <Section title="Was kommt ins Paket?"
             lead={<>Das gehört zum Datensatz „{source.name}“ - in der Reihenfolge, in der die Daten fließen.</>}>
-            {!inventory ? <Pending>Bestand wird geladen …</Pending>
-                : inventory.error ? <Notice tone="error" title="Der Bestand konnte nicht gelesen werden" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
+            {!inventory ? <Pending>Inhalt wird gelesen …</Pending>
+                : inventory.error ? <Notice tone="error" title="Der Inhalt ließ sich nicht lesen" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
                 : <>
                     <PackageContents source={source} artifacts={inventory.artifacts} demo={inventory.demo}
                         demoExcluded={demoExcluded} onToggleDemo={toggleDemo} onReloadDemo={reloadInventory} />
                     {lacksStructure && <Notice tone="warn" title="Es fehlt eine eigene Datenstruktur">Ohne eigene Datenstruktur lässt sich das Paket nicht teilen - die Paketprüfung verlangt mindestens eine.</Notice>}
-                    {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Bestand"><NoticeList items={inventory.warnings} /></Notice>}
+                    {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Inhalt"><NoticeList items={inventory.warnings} /></Notice>}
                     <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-muted-foreground">Nicht im Paket: gespeicherte Daten, der Datenpool und Zugangsdaten.</p>
                         {/* Blocked rather than refused later: the package check would turn it down after the whole form (Ewa's plan, 2026-10-13). */}
                         <div className="flex flex-wrap items-center gap-3">
                             {lacksStructure && <InlineNotice tone="warn" id="steckbrief-gesperrt">Geht erst mit einer eigenen Datenstruktur.</InlineNotice>}
-                            <Button variant="primary" disabled={lacksStructure} aria-describedby={lacksStructure ? 'steckbrief-gesperrt' : undefined} onClick={() => setStep(3)}>Weiter zum Steckbrief</Button>
+                            <Button variant="primary" disabled={lacksStructure} aria-describedby={lacksStructure ? 'steckbrief-gesperrt' : undefined} onClick={() => onStep(2)}>Weiter zum Steckbrief</Button>
                         </div>
                     </div>
                 </>}
         </Section>}
-        {step === 3 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
+        {/* Focus stays in the dropdown, so the contents arriving below it are said, not jumped to. */}
+        {step === 1 && <p role="status" className="sr-only">{inventory && !inventory.error ? `Inhalt von „${source.name}“ gelesen` : ''}</p>}
+        {step === 2 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
             <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
                 <div className="mt-3 flex flex-col gap-2 empty:hidden">
                     {source.notice && <Notice tone="neutral">{source.notice}</Notice>}
@@ -330,20 +408,20 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><Select value={targetKey} onValueChange={chooseTarget} disabled={!targets.length} placeholder="Nicht konfiguriert - Vorschau verfügbar"
                         options={targets.map((target) => ({ value: target.key, label: `${target.label} · ${target.baseBranch}` }))} /></label>
                 </section>
-                {/* The answer belongs to this step's form: back in the inventory it would describe a form no longer shown. */}
+                {/* The answer belongs to this step's form: back in „Auswählen“ it would describe a form no longer shown. */}
                 {/* A continued draft starts here, before the inventory arrived - or without it, when reading it failed.
                     The preview needs its demo streams, so it waits for the inventory instead of going without them. */}
-                {inventory?.error && <InlineNotice tone="warn" id="bestand-fehlt">Der Bestand ließ sich nicht lesen ({inventory.error}). Ohne ihn fehlen dem Paket die Demo-Daten - bitte erst neu laden.</InlineNotice>}
-                <div className="flex flex-wrap gap-2"><Button onClick={() => { setStep(2); setResult(null) }}>Zurück zum Bestand</Button>
-                    {inventory?.error && <Button onClick={reloadInventory}>Bestand neu laden</Button>}
+                {inventory?.error && <InlineNotice tone="warn" id="inhalt-fehlt">Der Inhalt ließ sich nicht lesen ({inventory.error}). Ohne ihn fehlen dem Paket die Demo-Daten - bitte erst neu laden.</InlineNotice>}
+                <div className="flex flex-wrap gap-2"><Button onClick={backToChoice}>Zurück zur Auswahl</Button>
+                    {inventory?.error && <Button onClick={reloadInventory}>Inhalt neu laden</Button>}
                     <Button type="submit" variant="primary" icon={Eye} pending={pending || !inventory} disabled={Boolean(inventory?.error)}
-                        aria-describedby={inventory?.error ? 'bestand-fehlt' : undefined}>Vorschau erstellen</Button></div>
+                        aria-describedby={inventory?.error ? 'inhalt-fehlt' : undefined}>Vorschau erstellen</Button></div>
             </fieldset>
         </form>}
-        {step === 4 && preview && <>
+        {step === 3 && preview && <>
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Vorschau & Teilen</h2><p className="mt-1 text-sm text-muted-foreground">Prüfe Steckbrief und Paket. In den Katalog kommt es in vier Schritten - zwei davon übernehmen Prüfende.</p></div>
-                <Button variant="ghost" disabled={pending} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</Button>
+                <Button variant="ghost" disabled={pending} onClick={() => { onStep(2); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</Button>
             </div>
             {takenOut}
             {/* The one action first, not under all the previews (Ewa's point 8). */}
@@ -373,9 +451,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             </section>
             <Preview preview={preview} />
         </>}
-        {pending && step !== 4 && <Pending>Anfrage wird verarbeitet …</Pending>}
+        {pending && step !== 3 && <Pending>Anfrage wird verarbeitet …</Pending>}
         {/* Not twice: once a step shows its merge request, the answer does not repeat the link. */}
-        {result && !refused && step !== 4 && <Notice tone={resultTone(result.status)} live
+        {result && !refused && step !== 3 && <Notice tone={resultTone(result.status)} live
             action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
             <p className="whitespace-pre-wrap">{result.detail}</p>
         </Notice>}

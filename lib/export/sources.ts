@@ -12,6 +12,12 @@ export interface ExportInstallation {
 export interface ExportSource extends DatasetListing {
     catalog?: { id: string; displayName: string; description: string; version: string; maintainer: string; license: string; keywords: string[]; metadata: ExportMetadata }
     notice?: string
+    /**
+     * Whether an active installation made this dataset: installed from the
+     * catalogue, or made here. Unknown (undefined) when the installations could
+     * not be read - then every dataset would look made here.
+     */
+    installed?: boolean
 }
 /**
  * Only readable local datasets become choices. Names are never used as provenance.
@@ -29,15 +35,16 @@ export interface ExportSource extends DatasetListing {
  * is not consent from the people named in it. Decision D12's line: supplied is
  * not copied.
  */
-export function exportSources(datasets: DatasetListing[], installations: ExportInstallation[], catalog: CatalogSummary[]): ExportSource[] {
+export function exportSources(datasets: DatasetListing[], installations: ExportInstallation[] | undefined, catalog: CatalogSummary[]): ExportSource[] {
     return datasets.map((dataset) => {
-        const matches = installations.filter((row) => row.dataSetId === dataset.id && !row.uninstalledAt && row.packageId)
+        const matches = (installations ?? []).filter((row) => row.dataSetId === dataset.id && !row.uninstalledAt && row.packageId)
+        const known = installations ? { installed: matches.length > 0 } : {}
         const ids = new Set(matches.map((row) => row.packageId))
-        if (ids.size > 1) return { ...dataset, notice: 'Mehrere Katalogzuordnungen: bitte die Angaben selbst ergänzen.' }
+        if (ids.size > 1) return { ...dataset, ...known, notice: 'Mehrere Katalogzuordnungen: bitte die Angaben selbst ergänzen.' }
         const entry = catalog.find((row) => ids.has(row.id) && !row.revoked)
-        if (!entry) return { ...dataset, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }
+        if (!entry) return { ...dataset, ...known, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }
         const { id, displayName, description, version, maintainer, license, keywords, themes } = entry
-        return { ...dataset, catalog: { id, displayName, description, version, maintainer, license, keywords,
+        return { ...dataset, ...known, catalog: { id, displayName, description, version, maintainer, license, keywords,
             // `contact`, `media` and `implementation` are the previous operator's
             // own account of their deployment and start empty — see above.
             metadata: exportMetadataSchema.parse({ themes }),

@@ -216,4 +216,15 @@ describe('sharing metadata', () => {
             { dataSetId: 'local', packageId: row.id }, { dataSetId: 'local', packageId: 'another' },
         ], [row])[0].catalog).toBeUndefined()
     })
+
+    it('tells installed datasets from ones made here, and says nothing when the installations are unknown', () => {
+        const datasets = [{ id: 'installed', name: 'A' }, { id: 'removed', name: 'B' }, { id: 'own', name: 'C' }]
+        const installations = [
+            { dataSetId: 'installed', packageId: 'urn:x:usecase:a' },
+            // Uninstalled: whatever is left of it is no installation any more.
+            { dataSetId: 'removed', packageId: 'urn:x:usecase:b', uninstalledAt: '2026-09-20' },
+        ]
+        expect(exportSources(datasets, installations, []).map((source) => source.installed)).toEqual([true, false, false])
+        expect(exportSources(datasets, undefined, []).map((source) => source.installed)).toEqual([undefined, undefined, undefined])
+    })
 })

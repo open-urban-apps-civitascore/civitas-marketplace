@@ -23,7 +23,7 @@ const STAGE_ICON: Record<string, LucideIcon> = {
 
 /**
  * How many rows show before "Alle anzeigen": enough for what waits on the
- * person, few enough that "Welchen Use Case möchtest du teilen?" stays in
+ * person, few enough that "Welchen Datensatz möchtest du teilen?" stays in
  * sight below (Ewa, 2026-10-17).
  */
 const VISIBLE = 3

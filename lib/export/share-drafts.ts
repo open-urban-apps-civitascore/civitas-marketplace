@@ -13,9 +13,21 @@ import type { MetadataDraft } from '@/lib/export/metadata'
  * Saved without validation, as the patterns for long forms advise: a draft is
  * allowed to be incomplete. Read back defensively instead: an entry from an
  * older version, or edited by hand, is dropped rather than trusted.
+ *
+ * Saved only once the person reached the Steckbrief: choosing a dataset and
+ * looking at what goes into the package is no started share yet (plan of
+ * 2026-10-18, section 3).
  */
 
 const PREFIX = 'marketplace.share-draft.v1:'
+
+/**
+ * How many steps the wizard has, stored with every draft since it has three
+ * (rc.5). Drafts from the four-step wizard carry none: they counted „Bestand
+ * prüfen“ as a step of its own, so their step reads one lower. They keep their
+ * key and are never rewritten for it, so a draft cannot get lost in between.
+ */
+const WIZARD_STEPS = 3
 
 export interface ShareDraft {
     datasetId: string
@@ -23,13 +35,15 @@ export interface ShareDraft {
     datasetName: string
     /** ISO timestamp of the last save. */
     savedAt: string
-    /** The step to come back to: the inventory (2) or the Steckbrief (3). */
-    step: 2 | 3
+    /** ISO timestamp of the first save, for „Angefangen am“. Drafts saved before rc.5 have none (see `draftStart`). */
+    startedAt?: string
+    /** The step to come back to: „Auswählen“ with the package contents (1), or the Steckbrief (2). */
+    step: 1 | 2
     /** The form's basic fields (name, description, version, …). */
     basics: Record<string, string>
     metadata: MetadataDraft
     targetKey: string
-    /** Demo streams unticked in step 2. */
+    /** Demo streams unticked under the package contents. */
     demoExcluded: string[]
 }
 
@@ -77,6 +91,16 @@ function isMetadataDraft(value: unknown): value is MetadataDraft {
     )
 }
 
+const isTimestamp = (value: unknown): value is string => typeof value === 'string' && !Number.isNaN(Date.parse(value))
+
+/** The step a stored draft comes back to, in today's numbering; undefined for a step no wizard had. */
+function storedStep(steps: unknown, step: unknown): ShareDraft['step'] | undefined {
+    if (steps === WIZARD_STEPS) return step === 1 || step === 2 ? step : undefined
+    // The four-step wizard: 2 was the inventory, now part of „Auswählen“, and 3 the Steckbrief.
+    if (steps === undefined) return step === 2 ? 1 : step === 3 ? 2 : undefined
+    return undefined
+}
+
 /** A stored draft, or undefined when the entry is missing, damaged or of another shape. */
 export function parseDraft(raw: string | null): ShareDraft | undefined {
     if (!raw) return undefined
@@ -87,13 +111,14 @@ export function parseDraft(raw: string | null): ShareDraft | undefined {
         return undefined
     }
     if (typeof value !== 'object' || value === null) return undefined
-    const draft = value as Record<string, unknown>
+    const { steps, ...draft } = value as Record<string, unknown>
+    const step = storedStep(steps, draft.step)
     if (
         typeof draft.datasetId !== 'string' ||
         typeof draft.datasetName !== 'string' ||
-        typeof draft.savedAt !== 'string' ||
-        Number.isNaN(Date.parse(draft.savedAt)) ||
-        (draft.step !== 2 && draft.step !== 3) ||
+        !isTimestamp(draft.savedAt) ||
+        (draft.startedAt !== undefined && !isTimestamp(draft.startedAt)) ||
+        step === undefined ||
         !isRecordOfStrings(draft.basics) ||
         !isMetadataDraft(draft.metadata) ||
         typeof draft.targetKey !== 'string' ||
@@ -101,7 +126,18 @@ export function parseDraft(raw: string | null): ShareDraft | undefined {
     ) {
         return undefined
     }
-    return draft as unknown as ShareDraft
+    return { ...draft, step } as unknown as ShareDraft
+}
+
+/**
+ * The step a draft saved now comes back to, or none: „Auswählen“ alone starts
+ * no draft, it only keeps one up to date that exists already - an older draft
+ * continued there, or one the person went back to from the Steckbrief.
+ * The preview is not saved as a step: it is made again from the Steckbrief.
+ */
+export function draftStepAt(step: number, hasDraft: boolean): ShareDraft['step'] | undefined {
+    if (step >= 2) return 2
+    return hasDraft ? 1 : undefined
 }
 
 /** Every draft of one person, newest first. Never throws: a browser that blocks storage simply has none. */
@@ -126,7 +162,7 @@ export function readDrafts(storage: DraftStorage | undefined, ownerTag: string):
 export function writeDraft(storage: DraftStorage | undefined, ownerTag: string, draft: ShareDraft): boolean {
     if (!storage) return false
     try {
-        storage.setItem(draftKey(ownerTag, draft.datasetId), JSON.stringify(draft))
+        storage.setItem(draftKey(ownerTag, draft.datasetId), JSON.stringify({ ...draft, steps: WIZARD_STEPS }))
         return true
     } catch {
         return false
@@ -146,4 +182,16 @@ const SAVED_AT = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-di
 /** "16.10., 14:32", the way the page names when a draft was saved. */
 export function draftTime(savedAt: string): string {
     return SAVED_AT.format(new Date(savedAt))
+}
+
+const STARTED_ON = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' })
+
+/** When a share was started; a draft from before rc.5 knows only its last save, which is the closest there is. */
+export function draftStart(draft: Pick<ShareDraft, 'savedAt' | 'startedAt'>): string {
+    return draft.startedAt ?? draft.savedAt
+}
+
+/** "12.10.", the day a share was started, for „Angefangen am 12.10.“. */
+export function draftStartedOn(draft: Pick<ShareDraft, 'savedAt' | 'startedAt'>): string {
+    return STARTED_ON.format(new Date(draftStart(draft)))
 }
