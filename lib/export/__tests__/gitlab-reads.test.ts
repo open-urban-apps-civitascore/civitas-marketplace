@@ -7,6 +7,7 @@ import {
     GitLabReadCache,
     listOpenMergeRequests,
     mergeRequestCommits,
+    mergeRequestNotes,
     readFile,
 } from '@/lib/export/gitlab'
 
@@ -69,6 +70,19 @@ describe('GitLabReadCache', () => {
         await mergeRequestCommits(client, 7, 4)
         expect(gitlab.urls.filter((url) => url.includes('/merge_requests/3/'))).toHaveLength(1)
         expect(gitlab.urls.filter((url) => url.includes('/merge_requests/4/'))).toHaveLength(2)
+    })
+
+    it('keeps the notes of a request until it changes, and none of a request whose last change is unknown', async () => {
+        const gitlab = counting(() => new Response(JSON.stringify([{ body: 'closed' }]), { status: 200 }))
+        const client = withCache(gitlab.fetchImpl)
+        await mergeRequestNotes(client, 7, 5, '2026-10-17T10:00:00Z')
+        await mergeRequestNotes(client, 7, 5, '2026-10-17T10:00:00Z')
+        // A comment after the close moves its time, and with it the key.
+        await mergeRequestNotes(client, 7, 5, '2026-10-18T09:00:00Z')
+        await mergeRequestNotes(client, 7, 6, undefined)
+        await mergeRequestNotes(client, 7, 6, undefined)
+        expect(gitlab.urls.filter((url) => url.includes('/merge_requests/5/notes'))).toHaveLength(2)
+        expect(gitlab.urls.filter((url) => url.includes('/merge_requests/6/notes'))).toHaveLength(2)
     })
 
     it('reads straight from GitLab for a client without a cache', async () => {

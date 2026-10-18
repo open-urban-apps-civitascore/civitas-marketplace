@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { MergeRequestRef } from '@/lib/export/gitlab'
-import { catalogStatusIn, judgeBundle, packageFolder } from '@/lib/export/status'
+import { catalogFloor, catalogStatusIn, judgeBundle, packageFolder } from '@/lib/export/status'
 
 const merged: MergeRequestRef = {
     iid: 3,
@@ -55,6 +55,69 @@ describe('catalogStatusIn', () => {
         expect(catalogStatusIn({ openRequests: [], index }, 'baeume', '1.0.0', 'urn:stadt:usecase:baeume').state).toBe('listed')
         expect(catalogStatusIn({ openRequests: [], index }, 'baeume', '1.1.0', 'urn:stadt:usecase:baeume').state).toBe('none')
         expect(catalogStatusIn({ openRequests: [], index: undefined }, 'baeume', '1.0.0', 'urn:stadt:usecase:baeume').state).toBe('none')
+    })
+})
+
+describe('a version the catalogue team took out', () => {
+    const ID = 'urn:stadt:usecase:baeume'
+    const indexOf = (useCases: unknown[]) => JSON.stringify({ version: '1.0.0', useCases })
+    /** A merged catalogue proposal as `proposeCatalog` writes it: the branch names slug and version, the description the id. */
+    const merged = (iid: number, version: string, id = ID): MergeRequestRef => ({
+        iid,
+        state: 'merged',
+        source_branch: `catalog/baeume-${version}`,
+        web_url: `https://gitlab.example/mr/${iid}`,
+        description: `Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\nAdds \`${id}\` in \`useCases\`, pinned to ...`,
+    })
+    const open = (version: string): MergeRequestRef => ({ iid: 27, state: 'opened', source_branch: `catalog/baeume-${version}`, web_url: 'https://gitlab.example/mr/27' })
+
+    it('is withdrawn when it was listed once and its row was deleted by hand', () => {
+        const context = { openRequests: [], index: indexOf([]), merged: [merged(5, '1.0.2')] }
+        expect(catalogStatusIn(context, 'baeume', '1.0.2', ID)).toEqual({ state: 'withdrawn', takenOut: { version: '1.0.2' } })
+        // Another version may still go in, and knows what happened to the earlier one.
+        expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'none', takenOut: { version: '1.0.2' } })
+    })
+
+    it('is withdrawn, with the reason, when its row is marked revoked - and so is the whole entry', () => {
+        const context = { openRequests: [], index: indexOf([{ id: ID, version: '1.0.2', revoked: true, revokedReason: 'Datenquelle abgeschaltet' }]), merged: [] }
+        const status = catalogStatusIn(context, 'baeume', '1.0.2', ID)
+        expect(status).toEqual({ state: 'withdrawn', takenOut: { version: '1.0.2', reason: 'Datenquelle abgeschaltet' } })
+        expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toMatchObject({ state: 'withdrawn', takenOut: { version: '1.0.2' } })
+    })
+
+    it('flags an open proposal that would bring a taken-out version back', () => {
+        const context = { openRequests: [open('1.0.2')], index: indexOf([]), merged: [merged(5, '1.0.2')] }
+        expect(catalogStatusIn(context, 'baeume', '1.0.2', ID)).toEqual({
+            state: 'mr-open',
+            mrUrl: 'https://gitlab.example/mr/27',
+            takenOut: { version: '1.0.2' },
+            bringsBack: true,
+        })
+        // A first proposal of a version is no such thing.
+        expect(catalogStatusIn({ ...context, merged: [] }, 'baeume', '1.0.2', ID)).toEqual({ state: 'mr-open', mrUrl: 'https://gitlab.example/mr/27' })
+    })
+
+    it('calls a version replaced by a newer listed one replaced, not taken out', () => {
+        const context = { openRequests: [], index: indexOf([{ id: ID, version: '1.1.0' }]), merged: [merged(5, '1.0.2'), merged(6, '1.1.0')] }
+        expect(catalogStatusIn(context, 'baeume', '1.0.2', ID)).toEqual({ state: 'none' })
+        expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'listed' })
+    })
+
+    it('counts only proposals that name this package, and judges nothing without an index', () => {
+        // The branch names no publisher: another publisher's "baeume" is not this one.
+        const foreign = { openRequests: [], index: indexOf([]), merged: [merged(5, '1.0.2', 'urn:andere:usecase:baeume')] }
+        expect(catalogStatusIn(foreign, 'baeume', '1.0.2', ID)).toEqual({ state: 'none' })
+        for (const index of [undefined, '{not json']) {
+            expect(catalogStatusIn({ openRequests: [], index, merged: [merged(5, '1.0.2')] }, 'baeume', '1.0.2', ID)).toEqual({ state: 'none' })
+        }
+    })
+
+    it('knows the highest version that reached the catalogue, listed or taken out', () => {
+        expect(catalogFloor({ openRequests: [], index: indexOf([{ id: ID, version: '1.1.0' }]) }, ID)).toBe('1.1.0')
+        expect(catalogFloor({ openRequests: [], index: indexOf([{ id: ID, version: '1.0.0', revoked: true }]) }, ID)).toBe('1.0.0')
+        expect(catalogFloor({ openRequests: [], index: indexOf([{ id: ID, version: '1.0.0' }]), merged: [merged(5, '1.2.0')] }, ID)).toBe('1.2.0')
+        expect(catalogFloor({ openRequests: [], index: indexOf([]) }, ID)).toBeUndefined()
+        expect(catalogFloor({ openRequests: [], index: undefined, merged: [merged(5, '1.2.0')] }, ID)).toBeUndefined()
     })
 })
 

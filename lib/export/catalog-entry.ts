@@ -235,6 +235,35 @@ export function isListed(indexJson: string, id: string, version: string): boolea
     }
 }
 
+/** One use case's row in the index, as far as the share pages care: the version, and whether the catalogue team withdrew it. */
+export interface IndexRow {
+    version?: string
+    revoked: boolean
+    /** Why it was withdrawn, when the row says. */
+    reason?: string
+}
+
+/**
+ * The index's row for `id`: undefined when the index has none, null when the
+ * index is no JSON to read - then nobody can tell what it lists.
+ */
+export function indexRowOf(indexJson: string, id: string): IndexRow | undefined | null {
+    let index: { useCases?: unknown }
+    try {
+        index = JSON.parse(indexJson) as { useCases?: unknown }
+    } catch {
+        return null
+    }
+    const rows = Array.isArray(index.useCases) ? (index.useCases as Record<string, unknown>[]) : []
+    const row = rows.find((candidate) => candidate?.id === id)
+    if (!row) return undefined
+    return {
+        ...(typeof row.version === 'string' ? { version: row.version } : {}),
+        revoked: Boolean(row.revoked),
+        ...(typeof row.revokedReason === 'string' && row.revokedReason.trim() ? { reason: row.revokedReason.trim() } : {}),
+    }
+}
+
 function canonical(value: unknown): string {
     if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
     if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`

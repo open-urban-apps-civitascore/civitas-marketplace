@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isNewerVersion, shareProgress, turnLabel } from '@/lib/export/share-stages'
+import { isNewerVersion, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
 
 const verified = { state: 'verified' as const, mergedMrUrl: 'https://gitlab.example/mr/1' }
 
@@ -85,6 +85,59 @@ describe('shareProgress', () => {
     it('names a merge request the marketplace closed itself as withdrawn', () => {
         expect(shareProgress({ bundleMrState: 'closed', withdrawn: true })).toMatchObject({ finished: true, summary: 'Zurückgezogen' })
         expect(shareProgress({ bundleMrState: 'closed' }).summary).toBe('Merge Request ohne Merge geschlossen')
+    })
+
+    it('is finished with a version the catalogue team took out, and offers no catalogue step for it', () => {
+        const deleted = shareProgress({ version: '1.0.2', bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'withdrawn', takenOut: { version: '1.0.2' } } })
+        expect(deleted).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen' })
+        expect(deleted.states.catalog).toBe('blocked')
+        expect(deleted.active).toBeUndefined()
+        expect(turnLabel(deleted)).toBeUndefined()
+
+        const revoked = shareProgress({
+            version: '1.0.2',
+            bundleMrState: 'merged',
+            // Even a package changed after the merge does not ask for a look any more.
+            bundle: { state: 'on-base', verification: { state: 'changed-after-merge' } },
+            catalog: { state: 'withdrawn', takenOut: { version: '1.0.2', reason: 'Datenquelle abgeschaltet.' } },
+        })
+        expect(revoked).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen - Datenquelle abgeschaltet' })
+        expect(revoked.blockedBy).toBe('Diese Version kommt nicht noch einmal in den Katalog.')
+
+        // A revoked row shuts out the whole entry: a higher version was never there, so "nicht noch einmal" would be wrong.
+        const wholeEntry = shareProgress({ version: '1.1.0', bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'withdrawn', takenOut: { version: '1.0.2' } } })
+        expect(wholeEntry).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen' })
+        expect(wholeEntry.blockedBy).toBe('Herausgenommen ist der ganze Eintrag: auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team ihn wieder freigibt.')
+    })
+
+    it('asks the person to withdraw an open proposal that would bring a taken-out version back', () => {
+        const progress = shareProgress({
+            version: '1.0.2',
+            bundleMrState: 'merged',
+            bundle: { state: 'on-base', verification: verified },
+            catalog: { state: 'mr-open', mrUrl: 'u/27', takenOut: { version: '1.0.2' }, bringsBack: true },
+        })
+        expect(progress).toMatchObject({ finished: false, active: 'listing', turn: 'you', summary: 'Katalog-Eintrag in Prüfung - bringt einen herausgenommenen Eintrag zurück' })
+        expect(progress.states.listing).toBe('blocked')
+        expect(turnLabel(progress)).toBe('Du bist dran')
+    })
+
+    it('does not offer to propose a version again that was in the catalogue, but does a higher one', () => {
+        const usedUp = shareProgress({ version: '1.0.2', catalog: { state: 'withdrawn', takenOut: { version: '1.0.2' } } })
+        expect(usedUp).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen' })
+        expect(usedUp.states.propose).toBe('blocked')
+        const higher = shareProgress({ version: '1.1.0', catalog: { state: 'none', takenOut: { version: '1.0.2' } } })
+        expect(higher.states.propose).toBe('current')
+    })
+
+    it('tells who took a version out, why, and what to do before the next one', () => {
+        expect(takenOutNotice({ version: '1.0.2' })).toBe('Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Frag dort nach, bevor du eine neue Version teilst.')
+        // One full stop, whether or not the reason brings its own.
+        for (const reason of ['Datenquelle abgeschaltet', 'Datenquelle abgeschaltet.']) {
+            expect(takenOutNotice({ version: '1.0.2', reason })).toBe(
+                'Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Grund: Datenquelle abgeschaltet. Frag dort nach, bevor du eine neue Version teilst.',
+            )
+        }
     })
 
     it('waits for the repository reviewers while a removal is proposed, instead of asking for the catalogue entry', () => {

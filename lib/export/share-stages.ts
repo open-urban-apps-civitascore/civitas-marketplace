@@ -15,7 +15,9 @@ import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
  * Deleting a share (see `share-deletion.ts`) adds two endings: a proposal
  * closed by the marketplace itself is "Zurückgezogen", and a merged version
  * goes out again only through a merge request of its own, which the
- * repository's reviewers decide on like the first.
+ * repository's reviewers decide on like the first. The catalogue team adds a
+ * third: a version they took out of the catalogue (`CatalogStatus` state
+ * `withdrawn`) is finished for good, and is never proposed for it again.
  *
  * "Finished" means nothing is left that the marketplace could move on: that
  * includes a merged version that is no longer, or not as such, in the
@@ -59,7 +61,7 @@ export interface ShareFacts {
     /** With the version's removal, if one was proposed (`BundleStatus.removal`). */
     bundle?: BundleStatus
     catalog?: CatalogStatus
-    /** The version's merge request was closed by the marketplace's own account: taken back, not turned down. */
+    /** The version's merge request was closed through the marketplace, with its withdrawal note: taken back, not turned down. */
     withdrawn?: boolean
 }
 
@@ -71,6 +73,45 @@ export function isNewerVersion(candidate: string, version: string): boolean {
     if (!a || !b) return false
     for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index] > b[index]
     return false
+}
+
+/** "Grund: …" with exactly one full stop, whether or not the catalogue team ended their reason with one. */
+function sentence(text: string): string {
+    return /[.!?]$/.test(text) ? text : `${text}.`
+}
+
+/** Who took which version out of the catalogue, and why when they said. */
+export function takenOutFact(takenOut: { version: string; reason?: string }): string {
+    const reason = takenOut.reason ? ` Grund: ${sentence(takenOut.reason)}` : ''
+    return `Das Katalog-Team hat Version ${takenOut.version} aus dem Katalog genommen.${reason}`
+}
+
+/**
+ * What the person learns where a version of their package was taken out of
+ * the catalogue (decided 2026-10-18): who decided, and that a new version
+ * should wait for a word with them. Shown as a neutral notice: nobody on the
+ * page can undo it.
+ */
+export function takenOutNotice(takenOut: { version: string; reason?: string }): string {
+    return `${takenOutFact(takenOut)} Frag dort nach, bevor du eine neue Version teilst.`
+}
+
+/**
+ * Why `version` does not go into the catalogue: it was there itself, or the
+ * catalogue team took out the whole entry (`revoked`), which shuts out every
+ * version until they let it in again - then "nicht noch einmal" would be
+ * wrong for a version that was never there.
+ */
+export function takenOutBlocker(takenOut: { version: string } | undefined, version: string | undefined): string {
+    return takenOut && version && takenOut.version !== version
+        ? 'Herausgenommen ist der ganze Eintrag: auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team ihn wieder freigibt.'
+        : 'Diese Version kommt nicht noch einmal in den Katalog.'
+}
+
+/** "Aus dem Katalog genommen", with the reason when there is one. */
+function takenOutSummary(takenOut: { reason?: string } | undefined): string {
+    const reason = takenOut?.reason?.replace(/[.!?]+$/, '')
+    return reason ? `Aus dem Katalog genommen - ${reason}` : 'Aus dem Katalog genommen'
 }
 
 /** Why a merged package is not where it should be, in the person's words. */
@@ -140,6 +181,26 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
     }
 
     if (bundle?.state === 'on-base') {
+        // The catalogue team's decision comes first: nothing about the package changes it.
+        if (catalog?.state === 'withdrawn') {
+            return {
+                states: states('done', 'done', 'blocked', 'later'),
+                blockedBy: takenOutBlocker(catalog.takenOut, version),
+                finished: true,
+                summary: takenOutSummary(catalog.takenOut),
+            }
+        }
+        // Proposed again after it was taken out (!27, !29, !30 on the demo): the person who can withdraw it is asked to.
+        if (catalog?.state === 'mr-open' && catalog.bringsBack) {
+            return {
+                states: states('done', 'done', 'done', 'blocked'),
+                active: 'listing',
+                turn: 'you',
+                blockedBy: 'Der offene Katalog-Vorschlag würde einen Eintrag zurückbringen, den das Katalog-Team herausgenommen hat - zieh den Vorschlag unter „In Arbeit“ zurück.',
+                finished: false,
+                summary: 'Katalog-Eintrag in Prüfung - bringt einen herausgenommenen Eintrag zurück',
+            }
+        }
         const verification = bundle.verification
         if (verification && verification.state !== 'verified') {
             return {
@@ -202,6 +263,16 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             states: states('later', 'later', 'later', 'later'),
             finished: true,
             summary: withdrawn ? 'Zurückgezogen' : 'Merge Request ohne Merge geschlossen',
+        }
+    }
+
+    // A version that was in the catalogue is used up: not even its package is proposed again.
+    if (catalog?.state === 'withdrawn' && version && catalog.takenOut?.version === version) {
+        return {
+            states: states('blocked', 'later', 'later', 'later'),
+            blockedBy: 'Diese Version war schon im Katalog und lässt sich nicht noch einmal teilen - nur eine höhere.',
+            finished: true,
+            summary: takenOutSummary(catalog.takenOut),
         }
     }
 

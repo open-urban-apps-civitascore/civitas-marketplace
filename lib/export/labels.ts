@@ -26,5 +26,7 @@ export function catalogStateLabel(state: CatalogStatus['state']): string {
           ? 'MR offen'
           : state === 'unconfigured'
             ? 'nicht konfiguriert'
-            : 'nicht gelistet'
+            : state === 'withdrawn'
+              ? 'aus dem Katalog genommen'
+              : 'nicht gelistet'
 }

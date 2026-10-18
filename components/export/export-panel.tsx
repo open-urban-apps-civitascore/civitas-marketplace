@@ -6,8 +6,8 @@ import { exportAction, inspectExportSource, type ExportActionResult, type Export
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { draftTime, type ShareDraft } from '@/lib/export/share-drafts'
-import { shareProgress } from '@/lib/export/share-stages'
-import { mergeRequestRef, rememberShareResult, shareKey, type ShareStates } from '@/lib/export/share-state'
+import { shareProgress, takenOutNotice } from '@/lib/export/share-stages'
+import { mergeRequestRef, rememberShareResult, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
@@ -159,6 +159,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // Where this version stands is told by lib/export/share-stages, the same as in "In Arbeit" and "Geteilte Pakete".
     // The catalogue step needs the package on the base branch AND, by tree id, the merged one.
     const known = shareStates[currentShareKey] ?? {}
+    // The catalogue team took this version or an earlier one out, as a GitLab reading of any version said: before anyone proposes more.
+    const takenOutVersion = takenOutOf(shareStates, currentShareKey)
+    const takenOut = takenOutVersion ? <Notice tone="neutral">{takenOutNotice(takenOutVersion)}</Notice> : undefined
     useEffect(() => {
         let cancelled = false
         inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
@@ -306,6 +309,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
                     {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Merge Request offen{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst nach dem Merge oder nach dem Schließen des Merge Requests, dann mit einer neuen Version.</Notice>}
                     {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon im Repository. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
+                    {takenOut}
                 </div></div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
@@ -341,6 +345,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Vorschau & Teilen</h2><p className="mt-1 text-sm text-muted-foreground">Prüfe Steckbrief und Paket. In den Katalog kommt es in vier Schritten - zwei davon übernehmen Prüfende.</p></div>
                 <Button variant="ghost" disabled={pending} onClick={() => { setStep(3); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</Button>
             </div>
+            {takenOut}
             {/* The one action first, not under all the previews (Ewa's point 8). */}
             <ShareSteps
                 progress={shareProgress({ version: basics.version, bundle: known.bundle, catalog: known.catalog })}

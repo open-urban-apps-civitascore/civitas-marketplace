@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ExportActionResult } from '@/lib/export-actions'
-import { mergeRequestRef, mergeShareResult, rememberShareResult, shareKey } from '@/lib/export/share-state'
+import { mergeRequestRef, mergeShareResult, rememberShareResult, shareKey, takenOutOf } from '@/lib/export/share-state'
 
 const MR = 'https://gitlab.com/group/repo/-/merge_requests/18'
 const CATALOG_MR = 'https://gitlab.com/group/catalog/-/merge_requests/19'
@@ -12,6 +12,16 @@ const result = (partial: Partial<ExportActionResult> & Pick<ExportActionResult, 
 })
 
 describe('share state', () => {
+    it('remembers what the catalogue team took out across the versions of one package', () => {
+        const takenOut = { version: '1.0.2', reason: 'Datenquelle abgeschaltet' }
+        const states = rememberShareResult({}, version('1.0.2'), result({ intent: 'status', status: 'ok', catalog: { state: 'withdrawn', takenOut } }))
+        expect(takenOutOf(states, version('1.0.2'))).toEqual(takenOut)
+        // Typing a higher version keeps the notice: it is about the package.
+        expect(takenOutOf(states, version('1.0.3'))).toEqual(takenOut)
+        const other = shareKey({ targetKey: 'catalog', publisher: 'openurbanapps', slug: 'baeume', version: '1.0.3' })
+        expect(takenOutOf(states, other)).toBeUndefined()
+    })
+
     it('remembers a merge request the bundle step opened', () => {
         expect(mergeShareResult({}, result({ intent: 'bundle', status: 'ok', mrUrl: MR })).bundle).toEqual({ state: 'mr-open', mrUrl: MR })
     })

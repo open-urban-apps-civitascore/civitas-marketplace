@@ -156,6 +156,12 @@ export function catalogBranch(slug: string, version: string): string {
     return `catalog/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }
 
+/** The inverse of {@link catalogBranch}, as {@link parseBundleBranch} is of the export branch. */
+export function parseCatalogBranch(branch: string): { slug: string; version: string } | undefined {
+    const match = /^catalog\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
+    return match ? { slug: match[1], version: match[2] } : undefined
+}
+
 /** Where the proposal to take a merged version out of the repository again lives. */
 export function removalBranch(slug: string, version: string): string {
     return `remove/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`

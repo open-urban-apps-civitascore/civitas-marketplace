@@ -15,3 +15,14 @@ export function proposerOf(description: string | null | undefined): string | und
     const name = description?.match(/^Proposed by the Open Urban Apps marketplace on behalf of \*\*(.+?)\*\*\./m)?.[1]?.trim()
     return name && name !== 'unbekannt' ? name : undefined
 }
+
+/**
+ * Whom a withdrawal was made for, from the note the marketplace leaves on a
+ * merge request it closes (`withdrawalNote` in share-deletion.ts); undefined
+ * for any other comment. The bot account is also used by hand, so a request
+ * it closed counts as withdrawn only with this note.
+ */
+export function withdrawerOf(body: string | null | undefined): string | undefined {
+    const name = body?.match(/^Withdrawn through the Open Urban Apps marketplace on behalf of \*\*(.+?)\*\*\./m)?.[1]?.trim()
+    return name || undefined
+}

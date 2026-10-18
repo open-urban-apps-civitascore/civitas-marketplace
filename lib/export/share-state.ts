@@ -44,6 +44,19 @@ export function mergeShareResult(known: ShareKnowledge, result: ExportActionResu
     return { bundle, catalog }
 }
 
+/**
+ * What the catalogue team took out of this package, from the reading of any
+ * of its versions: it stays true when the person types a higher version,
+ * which is when it matters. This version's own reading comes first.
+ */
+export function takenOutOf(states: ShareStates, key: string): CatalogStatus['takenOut'] {
+    const own = states[key]?.catalog?.takenOut
+    if (own) return own
+    // The version is the key's last part, and has no colon of its own.
+    const samePackage = key.slice(0, key.lastIndexOf(':') + 1)
+    return Object.entries(states).find(([other, known]) => other.startsWith(samePackage) && known.catalog?.takenOut)?.[1].catalog?.takenOut
+}
+
 /** `states` with one result folded into the entry for `key`; the other versions stay as they were. */
 export function rememberShareResult(states: ShareStates, key: string, result: ExportActionResult): ShareStates {
     return { ...states, [key]: mergeShareResult(states[key] ?? {}, result) }
