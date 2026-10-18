@@ -240,10 +240,10 @@ export async function ensureFork(client: GitLabClient, upstream: GitLabProject):
     const deadline = Date.now() + 60_000
     while (fork.import_status && fork.import_status !== 'finished' && fork.import_status !== 'none') {
         if (fork.import_status === 'failed') {
-            throw new GitLabError('Der Fork des Zielrepos konnte nicht angelegt werden', 500)
+            throw new GitLabError('Die Arbeitskopie des Ablageorts (Fork) konnte nicht angelegt werden', 500)
         }
         if (Date.now() > deadline) {
-            throw new GitLabError('Der Fork des Zielrepos ist nach 60 s noch nicht bereit — bitte erneut versuchen', 504)
+            throw new GitLabError('Die Arbeitskopie des Ablageorts (Fork) ist nach 60 s noch nicht bereit - bitte erneut versuchen', 504)
         }
         await new Promise((resolve) => setTimeout(resolve, 2000))
         fork = await gl<GitLabProject>(client, `/projects/${fork.id}`)
@@ -307,7 +307,7 @@ export function listBlobs(
             for (const entry of batch) if (entry.type === 'blob') files.set(entry.path, entry.id)
             if (batch.length < 100) break
             if (files.size > 5000) {
-                throw new GitLabError('Das Zielverzeichnis enthält mehr als 5000 Dateien — das ist kein Paketordner', 413)
+                throw new GitLabError('Der Ordner im Ablageort enthält mehr als 5000 Dateien - das ist kein Paketordner', 413)
             }
         }
         return files

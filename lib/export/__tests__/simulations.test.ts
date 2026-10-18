@@ -130,7 +130,7 @@ describe('simulationMembers', () => {
 
     it('turns streams back into the package form the install reads', () => {
         // The original installation's stream was ticked but feeds another source: named, not taken.
-        expect(warnings).toEqual(['Ein gewählter Datenstrom gehört nicht (mehr) zu diesem Use Case und fehlt im Paket: inst-original--bf-001'])
+        expect(warnings).toEqual(['Ein gewählter Datenstrom gehört nicht (mehr) zu diesem Datensatz und fehlt im Paket: inst-original--bf-001'])
         expect(simulations).toEqual([
             {
                 sourceRef: 'Bodenfeuchte-Feed', messageClass: '#/$defs/BodenfeuchteMessung', topicBase: 'openurbanapps/bodenfeuchte', intervalSeconds: 10,

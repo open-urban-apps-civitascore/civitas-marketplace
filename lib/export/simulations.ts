@@ -177,7 +177,7 @@ export function simulationMembers(
     const feeding = new Set(sources.flatMap((demo) => demo.streams.map((stream) => stream.id)))
     const missing = [...chosen].filter((id) => !feeding.has(id))
     if (missing.length) {
-        warnings.push(`${missing.length === 1 ? 'Ein gewählter Datenstrom gehört' : `${missing.length} gewählte Datenströme gehören`} nicht (mehr) zu diesem Use Case und ${missing.length === 1 ? 'fehlt' : 'fehlen'} im Paket: ${missing.join(', ')}`)
+        warnings.push(`${missing.length === 1 ? 'Ein gewählter Datenstrom gehört' : `${missing.length} gewählte Datenströme gehören`} nicht (mehr) zu diesem Datensatz und ${missing.length === 1 ? 'fehlt' : 'fehlen'} im Paket: ${missing.join(', ')}`)
     }
     for (const demo of sources) {
         const picked = demo.streams.filter((stream) => chosen.has(stream.id)).map((stream) => byId.get(stream.id) as SimulationDetail)

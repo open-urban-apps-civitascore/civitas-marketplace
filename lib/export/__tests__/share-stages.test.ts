@@ -12,26 +12,27 @@ describe('shareProgress', () => {
         expect(progress.finished).toBe(false)
     })
 
-    it('waits for the repository reviewers once the package is proposed', () => {
+    it('waits for the catalogue team once the package is submitted', () => {
         for (const facts of [{ bundle: { state: 'mr-open' as const } }, { bundleMrState: 'opened' }]) {
             const progress = shareProgress(facts)
             expect(progress.states.review).toBe('waiting')
             expect(progress.active).toBe('review')
-            expect(turnLabel(progress)).toBe('Prüfende im Repository')
+            expect(turnLabel(progress)).toBe('Wartet auf das Katalog-Team')
+            expect(progress.summary).toBe('Paket in Prüfung')
         }
     })
 
     it('hands back to the person after the merge, for the catalogue entry', () => {
         const progress = shareProgress({ bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'none' } })
         expect(progress.states).toEqual({ propose: 'done', review: 'done', catalog: 'current', listing: 'later' })
-        expect(progress.summary).toBe('Paket gemergt - jetzt in den Katalog eintragen')
+        expect(progress.summary).toBe('Paket angenommen - jetzt Katalog-Eintrag vorschlagen')
         expect(turnLabel(progress)).toBe('Du bist dran')
     })
 
-    it('waits for the catalogue reviewers, then is finished', () => {
+    it('waits for the catalogue team on the entry, then is finished', () => {
         const waiting = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'mr-open', mrUrl: 'u' } })
         expect(waiting.states.listing).toBe('waiting')
-        expect(turnLabel(waiting)).toBe('Prüfende im Katalog')
+        expect(turnLabel(waiting)).toBe('Wartet auf das Katalog-Team')
         const listed = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'listed' } })
         expect(listed.finished).toBe(true)
         expect(listed.active).toBeUndefined()
@@ -41,7 +42,7 @@ describe('shareProgress', () => {
     it('stops at the catalogue step, with the reason, when the merged state cannot be confirmed', () => {
         const progress = shareProgress({ bundle: { state: 'on-base', verification: { state: 'changed-after-merge' } }, catalog: { state: 'none' } })
         expect(progress.states.catalog).toBe('blocked')
-        expect(progress.blockedBy).toContain('nach dem Merge geändert')
+        expect(progress.blockedBy).toContain('nach der Prüfung geändert')
         expect(turnLabel(progress)).toBe('Du bist dran')
     })
 
@@ -66,8 +67,8 @@ describe('shareProgress', () => {
         const missing = shareProgress({ version: '1.0.0', bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-package' } })
         expect(missing.finished).toBe(true)
         expect(missing.states.catalog).toBe('blocked')
-        expect(missing.blockedBy).toContain('nicht mehr im Repository')
-        expect(missing.summary).toBe('Paket gemergt, aber nicht im Repository')
+        expect(missing.blockedBy).toContain('nicht mehr im Ablageort')
+        expect(missing.summary).toBe('Paket angenommen, aber nicht mehr im Ablageort')
         expect(turnLabel(missing)).toBeUndefined()
 
         const older = shareProgress({
@@ -78,13 +79,13 @@ describe('shareProgress', () => {
         expect(older.finished).toBe(true)
         expect(older.blockedBy).toContain('1.0.0 statt 1.1.0')
 
-        const noBranch = shareProgress({ bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-base-branch', detail: 'Branch main existiert nicht' } })
-        expect(noBranch.blockedBy).toBe('Branch main existiert nicht')
+        const noBranch = shareProgress({ bundleMrState: 'merged', bundle: { state: 'none', reason: 'no-base-branch', detail: 'Im Ablageort fehlt „main“' } })
+        expect(noBranch.blockedBy).toBe('Im Ablageort fehlt „main“ - das richtet der Betrieb ein.')
     })
 
     it('names a merge request the marketplace closed itself as withdrawn', () => {
         expect(shareProgress({ bundleMrState: 'closed', withdrawn: true })).toMatchObject({ finished: true, summary: 'Zurückgezogen' })
-        expect(shareProgress({ bundleMrState: 'closed' }).summary).toBe('Merge Request ohne Merge geschlossen')
+        expect(shareProgress({ bundleMrState: 'closed' }).summary).toBe('Nicht angenommen')
     })
 
     it('is finished with a version the catalogue team took out, and offers no catalogue step for it', () => {
@@ -140,16 +141,16 @@ describe('shareProgress', () => {
         }
     })
 
-    it('waits for the repository reviewers while a removal is proposed, instead of asking for the catalogue entry', () => {
+    it('waits for the catalogue team while a removal is proposed, instead of asking for the catalogue entry', () => {
         const progress = shareProgress({
             bundleMrState: 'merged',
             bundle: { state: 'on-base', verification: verified, removal: { state: 'opened', mrUrl: 'u/remove' } },
             catalog: { state: 'none' },
         })
-        expect(progress).toMatchObject({ removal: 'pending', finished: false, summary: 'Entfernen wartet auf Prüfung' })
+        expect(progress).toMatchObject({ removal: 'pending', finished: false, summary: 'Entfernen vorgeschlagen' })
         expect(progress.active).toBeUndefined()
         expect(progress.states.catalog).toBe('later')
-        expect(turnLabel(progress)).toBe('Prüfende im Repository')
+        expect(turnLabel(progress)).toBe('Wartet auf das Katalog-Team')
     })
 
     it('is finished once the removal is merged and the version gone, and back when it was shared again', () => {
@@ -158,7 +159,7 @@ describe('shareProgress', () => {
             bundleMrState: 'merged',
             bundle: { state: 'none', reason: 'no-package', removal: { state: 'merged', mrUrl: 'u/remove' } },
         })
-        expect(removed).toMatchObject({ removal: 'done', finished: true, summary: 'Aus dem Repository entfernt' })
+        expect(removed).toMatchObject({ removal: 'done', finished: true, summary: 'Paket entfernt' })
         expect(turnLabel(removed)).toBeUndefined()
 
         const back = shareProgress({

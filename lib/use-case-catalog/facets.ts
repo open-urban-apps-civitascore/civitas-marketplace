@@ -71,7 +71,7 @@ export const USE_CASE_FACETS: FacetDef<CatalogSummary>[] = [
     },
     {
         id: 'status',
-        label: 'Use Case Status',
+        label: 'Stand der Umsetzung',
         mode: 'multi',
         valuesOf: (row) => band(row.implementation?.status),
         options: useCaseStatusSchema.options,

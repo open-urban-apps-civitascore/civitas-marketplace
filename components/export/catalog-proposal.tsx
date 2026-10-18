@@ -50,7 +50,7 @@ export function ProposalOutcome({ result }: { result: ExportActionResult }) {
             tone={resultTone(result.status)}
             live
             className="rounded-md px-3 py-2"
-            action={result.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}
+            action={result.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}
         >
             {result.detail}
         </Notice>

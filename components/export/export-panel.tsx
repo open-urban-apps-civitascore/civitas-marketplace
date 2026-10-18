@@ -12,7 +12,9 @@ import { mergeRequestRef, rememberShareResult, shareKey, takenOutOf, type ShareS
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
+import { useCaseSlugPattern } from '@/lib/catalog/schema'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
+import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { InProgress } from '@/components/export/in-progress'
 import { MetadataForm } from '@/components/export/metadata-form'
 import { PackageContents } from '@/components/export/package-contents'
@@ -20,6 +22,7 @@ import { ShareSteps } from '@/components/export/share-steps'
 import { useShareDraftActions, useShareDrafts } from '@/components/export/use-share-drafts'
 import { useSharedListing } from '@/components/export/use-shared-listing'
 import { Button, ExternalAnchor } from '@/components/ui/button'
+import { Disclosure } from '@/components/ui/disclosure'
 import { EmptyState, Section } from '@/components/ui/layout'
 import { InlineNotice, Notice, NoticeList, Pending } from '@/components/ui/notice'
 import { resultTone } from '@/lib/export/result-tone'
@@ -27,6 +30,10 @@ import { Select } from '@/components/ui/select'
 
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 const STEPS = ['Auswählen', 'Steckbrief ergänzen', 'Vorschau & Teilen']
+/** The server's rules for the address fields (`parseForm`), so the fold-out can open when one is wrong. */
+const SEGMENT = /^[a-z0-9]{2,40}$/
+/** How the package kinds of the preview's identity table read on the page. */
+const IDENTITY_KINDS: Record<string, string> = { datastructure: 'Datenstruktur', mapping: 'Mapping', datasource: 'Datenquelle', datasink: 'Datensenke' }
 interface PanelProps {
     sources: ExportSource[]
     sourceNotice?: string
@@ -68,6 +75,8 @@ export function ExportPanel(props: PanelProps) {
     // The started share offered for the chosen dataset, as it was when chosen: discarded meanwhile in another
     // tab, it stays on offer, so the choice does not end in an empty step without a button.
     const [offered, setOffered] = useState<ShareDraft>()
+    // „Neu beginnen“ discards what was typed, so it asks first, like every „Verwerfen“ (decided 2026-10-18).
+    const [restarting, setRestarting] = useState<ShareDraft>()
     const runs = useRef(0)
     const pickerHeading = useRef<HTMLHeadingElement>(null)
     const previousStep = useRef(step)
@@ -135,17 +144,39 @@ export function ExportPanel(props: PanelProps) {
                 <Notice tone="neutral" title={`Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.`}
                     action={<div className="flex flex-wrap gap-2">
                         <Button variant="primary" onClick={() => openFromButton(selection, started)}>Weitermachen</Button>
-                        <Button onClick={() => { discard(selection); openFromButton(selection) }}>Neu beginnen</Button>
+                        <Button onClick={() => setRestarting(started)}>Neu beginnen</Button>
                     </div>}>
                     Gespeichert in diesem Browser. „Neu beginnen“ verwirft deine bisherigen Angaben.
                 </Notice>
             )}
             {/* Focus stays in the dropdown, so the offer appearing below it is said, as the package contents are. */}
             <p role="status" className="sr-only">{started ? `Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.` : ''}</p>
+            {restarting && <DiscardDraftDialog title={draftTitle(restarting)} draft={restarting} onCancel={() => setRestarting(undefined)}
+                onConfirm={() => { setRestarting(undefined); discard(restarting.datasetId); openFromButton(restarting.datasetId) }} />}
         </section>}
         {active && source && <ExportEditor key={`${source.id}:${active.run}`} {...props} source={source} draft={active.draft}
-            step={current} onStep={setStep} onProposed={shared.reload} />}
+            step={current} onStep={setStep} onProposed={shared.reload} onDiscarded={() => openFromButton(source.id)} />}
     </div>
+}
+
+/** The Steckbrief's basic fields, by the labels the server's messages use too (`parseForm`). */
+const BASIC_FIELDS: { key: 'displayName' | 'maintainer' | 'license' | 'keywords'; label: string; hint?: string }[] = [
+    { key: 'displayName', label: 'Name im Katalog *' },
+    { key: 'maintainer', label: 'Herausgeber *' },
+    { key: 'license', label: 'Lizenz *' },
+    { key: 'keywords', label: 'Schlagworte', hint: 'Mit Komma trennen.' },
+]
+
+/** The address fields inside „Adresse ändern“: plain names, a hint with an example, the server's limits. */
+const ADDRESS_FIELDS: { key: 'publisher' | 'slug' | 'domain'; label: string; hint: string }[] = [
+    { key: 'publisher', label: 'Herausgeber-Kürzel *', hint: 'Steht vorn in der Adresse, zum Beispiel openurbanapps. 2 bis 40 Kleinbuchstaben oder Ziffern.' },
+    { key: 'slug', label: 'Kurzname *', hint: 'Steht hinten in der Adresse, zum Beispiel baumkataster-mitte. 2 bis 60 Kleinbuchstaben, Ziffern oder Bindestriche, nicht am Anfang oder Ende.' },
+    { key: 'domain', label: 'Fachgebiet *', hint: 'Auf Englisch, zum Beispiel environment, mobility oder general - es steht in den Kennungen der Bausteine. 2 bis 40 Kleinbuchstaben oder Ziffern.' },
+]
+
+/** The name a started share goes by: the name typed for the catalogue so far, else the dataset's. */
+function draftTitle(draft: ShareDraft): string {
+    return draft.basics.displayName?.trim() || draft.datasetName
 }
 
 /** A saved draft's form text over the defaults: fields added since the draft was saved start empty, not undefined. */
@@ -158,7 +189,7 @@ function stamped(payload: ShareDraft, startedAt: { current: string | undefined }
     startedAt.current ??= at
     return { ...payload, savedAt: at, startedAt: startedAt.current }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, onStep, onProposed }: PanelProps & {
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, onStep, onProposed, onDiscarded }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
     /** The wizard's step, kept by the panel: „Auswählen“ (1) shows its dropdown above this. */
@@ -166,6 +197,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     onStep: (step: number) => void
     /** A merge request was opened or found: "In Arbeit" should read GitLab again. */
     onProposed: () => void
+    /** The started share was discarded: the panel starts this dataset afresh. */
+    onDiscarded: () => void
 }) {
     const stepHeading = useRef<HTMLHeadingElement>(null)
     useEffect(() => {
@@ -214,6 +247,12 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const stored = useRef(draft !== undefined)
     const startedAt = useRef(draft ? draftStart(draft) : undefined)
     const [pendingIntent, setPendingIntent] = useState<ExportIntent>()
+    // The started share „Verwerfen“ asks about, as it stood when the button was pressed.
+    const [discarding, setDiscarding] = useState<Pick<ShareDraft, 'savedAt' | 'startedAt'>>()
+    // „Adresse ändern“ stays folded while the prefilled address is fine, and opens by itself when it is not:
+    // a required field must never be wrong or empty out of sight. Once edited it stays open, so fixing a
+    // value does not fold it away mid-typing.
+    const [addressOpen, setAddressOpen] = useState(false)
     const { save: saveDraft, discard: discardDraft } = useShareDraftActions(draftOwner)
     // The edits a pending save has not written yet; written at once when the page is left.
     const unsaved = useRef<ShareDraft | null>(null)
@@ -271,7 +310,17 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         setSavedAt(undefined)
         setDirty(false)
     }
-    const editBasics = (key: keyof typeof basics, value: string) => { setBasics({ ...basics, [key]: value }); setDirty(true) }
+    const editBasics = (key: keyof typeof basics, value: string) => {
+        setBasics({ ...basics, [key]: value })
+        setDirty(true)
+        if (key === 'publisher' || key === 'slug' || key === 'domain') setAddressOpen(true)
+    }
+    const addressInvalid = !SEGMENT.test(basics.publisher.trim().toLowerCase()) || !useCaseSlugPattern.test(basics.slug.trim().toLowerCase())
+        || !SEGMENT.test(basics.domain.trim().toLowerCase())
+    // Where the use case would be found; the URN itself shows only in the preview's technical details. Valid values
+    // read exactly as the catalogue spells its pages (catalogEntryHref), and wrong ones as typed: tidied up, an empty
+    // Herausgeber-Kürzel would show an address that will never exist.
+    const addressHref = `/use-cases/${basics.publisher.trim().toLowerCase()}/${basics.slug.trim().toLowerCase()}`
     const editMetadata = (next: MetadataDraft) => { setMetadata(next); setDirty(true) }
     const chooseTarget = (key: string) => { setTargetKey(key); setDirty(true) }
     // Saved shortly after the typing stops, without a button and without validation:
@@ -345,20 +394,23 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const previewBlocker = preview?.errors.length ? 'Die Paketprüfung meldet Fehler - Details in der Vorschau unten.' : undefined
     const setupBlocker = readiness !== 'ready' || targets.length === 0
         ? 'Teilen ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein. Die Vorschau geht trotzdem.'
-        : mayShare ? undefined : 'Merge Requests darf hier nur anlegen, wer Datenstrukturen anlegen und Datensätze bearbeiten darf, zum Beispiel Data Owner, Data Architect oder Data Steward.'
+        : mayShare ? undefined : 'Einreichen darf hier nur, wer Datenstrukturen anlegen und Datensätze bearbeiten darf, zum Beispiel Data Owner, Data Architect oder Data Steward.'
     // To „Auswählen“, with this dataset still chosen and the form kept; the preview is made again from the Steckbrief.
     const backToChoice = () => { onStep(1); setResult(null); setPreview(undefined) }
     return <div className="flex flex-col gap-6">
         {step >= 2 && <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm"><span className="text-muted-foreground">Ausgewählt: </span><strong>{source.name}</strong></p>
+            <p className="text-sm"><span className="text-muted-foreground">Datensatz: </span><strong>{source.name}</strong></p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {/* Quiet proof that nothing is lost by leaving; the draft stays in this browser. */}
-                {savedAt && <span className="text-xs text-muted-foreground">Entwurf gespeichert, {draftTime(savedAt)} ·{' '}
-                    <Button variant="ghost" className="text-xs" onClick={forgetDraft}>Entwurf löschen</Button></span>}
+                {/* Quiet proof that nothing is lost by leaving; the started share stays in this browser. */}
+                {savedAt && <span className="text-xs text-muted-foreground">Zwischenstand gespeichert, {draftTime(savedAt)} ·{' '}
+                    <Button variant="ghost" className="text-xs" disabled={pending} onClick={() => setDiscarding({ savedAt, startedAt: startedAt.current })}>Verwerfen</Button></span>}
                 {/* In the Steckbrief the same move is its footer's secondary button. */}
                 {step === 3 && <Button variant="ghost" disabled={pending} onClick={backToChoice}>Zurück zur Auswahl</Button>}
             </div>
         </div>}
+        {/* Asked first: what was typed lives only in this browser. Afterwards the dataset starts afresh at „Auswählen“. */}
+        {discarding && <DiscardDraftDialog title={basics.displayName.trim() || source.name} draft={discarding}
+            onCancel={() => setDiscarding(undefined)} onConfirm={() => { setDiscarding(undefined); forgetDraft(); onDiscarded() }} />}
         {step === 1 && <Section title="Was kommt ins Paket?"
             lead={<>Das gehört zum Datensatz „{source.name}“ - in der Reihenfolge, in der die Daten fließen.</>}>
             {!inventory ? <Pending>Inhalt wird gelesen …</Pending>
@@ -385,28 +437,35 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 <div className="mt-3 flex flex-col gap-2 empty:hidden">
                     {source.notice && <Notice tone="neutral">{source.notice}</Notice>}
                     {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
-                    {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Merge Request offen{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst nach dem Merge oder nach dem Schließen des Merge Requests, dann mit einer neuen Version.</Notice>}
-                    {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon im Repository. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
+                    {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Vorschlag in Prüfung{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst, wenn er angenommen oder zurückgezogen ist, dann mit einer neuen Version.</Notice>}
+                    {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon angenommen. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
                     {takenOut}
                 </div></div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
-                    {([{ key: 'displayName', label: 'Anzeigename *' }, { key: 'maintainer', label: 'Herausgeber / Maintainer *' },
-                        { key: 'license', label: 'Lizenz *' }, { key: 'keywords', label: 'Schlagworte (kommagetrennt)' }] as const).map(({ key, label }) =>
-                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required={key !== 'keywords'} onChange={(event) => editBasics(key, event.target.value)} /></label>)}
-                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Beschreibung *</span><textarea rows={4} className={inputClass} value={basics.description} required onChange={(event) => editBasics('description', event.target.value)} /></label>
+                    {BASIC_FIELDS.map(({ key, label, hint }) =>
+                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required={key !== 'keywords'} onChange={(event) => editBasics(key, event.target.value)} />
+                            {hint && <span className="text-xs text-muted-foreground">{hint}</span>}</label>)}
+                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Kurzbeschreibung *</span><textarea rows={4} className={inputClass} value={basics.description} required onChange={(event) => editBasics('description', event.target.value)} /></label>
                 </section>
                 <MetadataForm value={metadata} onChange={editMetadata} />
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
-                    <h3 className="font-semibold md:col-span-2">Paket & Veröffentlichung</h3>
-                    <p className="text-sm text-muted-foreground md:col-span-2">{catalog ? 'Die nächste Patch-Version ist vorgeschlagen. Für eine eigenständige Variante kannst du Publisher und Paket-Slug ändern.' : 'Lege die Kennung für das neue Paket fest.'}</p>
-                    {([{ key: 'publisher', label: 'Publisher *', hint: '2–40 Kleinbuchstaben oder Ziffern.' }, { key: 'slug', label: 'Paket-Slug *', hint: '2–60 Kleinbuchstaben, Ziffern oder Bindestriche, nicht am Rand.' },
-                        { key: 'version', label: 'Version *', hint: 'Zum Beispiel 1.0.0.' }, { key: 'domain', label: 'URN-Domain *', hint: 'Zum Beispiel environment, mobility oder general.' }] as const).map(({ key, label, hint }) =>
-                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required onChange={(event) => editBasics(key, event.target.value)} /><span className="text-xs text-muted-foreground">{hint}</span></label>)}
-                    <p className="break-all text-xs text-muted-foreground md:col-span-2">Katalog-ID: urn:{basics.publisher}:usecase:{basics.slug}</p>
-                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Zielrepository</span><Select value={targetKey} onValueChange={chooseTarget} disabled={!targets.length} placeholder="Nicht konfiguriert - Vorschau verfügbar"
-                        options={targets.map((target) => ({ value: target.key, label: `${target.label} · ${target.baseBranch}` }))} /></label>
+                    <h3 className="font-semibold md:col-span-2">Adresse und Version im Katalog</h3>
+                    <p className="text-sm text-muted-foreground md:col-span-2">{catalog ? 'Die nächste Version ist vorgeschlagen. Für eine eigenständige Variante kannst du die Adresse ändern.' : 'Die Adresse ist aus dem Namen des Datensatzes gebildet. Ändern musst du sie nur, wenn sie anders lauten soll.'}</p>
+                    <label className="flex flex-col gap-1 text-sm"><span>Version *</span><input className={inputClass} value={basics.version} required onChange={(event) => editBasics('version', event.target.value)} />
+                        <span className="text-xs text-muted-foreground">Drei Zahlen mit Punkt, zum Beispiel 1.0.0. Eine neue Version muss höher sein als die letzte.</span></label>
+                    <p className="text-sm md:col-span-2"><span className="text-muted-foreground">Adresse im Katalog: </span><span className="break-all">{addressHref}</span></p>
+                    {/* Prefilled and rarely changed, so folded - but never while one of them is wrong or empty. */}
+                    <Disclosure className="md:col-span-2" summary="Adresse ändern" open={addressOpen || addressInvalid} onOpenChange={setAddressOpen}>
+                        <div className="grid gap-4 md:grid-cols-2">
+                            {ADDRESS_FIELDS.map(({ key, label, hint }) =>
+                                <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required onChange={(event) => editBasics(key, event.target.value)} /><span className="text-xs text-muted-foreground">{hint}</span></label>)}
+                        </div>
+                    </Disclosure>
+                    <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Ablageort</span><Select value={targetKey} onValueChange={chooseTarget} disabled={!targets.length} placeholder="Nicht eingerichtet - die Vorschau geht trotzdem"
+                        options={targets.map((target) => ({ value: target.key, label: target.label }))} />
+                        <span className="text-xs text-muted-foreground">Wo das Paket bei GitLab abgelegt wird.</span></label>
                 </section>
                 {/* The answer belongs to this step's form: back in „Auswählen“ it would describe a form no longer shown. */}
                 {/* A continued draft starts here, before the inventory arrived - or without it, when reading it failed.
@@ -420,7 +479,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         </form>}
         {step === 3 && preview && <>
             <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Vorschau & Teilen</h2><p className="mt-1 text-sm text-muted-foreground">Prüfe Steckbrief und Paket. In den Katalog kommt es in vier Schritten - zwei davon übernehmen Prüfende.</p></div>
+                <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Vorschau & Teilen</h2><p className="mt-1 text-sm text-muted-foreground">Prüfe Steckbrief und Paket. Nach dem Einreichen prüft das Katalog-Team zweimal: erst das Paket, dann den Katalog-Eintrag, den du dazwischen vorschlägst.</p></div>
                 <Button variant="ghost" disabled={pending} onClick={() => { onStep(2); setResult(null); setPreview(undefined) }}>Steckbrief bearbeiten</Button>
             </div>
             {takenOut}
@@ -430,7 +489,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 pendingIntent={pending && (pendingIntent === 'bundle' || pendingIntent === 'status' || pendingIntent === 'catalog') ? pendingIntent : undefined}
                 busy={pending}
                 proposeBlocker={previewBlocker ?? setupBlocker}
-                catalogBlocker={previewBlocker ?? setupBlocker ?? (catalogUrl ? undefined : 'Für diese Instanz ist kein Katalog-Repository eingerichtet - das richtet der Betrieb ein.')}
+                catalogBlocker={previewBlocker ?? setupBlocker ?? (catalogUrl ? undefined : 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.')}
                 canCheck={forgeReady}
                 bundleMrUrl={known.bundle?.mrUrl}
                 catalogMrUrl={known.catalog?.mrUrl}
@@ -441,12 +500,13 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             />
             {/* The answer to the last action, under the task it answers. */}
             {result && <Notice tone={resultTone(result.status)} live
-                action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
+                action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>
                 <p className="whitespace-pre-wrap">{result.detail}</p>
             </Notice>}
             <section className="rounded-xl border bg-card p-5">
                 <h3 className="text-lg font-semibold">{basics.displayName}</h3><p className="mt-2 whitespace-pre-wrap text-sm">{basics.description}</p>
-                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">{Object.entries(basics).filter(([key]) => !['displayName', 'description'].includes(key)).map(([key, value]) => <div key={key}><dt className="text-muted-foreground">{{ maintainer: 'Herausgeber', license: 'Lizenz', keywords: 'Schlagworte', version: 'Version', domain: 'URN-Domain', publisher: 'Publisher', slug: 'Paket-Slug' }[key]}</dt><dd className="break-words">{value || 'Keine Angabe'}</dd></div>)}</dl>
+                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">{([['Herausgeber', basics.maintainer], ['Lizenz', basics.license], ['Schlagworte', basics.keywords], ['Version', basics.version],
+                    ['Adresse im Katalog', addressHref], ['Fachgebiet', basics.domain]] as const).map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value || 'Keine Angabe'}</dd></div>)}</dl>
                 <div className="mt-5"><MetadataReview metadata={metadata} /></div>
             </section>
             <Preview preview={preview} />
@@ -454,12 +514,12 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         {pending && step !== 3 && <Pending>Anfrage wird verarbeitet …</Pending>}
         {/* Not twice: once a step shows its merge request, the answer does not repeat the link. */}
         {result && !refused && step !== 3 && <Notice tone={resultTone(result.status)} live
-            action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
+            action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>
             <p className="whitespace-pre-wrap">{result.detail}</p>
         </Notice>}
         {refused && <div className="flex flex-col gap-3">
-            <Notice tone="error" live title={`Das Paket würde die Prüfung nicht bestehen (${refused.errors.length} Fehler)`}><NoticeList items={refused.errors} /></Notice>
-            {!!refused.warnings.length && <Notice tone="warn" title="Hinweise aus dem Export"><NoticeList items={refused.warnings} /></Notice>}
+            <Notice tone="error" live title={`Das Paket würde die Paketprüfung nicht bestehen (${refused.errors.length} Fehler)`}><NoticeList items={refused.errors} /></Notice>
+            {!!refused.warnings.length && <Notice tone="warn" title="Hinweise zum Paket"><NoticeList items={refused.warnings} /></Notice>}
         </div>}
     </div>
 }
@@ -470,11 +530,15 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="font-medium text-foreground">{preview.manifest.displayName}</span>
                 <span className="rounded bg-status-label px-1.5 py-0.5 text-xs">v{preview.manifest.version}</span>
-                <span className="break-all text-xs text-muted-foreground">{preview.manifest.id}</span>
-                <span className="text-xs text-muted-foreground">
-                    → {preview.packageDir}/ · Branch {preview.branch}
-                </span>
             </div>
+            {/* For whoever reviews or operates it: the identifiers GitLab and the catalogue use. */}
+            <Disclosure summary="Technische Angaben">
+                <dl className="grid gap-1 text-xs text-muted-foreground">
+                    <div><dt className="inline">Kennung im Katalog: </dt><dd className="inline break-all font-mono">{preview.manifest.id}</dd></div>
+                    <div><dt className="inline">Ordner im Ablageort: </dt><dd className="inline break-all font-mono">{preview.packageDir}/</dd></div>
+                    <div><dt className="inline">Zweig bei GitLab: </dt><dd className="inline break-all font-mono">{preview.branch}</dd></div>
+                </dl>
+            </Disclosure>
 
             <p className="text-sm">
                 {preview.demo.streams
@@ -483,9 +547,9 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
             </p>
 
             {preview.errors.length > 0 && (
-                <Notice tone="error" title="Das Paket würde die Prüfung nicht bestehen"><NoticeList items={preview.errors} /></Notice>
+                <Notice tone="error" title="Das Paket würde die Paketprüfung nicht bestehen"><NoticeList items={preview.errors} /></Notice>
             )}
-            {preview.warnings.length > 0 && <Notice tone="warn" title="Hinweise aus dem Export"><NoticeList items={preview.warnings} /></Notice>}
+            {preview.warnings.length > 0 && <Notice tone="warn" title="Hinweise zum Paket"><NoticeList items={preview.warnings} /></Notice>}
 
             <div className="overflow-x-auto">
                 <table className="w-full min-w-[32rem] text-xs">
@@ -510,8 +574,8 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                 <table className="w-full min-w-[40rem] text-xs">
                     <thead className="border-b text-left uppercase tracking-wide text-muted-foreground">
                         <tr>
-                            <th className="px-2 py-1 font-medium">Artefakt</th>
-                            <th className="px-2 py-1 font-medium">Identität im Paket</th>
+                            <th className="px-2 py-1 font-medium">Baustein</th>
+                            <th className="px-2 py-1 font-medium">Kennung im Paket</th>
                             <th className="px-2 py-1 font-medium">Herkunft</th>
                         </tr>
                     </thead>
@@ -519,11 +583,11 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                         {preview.identities.map((identity) => (
                             <tr key={`${identity.kind}-${identity.to}`} className="border-b last:border-0">
                                 <td className="px-2 py-1 text-foreground">
-                                    {identity.title} <span className="text-muted-foreground">({identity.kind})</span>
+                                    {identity.title} <span className="text-muted-foreground">({IDENTITY_KINDS[identity.kind] ?? identity.kind})</span>
                                 </td>
                                 <td className="break-all px-2 py-1 font-mono text-muted-foreground">{identity.to}</td>
                                 <td className="px-2 py-1 text-muted-foreground">
-                                    {identity.kept ? 'aus Katalogpaket, unverändert' : 'beim Export abgeleitet'}
+                                    {identity.kept ? 'aus dem Katalog, unverändert' : 'neu vergeben'}
                                 </td>
                             </tr>
                         ))}
@@ -540,7 +604,7 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
                 }
             />
             <List
-                title="Install-Parameter der Zielinstanz"
+                title="Wird bei der Installation abgefragt"
                 items={
                     preview.parameters.length
                         ? preview.parameters.map((p) => `${p.file}: ${p.fields.join(', ')}`)

@@ -107,7 +107,7 @@ describe('proposing a version that GitLab already has', () => {
         const result = await exportAction(null, bundleForm())
         expect(result.status).toBe('unchanged')
         expect(result.bundle?.state).toBe('on-base')
-        expect(result.detail).toContain('schon im Repository')
+        expect(result.detail).toContain('schon angenommen')
         expect(openMergeRequest).not.toHaveBeenCalled()
         // Nothing is built for it either: the platform is not read.
         expect(readUseCase).not.toHaveBeenCalled()

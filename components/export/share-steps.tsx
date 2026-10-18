@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Circle, CircleCheck, Clock, GitMerge, GitPullRequest, RefreshCw, type LucideIcon } from 'lucide-react'
 
 import { Button, ExternalAnchor } from '@/components/ui/button'
@@ -6,26 +5,29 @@ import { Disclosure } from '@/components/ui/disclosure'
 import { Panel } from '@/components/ui/layout'
 import { InlineNotice } from '@/components/ui/notice'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { STAGES, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
+import { STAGES, WAITING_FOR_TEAM, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
 
 /**
  * "So geht es weiter": the last step of "Teilen" as the task it is (Ewa's
  * point 8 of 2026-10-13). Four stages, two of them the person's own, two the
- * reviewers'. Exactly one primary button, at the stage that is the person's
- * move now; a stage that waits for others offers "Stand prüfen"; later stages
- * are a grey line, not a disabled button. What stops a stage says why, at the
- * stage.
+ * catalogue team's. Exactly one primary button, at the stage that is the
+ * person's move now; a stage that waits for others offers "Stand prüfen";
+ * later stages are a grey line, not a disabled button. What stops a stage
+ * says why, at the stage.
  *
- * No numbers on purpose: the stepper above already numbers the four steps of
- * the form, and two numbered lists on one page read as one.
+ * No numbers on purpose: the stepper above already numbers the steps of the
+ * form, and two numbered lists on one page read as one.
+ *
+ * "Merge Request" is said only in the fold-out that explains it; everywhere
+ * else a proposal is a "Vorschlag" and GitLab is where it can be seen.
  */
 
 /** Who the stage belongs to, and whether it is theirs now. A stage nobody can move on is nobody's turn. */
 function whoLine(stage: Stage, state: StageState, progress: ShareProgress): string {
     if (state === 'done') return `${stage.who} - erledigt`
     if (state === 'blocked') return progress.turn === 'you' ? 'Du bist dran' : stage.who
-    if (state === 'current') return stage.turn === 'you' ? 'Du bist dran' : `${stage.who} sind dran`
-    if (state === 'waiting') return `${stage.who} sind dran`
+    if (state === 'current') return stage.turn === 'you' ? 'Du bist dran' : WAITING_FOR_TEAM
+    if (state === 'waiting') return WAITING_FOR_TEAM
     return stage.who
 }
 
@@ -35,6 +37,12 @@ const MARK: Record<StageState, LucideIcon> = {
     waiting: Clock,
     blocked: Circle,
     later: Circle,
+}
+
+/** " (Vorschlag !12)", or nothing when the address names no number. */
+function proposalRef(url: string | undefined): string {
+    const ref = mergeRequestRef(url)
+    return ref ? ` (Vorschlag ${ref})` : ''
 }
 
 export function ShareSteps({
@@ -73,9 +81,13 @@ export function ShareSteps({
     const action = (stage: Stage, state: StageState) => {
         if (state === 'current' && stage.key === 'propose' && !proposeBlocker) {
             return (
-                <Button variant="primary" icon={GitPullRequest} pending={pendingIntent === 'bundle'} disabled={busy} onClick={onPropose}>
-                    Merge Request erstellen
-                </Button>
+                <>
+                    {/* Said before the click: the proposal is public, and it names the person. */}
+                    <span className="text-xs text-muted-foreground">Dein Name erscheint im öffentlichen Vorschlag bei GitLab.</span>
+                    <Button variant="primary" icon={GitPullRequest} pending={pendingIntent === 'bundle'} disabled={busy} onClick={onPropose}>
+                        Zur Prüfung einreichen
+                    </Button>
+                </>
             )
         }
         if (state === 'current' && stage.key === 'catalog' && !catalogBlocker) {
@@ -105,8 +117,7 @@ export function ShareSteps({
             (stage.key === 'catalog' && state === 'done' && progress.states.listing !== 'waiting') ||
             (stage.key === 'listing' && state === 'waiting')
         if (!url || !shows) return undefined
-        const ref = mergeRequestRef(url)
-        return <ExternalAnchor href={url} className="text-xs">{ref ? `Merge Request ${ref} öffnen` : 'Merge Request öffnen'}</ExternalAnchor>
+        return <ExternalAnchor href={url} className="text-xs">In GitLab ansehen</ExternalAnchor>
     }
 
     const blocker = (stage: Stage, state: StageState) => {
@@ -116,7 +127,6 @@ export function ShareSteps({
         return undefined
     }
 
-    const removalRef = mergeRequestRef(removalMrUrl)
     return (
         <Panel title="So geht es weiter">
             {/* Outside the four stages: it undoes them. Said first, because it decides what the stages below still mean. */}
@@ -124,11 +134,9 @@ export function ShareSteps({
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <InlineNotice tone="neutral">
                         {progress.removal === 'pending'
-                            ? 'Das Entfernen dieser Version aus dem Repository ist vorgeschlagen - jetzt entscheiden die Prüfenden im Repository.'
-                            : 'Diese Version ist aus dem Repository entfernt.'}{' '}
-                        {removalMrUrl && (
-                            <ExternalAnchor href={removalMrUrl}>{removalRef ? `Merge Request ${removalRef} öffnen` : 'Merge Request öffnen'}</ExternalAnchor>
-                        )}
+                            ? `Für diese Version ist das Entfernen vorgeschlagen${proposalRef(removalMrUrl)} - jetzt entscheidet das Katalog-Team.`
+                            : 'Diese Version ist entfernt - das Katalog-Team hat das Entfernen angenommen.'}{' '}
+                        {removalMrUrl && <ExternalAnchor href={removalMrUrl}>In GitLab ansehen</ExternalAnchor>}
                     </InlineNotice>
                     {progress.removal === 'pending' && canCheck && (
                         <Button icon={RefreshCw} pending={pendingIntent === 'status'} disabled={busy} onClick={onCheck} className="shrink-0">
@@ -178,20 +186,17 @@ export function ShareSteps({
 
             <Disclosure summary="Was ist ein Merge Request?">
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                    Ein Änderungsvorschlag in GitLab. Prüfende sehen sich das Paket dort an und übernehmen es (Merge) - oder
-                    antworten im Merge Request. Erst nach dem Merge steht das Paket im Repository, und du bist wieder dran.
+                    So heißt bei GitLab ein Änderungsvorschlag - hier kurz „Vorschlag“. Das Katalog-Team sieht sich das Paket
+                    dort an und nimmt es an („Merge“) - oder fragt im Vorschlag nach. Erst wenn es angenommen ist, bist du
+                    wieder dran.
                 </p>
             </Disclosure>
 
             {/* Said at the moment someone might leave: the way back has to be known before it is needed. */}
             {progress.states.propose === 'done' && !progress.finished && !progress.removal && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                    Du kannst diese Seite jetzt verlassen. Das Paket findest du jederzeit unter „Teilen“ oben bei „In Arbeit“
-                    und unter{' '}
-                    <Link href="/export/shared" className="font-medium text-primary underline-offset-2 hover:underline">
-                        „Geteilte Pakete“
-                    </Link>
-                    {' '}- dort geht es nach dem Merge weiter.
+                    Du kannst diese Seite jetzt verlassen. Du findest das Paket jederzeit unter „Teilen“ › „In Arbeit“ - dort
+                    geht es nach der Prüfung weiter.
                 </p>
             )}
         </Panel>
