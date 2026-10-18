@@ -146,7 +146,7 @@ export const FIELD_LABELS = {
     themes: 'Themengebiet',
     keywords: 'Schlagworte',
     totalCost: 'Geschätzte Gesamtkosten (36 Monate)',
-    status: 'Use Case Status',
+    status: 'Stand der Umsetzung',
     operator: 'Federführende Organisation',
     stakeholders: 'Relevante Stakeholder',
     serviceProviders: 'Dienstleister',

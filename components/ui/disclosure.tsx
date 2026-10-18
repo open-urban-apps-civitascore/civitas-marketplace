@@ -35,13 +35,19 @@ export function Disclosure({
     children,
     className,
     defaultOpen = false,
+    open: openProp,
+    onOpenChange,
 }: {
     summary: ReactNode
     children: ReactNode
     className?: string
     defaultOpen?: boolean
+    /** Kept by the caller instead, to open it when something inside needs attention (a field that is wrong). */
+    open?: boolean
+    onOpenChange?: (open: boolean) => void
 }) {
-    const [open, setOpen] = useState(defaultOpen)
+    const [ownOpen, setOwnOpen] = useState(defaultOpen)
+    const open = openProp ?? ownOpen
     // null until measured: an open disclosure then shows its natural height, so `defaultOpen`
     // content is visible in the server HTML instead of clipped to 0 until scripts run.
     const [contentHeight, setContentHeight] = useState<number | null>(null)
@@ -65,7 +71,10 @@ export function Disclosure({
                 type="button"
                 aria-expanded={open}
                 aria-controls={contentId}
-                onClick={() => setOpen((previous) => !previous)}
+                onClick={() => {
+                    if (openProp === undefined) setOwnOpen(!open)
+                    onOpenChange?.(!open)
+                }}
                 className="flex items-center gap-1 text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
                 <ChevronDown

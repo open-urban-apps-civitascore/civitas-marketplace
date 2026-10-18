@@ -26,12 +26,12 @@ export async function fetchShareRight(): Promise<ShareRight> {
     return mayShare(me) ? 'allowed' : 'refused'
 }
 
-/** Why no merge request may be opened, or undefined when it may. */
+/** Why this person may not submit (have the bot open merge requests), or undefined when they may. */
 export function shareRefusal(right: ShareRight): string | undefined {
     if (right === 'refused') {
         return (
-            'Merge Requests darf nur anlegen, wer auf dieser Instanz Datenstrukturen anlegen und Datasets bearbeiten darf ' +
-            '(z. B. Data Owner, Data Architect oder Data Steward). Die Vorschau steht allen offen.'
+            'Einreichen darf hier nur, wer auf dieser Instanz Datenstrukturen anlegen und Datensätze bearbeiten darf, ' +
+            'zum Beispiel Data Owner, Data Architect oder Data Steward. Die Vorschau steht allen offen.'
         )
     }
     if (right === 'unknown') {

@@ -9,6 +9,7 @@ vi.mock('@/lib/export/share-permission', async (importOriginal) => ({
 import { deleteShare, listSharedPackages, planShareDeletion, proposeSharedCatalogEntry } from '@/lib/export-actions'
 import { withdrawerOf } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
+import type { DeletionScope } from '@/lib/export/share-deletion'
 import { fetchShareRight } from '@/lib/export/share-permission'
 
 const WEB = 'https://gitlab.example/group/catalog'
@@ -142,14 +143,19 @@ function fakeGitLab(state: World) {
 const writes = (calls: Call[]) => calls.filter((call) => call.method !== 'GET')
 const sent = (calls: Call[]) => writes(calls).map((call) => `${call.method} ${call.path}`)
 
-/** Plans, then deletes with the plan's own fingerprint, as the dialog does. */
-async function planAndDelete(state: World, slug = 'baeume', version = '1.1.0') {
+/**
+ * Plans, then withdraws with the plan's own fingerprint, as the dialog does:
+ * the default plan, or with `scope` the plan of that option of the choice.
+ */
+async function planAndDelete(state: World, slug = 'baeume', version = '1.1.0', scope?: DeletionScope) {
     const gitlab = fakeGitLab(state)
     vi.stubGlobal('fetch', gitlab.fetchImpl)
-    const { plan, error } = await planShareDeletion(WEB, slug, version)
-    expect(error).toBeUndefined()
+    const answer = await planShareDeletion(WEB, slug, version)
+    expect(answer.error).toBeUndefined()
+    const plan = scope ? [answer.plan, answer.alternative].find((candidate) => candidate?.scope === scope) : answer.plan
+    expect(plan).toBeDefined()
     gitlab.calls.length = 0
-    const result = await deleteShare(WEB, slug, version, plan!.fingerprint)
+    const result = await deleteShare(WEB, slug, version, plan!.fingerprint, scope)
     return { plan: plan!, result, calls: gitlab.calls }
 }
 
@@ -182,7 +188,7 @@ describe('deleting a version that waits for review', () => {
         const { plan, result, calls } = await planAndDelete(waiting(), 'pegel', '1.0.0')
         expect(plan).toMatchObject({ kind: 'withdraw', closes: [{ what: 'bundle', ref: '!4', url: `${WEB}/-/merge_requests/4` }], proposedBy: 'Ewa' })
         expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/4` })
-        expect(result.detail).toBe('Merge Request !4 ist geschlossen - das Teilen ist zurückgezogen.')
+        expect(result.detail).toBe('Vorschlag !4 ist geschlossen - das Teilen ist zurückgezogen.')
 
         expect(sent(calls)).toEqual([
             'PUT /projects/7/merge_requests/4',
@@ -238,8 +244,8 @@ describe('deleting a version that waits for review', () => {
 })
 
 describe('deleting a merged version', () => {
-    it('proposes removing a first version, after withdrawing its open catalogue proposal', async () => {
-        const { plan, result, calls } = await planAndDelete(world({ catalogMrs: [catalogMr(9)] }))
+    it('proposes removing a first version, after withdrawing its open catalogue proposal, when the person chose both', async () => {
+        const { plan, result, calls } = await planAndDelete(world({ catalogMrs: [catalogMr(9)] }), 'baeume', '1.1.0', 'version')
         expect(plan).toMatchObject({
             kind: 'remove',
             closes: [{ what: 'catalog', ref: '!9' }],
@@ -266,20 +272,20 @@ describe('deleting a merged version', () => {
         expect(opened.description).toContain(`Withdrawn with it: ${WEB}/-/merge_requests/9`)
 
         expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/30` })
-        expect(result.detail).toBe('Entfernen vorgeschlagen: Merge Request !30 wartet auf die Prüfenden im Repository. Merge Request !9 ist geschlossen.')
+        expect(result.detail).toBe('Entfernen vorgeschlagen: Vorschlag !30 wartet auf das Katalog-Team. Vorschlag !9 ist geschlossen.')
     })
 
-    it('withdraws an open proposal of a merged version together with the rest, in one go', async () => {
+    it('withdraws the open proposals of a merged version together with the rest, in one go, when the person chose both', async () => {
         // Bodenfeuchte on the demo: proposed again after the merge, and its catalogue proposal open.
         const state = world({
             exportMrs: [mr(21, 'opened', 'export/baeume-1.1.0'), MERGED_EXPORT],
             catalogMrs: [catalogMr(20)],
         })
-        const { plan, result, calls } = await planAndDelete(state)
+        const { plan, result, calls } = await planAndDelete(state, 'baeume', '1.1.0', 'version')
         expect(plan).toMatchObject({ kind: 'remove', closes: [{ what: 'bundle', ref: '!21' }, { what: 'catalog', ref: '!20' }] })
         expect(sent(calls).filter((call) => call.startsWith('PUT'))).toEqual(['PUT /projects/7/merge_requests/21', 'PUT /projects/7/merge_requests/20'])
         expect(sent(calls).at(-1)).toBe('POST /projects/7/merge_requests')
-        expect(result.detail).toContain('Die Merge Requests !21 und !20 sind geschlossen.')
+        expect(result.detail).toContain('Die Vorschläge !21 und !20 sind geschlossen.')
     })
 
     it('hands the folder back to the version it replaced, writing only what differs', async () => {
@@ -362,10 +368,10 @@ describe('deleting a merged version', () => {
     })
 
     it('says what already happened when the removal fails after a proposal was closed', async () => {
-        const { result } = await planAndDelete(world({ catalogMrs: [catalogMr(9)], failing: ['POST /projects/7/repository/commits'] }))
+        const { result } = await planAndDelete(world({ catalogMrs: [catalogMr(9)], failing: ['POST /projects/7/repository/commits'] }), 'baeume', '1.1.0', 'version')
         expect(result.status).toBe('error')
         expect(result.partial).toBe(true)
-        expect(result.detail).toContain('Merge Request !9 ist geschlossen.')
+        expect(result.detail).toContain('Vorschlag !9 ist geschlossen.')
         expect(result.detail).toContain('500')
     })
 
@@ -376,7 +382,7 @@ describe('deleting a merged version', () => {
         })
         const { plan, result, calls } = await planAndDelete(state)
         expect(plan).toMatchObject({ kind: 'withdraw', listed: true, closes: [{ what: 'catalog', ref: '!9' }] })
-        expect(result.detail).toBe('Merge Request !9 ist geschlossen. Die Version bleibt im Katalog, wie sie ist.')
+        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Die Version bleibt im Katalog, wie sie ist.')
         expect(writes(calls).map((call) => call.method)).toEqual(['PUT', 'POST', 'DELETE'])
         expect(writes(calls)[1].body?.body).toContain('listed version stays')
     })
@@ -384,7 +390,7 @@ describe('deleting a merged version', () => {
     it('does not delete a listed version at all', async () => {
         const plan = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index([{ id: 'urn:stadt:usecase:baeume', version: '1.1.0' }]) } }))
         expect(plan).toMatchObject({ kind: 'none', closes: [] })
-        expect(plan.reason).toContain('Katalog-Pflege')
+        expect(plan.reason).toContain('nur das Katalog-Team')
     })
 
     it('points at a removal that is already proposed', async () => {
@@ -395,14 +401,14 @@ describe('deleting a merged version', () => {
     it('has nothing to delete for a version that is no longer on the base branch', async () => {
         const gone = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.2.0'), 'main|index.json': index() } }))
         expect(gone).toMatchObject({ kind: 'none' })
-        expect(gone.reason).toContain('nicht (mehr) im Repository')
+        expect(gone.reason).toContain('nicht (mehr) im Ablageort')
     })
 
     it('does not call a broken package folder gone', async () => {
         const broken = await planOf(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: '{not json', 'main|index.json': index() } }))
         expect(broken).toMatchObject({ kind: 'none' })
         expect(broken.reason).toContain('kein gültiges JSON')
-        expect(broken.reason).not.toContain('nicht (mehr) im Repository')
+        expect(broken.reason).not.toContain('nicht (mehr) im Ablageort')
     })
 
     it('does not claim the version is unlisted when no catalogue is configured, and counts one file as one', async () => {
@@ -417,6 +423,98 @@ describe('deleting a merged version', () => {
     })
 })
 
+describe('the choice between the open proposal and the accepted package', () => {
+    // Merged 1.1.0, not listed, with its catalogue proposal !9 still open.
+    const withProposal = () => world({ catalogMrs: [catalogMr(9)] })
+
+    it('plans withdrawing only the open proposal by default, and offers the removal as the other plan', async () => {
+        vi.stubGlobal('fetch', fakeGitLab(withProposal()).fetchImpl)
+        const { plan, alternative } = await planShareDeletion(WEB, 'baeume', '1.1.0')
+        expect(plan).toMatchObject({ kind: 'withdraw', scope: 'proposal', accepted: true, closes: [{ what: 'catalog', ref: '!9' }] })
+        expect(plan?.removal).toBeUndefined()
+        expect(alternative).toMatchObject({ kind: 'remove', scope: 'version', closes: [{ what: 'catalog', ref: '!9' }], removal: { folder: DIR, files: 2 } })
+        // Two plans, two fingerprints: confirming one never runs the other.
+        expect(plan?.fingerprint).not.toBe(alternative?.fingerprint)
+    })
+
+    it('withdraws only the open proposal and leaves the accepted package as it is', async () => {
+        const { plan, result, calls } = await planAndDelete(withProposal())
+        expect(plan.scope).toBe('proposal')
+        expect(sent(calls)).toEqual([
+            'PUT /projects/7/merge_requests/9',
+            'POST /projects/7/merge_requests/9/notes',
+            'DELETE /projects/7/repository/branches/catalog%2Fbaeume-1.1.0',
+        ])
+        expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/9` })
+        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(writes(calls)[1].body?.body).toContain('The merged package stays in the repository as it is.')
+    })
+
+    it('withdraws only the change to an accepted package by default, as for the bodenfeuchte proposal', async () => {
+        const state = world({ exportMrs: [mr(21, 'opened', 'export/baeume-1.1.0'), MERGED_EXPORT] })
+        const { plan, result, calls } = await planAndDelete(state)
+        expect(plan).toMatchObject({ kind: 'withdraw', accepted: true, closes: [{ what: 'bundle', ref: '!21' }] })
+        expect(sent(calls).filter((call) => call.startsWith('POST /projects/7/merge_requests'))).toEqual(['POST /projects/7/merge_requests/21/notes'])
+        expect(result.status).toBe('ok')
+    })
+
+    it('withdraws what is open on an accepted package that came in another way, and says the package stays', async () => {
+        // On the base branch, but through no merge request of this marketplace: no removal to offer, so no choice.
+        const { plan, result, calls } = await planAndDelete(world({ exportMrs: [], catalogMrs: [catalogMr(9)] }))
+        expect(plan).toMatchObject({ kind: 'withdraw', accepted: true, closes: [{ what: 'catalog', ref: '!9' }] })
+        expect(plan.scope).toBeUndefined()
+        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(writes(calls)[1].body?.body).toContain('The merged package stays in the repository as it is.')
+    })
+
+    it('does not run one option under the other’s fingerprint', async () => {
+        const gitlab = fakeGitLab(withProposal())
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { plan } = await planShareDeletion(WEB, 'baeume', '1.1.0')
+        const result = await deleteShare(WEB, 'baeume', '1.1.0', plan!.fingerprint, 'version')
+        expect(result.status).toBe('changed')
+        expect(result.plan).toMatchObject({ kind: 'remove', scope: 'version' })
+        expect(result.alternative).toMatchObject({ kind: 'withdraw', scope: 'proposal' })
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('refuses an option that no longer applies, once the open proposal is gone, and hands back what is left', async () => {
+        for (const scope of ['proposal', 'version'] as const) {
+            SHARE_READS.clear()
+            const state = withProposal()
+            const gitlab = fakeGitLab(state)
+            vi.stubGlobal('fetch', gitlab.fetchImpl)
+            const answer = await planShareDeletion(WEB, 'baeume', '1.1.0')
+            const chosen = [answer.plan, answer.alternative].find((candidate) => candidate?.scope === scope)
+            // Closed by the catalogue team while the dialog was open.
+            state.catalogMrs = [catalogMr(9, WEB, DIR, 'closed')]
+            const result = await deleteShare(WEB, 'baeume', '1.1.0', chosen!.fingerprint, scope)
+            expect(result.status).toBe('changed')
+            // Nothing open any more: proposing the removal is the one plan left, without a choice.
+            expect(result.plan).toMatchObject({ kind: 'remove', closes: [] })
+            expect(result.plan?.scope).toBeUndefined()
+            expect(result.alternative).toBeUndefined()
+            expect(writes(gitlab.calls)).toEqual([])
+        }
+    })
+
+    it('offers no choice where nothing is open: proposing the removal is the plan', async () => {
+        vi.stubGlobal('fetch', fakeGitLab(world()).fetchImpl)
+        const { plan, alternative } = await planShareDeletion(WEB, 'baeume', '1.1.0')
+        expect(plan).toMatchObject({ kind: 'remove', closes: [] })
+        expect(plan?.scope).toBeUndefined()
+        expect(alternative).toBeUndefined()
+    })
+
+    it('refuses a scope no dialog offers', async () => {
+        const gitlab = fakeGitLab(withProposal())
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await deleteShare(WEB, 'baeume', '1.1.0', 'any', 'everything' as DeletionScope)
+        expect(result.status).toBe('invalid')
+        expect(gitlab.calls).toEqual([])
+    })
+})
+
 describe('a version the catalogue team took out', () => {
     // 1.1.0 was listed through the merged !8, and Daniel deleted its row again (cb4d433 on the demo).
     const takenOut = (extra: unknown[] = []) => world({ catalogMrs: [...extra, catalogMr(8, WEB, DIR, 'merged')] })
@@ -425,7 +523,7 @@ describe('a version the catalogue team took out', () => {
         const { plan, result, calls } = await planAndDelete(takenOut([catalogMr(27)]))
         expect(plan).toMatchObject({ kind: 'withdraw', takenOut: true, closes: [{ what: 'catalog', ref: '!27' }] })
         expect(plan.removal).toBeUndefined()
-        expect(result.status).toBe('ok')
+        expect(result).toMatchObject({ status: 'ok', detail: 'Vorschlag !27 ist geschlossen. Das angenommene Paket bleibt, wie es ist.' })
         expect(sent(calls)).toEqual([
             'PUT /projects/7/merge_requests/27',
             'POST /projects/7/merge_requests/27/notes',

@@ -258,7 +258,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     const resolveStructure = (ref: unknown, where: string): string | undefined => {
         if (!isCoreUrn(ref)) return undefined
         const to = urnMap.get(logicalUrn(ref))
-        if (!to) warnings.push(`${where}: Struktur ${ref} ist nicht Teil des Pakets — Referenz bleibt eine Instanz-URN`)
+        if (!to) warnings.push(`${where}: Datenstruktur ${ref} ist nicht im Paket - der Verweis zeigt weiter auf diese Instanz`)
         return to ?? logicalUrn(ref)
     }
     const structureOfVersion = (versionId: string | undefined): string | undefined => {
@@ -279,7 +279,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             stripped,
         ))
         const element = structureOfVersion(source.structureVersionId) ?? resolveStructure(source.configuration.element, file)
-        if (!element) warnings.push(`${file}: die Quelle nennt keine Struktur — element fehlt`)
+        if (!element) warnings.push(`${file}: die Quelle nennt keine Struktur - element fehlt`)
         const document: Record<string, unknown> = {
             $schema: DATASOURCE_SCHEMA,
             id,
@@ -339,7 +339,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             stripped,
         )
         const element = resolveStructure(sink.configuration.element, file) ?? structureOfVersion(sink.structureVersionId)
-        if (!element) warnings.push(`${file}: die Senke nennt keine Zielstruktur — element fehlt`)
+        if (!element) warnings.push(`${file}: die Senke nennt keine Zielstruktur - element fehlt`)
         const document: Record<string, unknown> = {
             $schema: DATASINK_SCHEMA,
             id,

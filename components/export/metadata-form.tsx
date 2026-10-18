@@ -31,7 +31,7 @@ export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChan
         </fieldset>)}
         <fieldset className="flex flex-col gap-4 rounded-xl border bg-card p-5">
             <legend className="px-2 font-semibold">Bilder & Screenshots</legend>
-            <p className="text-sm text-muted-foreground">HTTPS-Adresse oder Bildpfad im Paketrepository. Bilder werden hier verlinkt, nicht hochgeladen - und derzeit noch nicht auf der Detailseite angezeigt, solange sie nicht über den Marktplatz ausgeliefert werden.</p>
+            <p className="text-sm text-muted-foreground">HTTPS-Adresse oder Bildpfad im Paketordner. Bilder werden hier verlinkt, nicht hochgeladen - und derzeit noch nicht auf der Detailseite angezeigt, solange sie nicht über den Marktplatz ausgeliefert werden.</p>
             {value.media.map((item, index) => <div key={index} className="grid gap-3 rounded-lg border p-4">
                 {/* Required only once the row says something. An untouched row is
                     dropped on submit anyway (see draftMetadata), so marking its

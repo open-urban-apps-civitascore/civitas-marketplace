@@ -239,7 +239,7 @@ describe('listSharedPackages', () => {
         expect(bySlug.pegel.withdrawn).toBe(true)
         expect(rowProgress(bySlug.pegel).summary).toBe('Zurückgezogen')
         expect(bySlug.wind.withdrawn).toBeUndefined()
-        expect(rowProgress(bySlug.wind).summary).toBe('Merge Request ohne Merge geschlossen')
+        expect(rowProgress(bySlug.wind).summary).toBe('Nicht angenommen')
         expect(bySlug.regen.withdrawn).toBeUndefined()
         // Only what the bot closed is read; a reviewer's close needs no notes.
         expect(count(gitlab.calls, '/merge_requests/14/notes')).toBe(1)

@@ -25,17 +25,23 @@ import { mergeRequestRef } from '@/lib/export/share-state'
 import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/status'
 
 /**
- * What "Löschen" in "In Arbeit" does to one shared version, by how far it got
- * (Ewa, 2026-10-17: "completely delete a process of sharing - decide what
- * that means on each stage"):
+ * What "Zurückziehen" in "In Arbeit" does to one shared version, by how far it
+ * got (Ewa, 2026-10-17: "completely delete a process of sharing - decide what
+ * that means on each stage"; the button was "Löschen" until rc.5):
  *
  * - whatever is still proposed is withdrawn: the package's merge request and
  *   the catalogue proposal, each closed, with a note and without its branch.
  *   GitLab keeps a closed request as its record.
- * - merged: the reviewers took the package in, so taking it out is theirs to
- *   decide too. A merge request proposes it: the package folder goes back to
- *   how it was before the merge that brought the version in, which removes it
- *   for a first version.
+ * - merged: the catalogue team took the package in, so taking it out is
+ *   theirs to decide too. A merge request proposes it: the package folder goes
+ *   back to how it was before the merge that brought the version in, which
+ *   removes it for a first version.
+ * - merged with a proposal still open (a change to the accepted package, or
+ *   its catalogue entry): the person chooses (decided 2026-10-18). The
+ *   default, scope `proposal`, withdraws only what is open and leaves the
+ *   accepted package; scope `version` also proposes its removal. Both plans
+ *   are read at once, so the dialog can switch between them without asking
+ *   GitLab again.
  * - listed: never deleted from here. The catalogue withdraws entries as
  *   tombstones (`revoked`), and that is a curation decision; only what is
  *   still proposed is withdrawn. The same holds for a version the catalogue
@@ -51,11 +57,20 @@ import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/sta
  */
 
 /**
- * - `withdraw`: only proposals are closed - nothing of the version is merged, or it is listed and stays.
+ * - `withdraw`: only proposals are closed - nothing of the version is merged, it is listed and stays, or the person chose to keep it.
  * - `remove`: the version is merged and not listed; its removal is proposed, after closing what is still open.
- * - `none`: nothing to delete from here; `reason` says why.
+ * - `none`: nothing to withdraw from here; `reason` says why.
  */
 export type DeletionKind = 'withdraw' | 'remove' | 'none'
+
+/**
+ * What a withdrawal covers where there is a choice, a merged version with a
+ * proposal still open: only that proposal (`proposal`, the default and the
+ * least destructive), or the accepted package as well (`version`).
+ */
+export type DeletionScope = 'proposal' | 'version'
+
+export const DELETION_SCOPES: readonly DeletionScope[] = ['proposal', 'version']
 
 export interface DeletionPlan {
     kind: DeletionKind
@@ -65,15 +80,19 @@ export interface DeletionPlan {
     listed?: boolean
     /** For `withdraw`: the catalogue team took the version out; what is open would bring it back, and the package stays. */
     takenOut?: boolean
+    /** For `withdraw` of scope `proposal`: the package is accepted, and stays as it is. */
+    accepted?: boolean
+    /** Set where the person chooses between two plans: which of them this is. Part of the fingerprint. */
+    scope?: DeletionScope
     /** For `remove`: the folder, whether something was there before the merge (and which version), how many files change. */
     removal?: { folder: string; previous: boolean; restores?: string; files: number; mergedUrl: string }
-    /** For `none`: why nothing is deleted from here. */
+    /** For `none`: why nothing is withdrawn from here. */
     reason?: string
     /** For `none`: the merge request that is already in the way, or already on it. */
     mrUrl?: string
     /** Whom the version was proposed for, as its merge request names them. */
     proposedBy?: string
-    /** Proposed for someone else than the person asking, who should know before deleting it. */
+    /** Proposed for someone else than the person asking, who should know before withdrawing it. */
     byOther?: boolean
     /** Names exactly this plan, see above. */
     fingerprint: string
@@ -86,6 +105,8 @@ export interface DeletionResult {
     mrUrl?: string
     /** The plan as it is now, when it is no longer the confirmed one. */
     plan?: DeletionPlan
+    /** With `plan`: the other plan of a choice, when there still is one. */
+    alternative?: DeletionPlan
     /** It failed after closing something: GitLab changed all the same. */
     partial?: boolean
 }
@@ -118,7 +139,9 @@ export function fileCount(count: number): string {
 }
 
 function fingerprintOf(plan: Omit<DeletionPlan, 'fingerprint' | 'byOther'>, detail: unknown): string {
-    return createHash('sha256').update(JSON.stringify([plan.kind, plan.closes.map((close) => close.url), plan.reason ?? '', detail])).digest('hex').slice(0, 32)
+    // What the dialog words differently is part of it: the person confirmed those words, not only the closes.
+    const words = [plan.scope ?? '', Boolean(plan.listed), Boolean(plan.takenOut), Boolean(plan.accepted)]
+    return createHash('sha256').update(JSON.stringify([plan.kind, plan.closes.map((close) => close.url), plan.reason ?? '', ...words, detail])).digest('hex').slice(0, 32)
 }
 
 /**
@@ -164,15 +187,15 @@ function versionIn(manifestRaw: string | undefined): string | undefined {
     }
 }
 
-/** Why a version that is not on the base branch has nothing to delete, in the person's words. */
+/** Why a version that is not on the base branch has nothing to withdraw, in the person's words. */
 function notThere(bundle: BundleStatus): string {
     switch (bundle.reason) {
         case 'no-base-branch':
-            return `${bundle.detail ?? 'Der Basisbranch fehlt im Repository'} - das richtet der Betrieb ein, von hier wird nichts gelöscht.`
+            return `${bundle.detail ?? 'Der Ablageort ist nicht vollständig eingerichtet'} - das richtet der Betrieb ein, von hier wird nichts zurückgezogen.`
         case 'bad-manifest':
-            return 'Im Repository liegt ein Paketordner mit einer manifest.json, die kein gültiges JSON ist. Von hier lässt er sich nicht entfernen - das kann nur, wer das Repository pflegt.'
+            return 'Im Ablageort liegt ein Paketordner mit einer manifest.json, die kein gültiges JSON ist. Von hier lässt er sich nicht entfernen - das kann nur, wer den Ablageort pflegt.'
         default:
-            return 'Diese Version liegt nicht (mehr) im Repository, und bei GitLab ist für sie nichts offen - es gibt nichts zu löschen.'
+            return 'Diese Version liegt nicht (mehr) im Ablageort, und bei GitLab ist für sie nichts offen - es gibt nichts zurückzuziehen.'
     }
 }
 
@@ -200,7 +223,13 @@ async function mergeThatBrought(
     return found
 }
 
-/** What deleting one version means now, read fresh from GitLab. Only the bot's own merge requests are ever closed. */
+/**
+ * What withdrawing one version means now, read fresh from GitLab. Only the
+ * bot's own merge requests are ever closed. `scope` picks the plan where the
+ * person has a choice; the other one comes along as `alternative`. Where there
+ * is none, the one plan there is answers either scope - its fingerprint says
+ * which it is.
+ */
 export async function readDeletion(
     config: ExportConfig,
     target: ExportTarget,
@@ -209,7 +238,8 @@ export async function readDeletion(
     version: string,
     /** Who asks, by the name proposals are made for (`proposerName`). */
     requestedBy: string,
-): Promise<{ plan: DeletionPlan; work: DeletionWork }> {
+    scope: DeletionScope = 'proposal',
+): Promise<{ plan: DeletionPlan; work: DeletionWork; alternative?: DeletionPlan }> {
     const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS }
     const project = await getProject(client, parseProjectUrl(target.url).projectPath)
     const [bot, requests, removals] = await Promise.all([
@@ -230,19 +260,19 @@ export async function readDeletion(
     }
     const nothing = (reason: string, mrUrl?: string) => planned({ kind: 'none', closes: [], reason, ...(mrUrl ? { mrUrl } : {}) }, { closes: [] })
     // What is still proposed goes in any case; nothing else, when the rest is not the marketplace's to undo.
-    const withdrawOnly = (listed = false, takenOut = false) =>
-        planned({ kind: 'withdraw', closes: shown(), ...(listed ? { listed } : {}), ...(takenOut ? { takenOut } : {}) })
+    // The flags say what stays, so the dialog and the note on GitLab say it too.
+    const withdrawOnly = (stays: Pick<DeletionPlan, 'listed' | 'takenOut' | 'accepted'> = {}) => planned({ kind: 'withdraw', closes: shown(), ...stays })
 
     const open = requests.find((mr) => mr.state === 'opened')
     if (open && !ours(open)) {
-        return nothing(`Der offene Merge Request ${ref(open)} kam nicht über diesen Marktplatz - zurückziehen kann ihn nur, wer ihn geöffnet hat.`, open.web_url)
+        return nothing(`Der offene Vorschlag ${ref(open)} kam nicht über diesen Marktplatz - zurückziehen kann ihn nur, wer ihn geöffnet hat.`, open.web_url)
     }
     if (open) closes.push({ client, projectId: project.id, mr: open, what: 'bundle' })
 
     const pendingRemoval = removals.find((mr) => mr.state === 'opened')
     if (pendingRemoval) {
         if (closes.length) return withdrawOnly()
-        return nothing(`Das Entfernen ist schon vorgeschlagen (${ref(pendingRemoval)}) - jetzt entscheiden die Prüfenden im Repository.`, pendingRemoval.web_url)
+        return nothing(`Das Entfernen ist schon vorgeschlagen (${ref(pendingRemoval)}) - jetzt entscheidet das Katalog-Team.`, pendingRemoval.web_url)
     }
 
     // What is merged of the version, apart from the proposal that is being withdrawn.
@@ -271,31 +301,35 @@ export async function readDeletion(
         const proposal = catalog.opened.find((mr) => mr.description?.includes(pin))
         if (proposal) closes.push({ client: catalog.client, projectId: catalog.projectId, mr: proposal, what: 'catalog' })
         if (catalog.listed) {
-            if (closes.length) return withdrawOnly(true)
-            return nothing(`Version ${version} steht im Katalog. Herausnehmen kann sie nur die Katalog-Pflege, als zurückgezogenen Eintrag - gelöscht wird im Katalog nichts.`)
+            if (closes.length) return withdrawOnly({ listed: true })
+            return nothing(`Version ${version} steht im Katalog. Herausnehmen kann sie nur das Katalog-Team, als zurückgezogenen Eintrag - gelöscht wird im Katalog nichts.`)
         }
         if (catalog.takenOut) {
-            if (closes.length) return withdrawOnly(false, true)
+            if (closes.length) return withdrawOnly({ takenOut: true })
             return nothing(`Das Katalog-Team hat Version ${version} aus dem Katalog genommen, und offen ist dazu nichts mehr. Das angenommene Paket bleibt, wie es ist.`)
         }
     }
 
     // Undoing the merge, not deleting a folder: a version that replaced an older one hands the folder back to it.
     const merge = await mergeThatBrought(client, project.id, requests.filter((mr) => mr.state === 'merged' && ours(mr)), dir, version)
+    // From here on the package is accepted: what is open is withdrawn, and the package stays unless the person chooses otherwise.
     if (!merge) {
-        if (closes.length) return withdrawOnly()
-        return nothing('Das Paket kam nicht über einen Merge Request dieses Marktplatzes ins Repository - entfernen kann es dort nur, wer das Repository pflegt.')
+        if (closes.length) return withdrawOnly({ accepted: true })
+        return nothing('Das Paket kam nicht über einen Vorschlag dieses Marktplatzes in den Ablageort - entfernen kann es dort nur, wer den Ablageort pflegt.')
     }
     const [now, then] = await Promise.all([listBlobs(client, project.id, dir, head), listBlobs(client, project.id, dir, merge.before)])
     const deleted = [...now.keys()].filter((path) => !then.has(path)).sort()
     const written = [...then].filter(([path, id]) => now.get(path) !== id).map(([path]) => path).sort()
     if (deleted.length === 0 && written.length === 0) {
-        return closes.length ? withdrawOnly() : nothing('Im Repository ist für diese Version nichts zu entfernen.')
+        return closes.length ? withdrawOnly({ accepted: true }) : nothing('Im Ablageort ist für diese Version nichts zu entfernen.')
     }
-    return planned(
+    // A proposal still open on the accepted package: withdrawing only it, or the package too, is the person's choice.
+    const choice = closes.length > 0
+    const removing = planned(
         {
             kind: 'remove',
             closes: shown(),
+            ...(choice ? { scope: 'version' as const } : {}),
             removal: {
                 folder: dir,
                 previous: then.size > 0,
@@ -323,12 +357,16 @@ export async function readDeletion(
         // Any change to the folder since, on the base branch or before the merge, makes it another plan.
         { before: merge.before, changes: [...deleted, ...written].map((path) => `${path}:${now.get(path) ?? '-'}>${then.get(path) ?? '-'}`) },
     )
+    if (!choice) return removing
+    const keeping = planned({ kind: 'withdraw', closes: shown(), accepted: true, scope: 'proposal' })
+    return scope === 'version' ? { ...removing, alternative: keeping.plan } : { ...keeping, alternative: removing.plan }
 }
 
 function withdrawalNote(what: 'bundle' | 'catalog', plan: DeletionPlan, requestedBy: string): string {
     const who = `Withdrawn through the Open Urban Apps marketplace on behalf of **${requestedBy}**.`
     if (plan.kind === 'remove') return `${who} The version's merged package is proposed for removal from the repository as well.`
     if (plan.listed) return `${who} The listed version stays as it is.`
+    if (plan.accepted) return `${who} The merged package stays in the repository as it is.`
     if (plan.takenOut && what === 'catalog') {
         return `${who} The catalogue team took this version out of the catalogue; this proposal would have brought it back. The package stays in the repository as it is.`
     }
@@ -347,7 +385,7 @@ function removalBody(removal: NonNullable<DeletionWork['removal']>, plan: Deleti
         '',
         `## Remove ${removal.displayName} ${removal.version}`,
         '',
-        `${requestedBy} deleted this shared version in the marketplace. It came in with ${facts.mergedUrl} ${listing}.` +
+        `${requestedBy} withdrew this shared version in the marketplace. It came in with ${facts.mergedUrl} ${listing}.` +
             (plan.closes.length ? ` Withdrawn with it: ${plan.closes.map((close) => close.url).join(', ')}.` : ''),
         '',
         facts.previous
@@ -357,13 +395,13 @@ function removalBody(removal: NonNullable<DeletionWork['removal']>, plan: Deleti
         'Nothing installed from the catalogue changes: an entry pins a commit, and the commit stays in the history.',
         '',
         '---',
-        `Branch \`${removalBranch(removal.slug, removal.version)}\` · proposed via "Löschen" in the marketplace's "In Arbeit"`,
+        `Branch \`${removalBranch(removal.slug, removal.version)}\` · proposed via "Zurückziehen" in the marketplace's "In Arbeit"`,
     ].join('\n')
 }
 
-/** "Merge Request !26 ist geschlossen", "Die Merge Requests !21 und !20 sind geschlossen". */
+/** "Vorschlag !26 ist geschlossen", "Die Vorschläge !21 und !20 sind geschlossen". */
 function closedSentence(closed: string[]): string {
-    return closed.length === 1 ? `Merge Request ${closed[0]} ist geschlossen` : `Die Merge Requests ${closed.join(' und ')} sind geschlossen`
+    return closed.length === 1 ? `Vorschlag ${closed[0]} ist geschlossen` : `Die Vorschläge ${closed.join(' und ')} sind geschlossen`
 }
 
 /**
@@ -378,7 +416,7 @@ export async function runDeletion(
     requestedBy: string,
     explain: (error: GitLabError) => string,
 ): Promise<DeletionResult> {
-    if (plan.kind === 'none') return { status: 'unchanged', detail: plan.reason ?? 'Hier gibt es nichts zu löschen.' }
+    if (plan.kind === 'none') return { status: 'unchanged', detail: plan.reason ?? 'Hier gibt es nichts zurückzuziehen.' }
     const removal = plan.kind === 'remove' ? work.removal : undefined
 
     // The files the folder goes back to, read before anything changes: an unreadable one changes nothing.
@@ -387,7 +425,7 @@ export async function runDeletion(
               await Promise.all(
                   removal.written.map(async (path) => {
                       const content = await readFile(removal.client, removal.project.id, path, removal.before)
-                      if (content === undefined) throw new GitLabError(`${path} ist am Stand vor dem Merge nicht lesbar`, 404)
+                      if (content === undefined) throw new GitLabError(`${path} ist im Stand vor der Annahme nicht lesbar`, 404)
                       return [path, content] as const
                   }),
               ),
@@ -401,9 +439,15 @@ export async function runDeletion(
             closed.push(ref(step.mr))
         }
         if (!removal) {
+            // A version taken out of the catalogue was accepted before, and its package stays as well.
+            const stays = plan.listed
+                ? 'Die Version bleibt im Katalog, wie sie ist.'
+                : plan.accepted || plan.takenOut
+                  ? 'Das angenommene Paket bleibt, wie es ist.'
+                  : undefined
             return {
                 status: 'ok',
-                detail: plan.listed ? `${closedSentence(closed)}. Die Version bleibt im Katalog, wie sie ist.` : `${closedSentence(closed)} - das Teilen ist zurückgezogen.`,
+                detail: stays ? `${closedSentence(closed)}. ${stays}` : `${closedSentence(closed)} - das Teilen ist zurückgezogen.`,
                 mrUrl: plan.closes.at(-1)?.url,
             }
         }
@@ -422,7 +466,7 @@ export async function runDeletion(
         const proposed =
             outcome.status === 'already-open'
                 ? `Das Entfernen ist schon vorgeschlagen (${mrRef}).`
-                : `Entfernen vorgeschlagen: Merge Request ${mrRef} wartet auf die Prüfenden im Repository.`
+                : `Entfernen vorgeschlagen: Vorschlag ${mrRef} wartet auf das Katalog-Team.`
         return { status: 'ok', detail: closed.length ? `${proposed} ${closedSentence(closed)}.` : proposed, mrUrl: outcome.url }
     } catch (error) {
         if (!(error instanceof GitLabError) || closed.length === 0) throw error

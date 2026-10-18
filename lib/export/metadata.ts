@@ -33,7 +33,7 @@ export const METADATA_GROUPS: { title: string; fields: MetadataField[] }[] = [
         { path: 'contact.url', label: 'Kontaktseite', kind: 'url', hint: 'HTTPS-Adresse. Ein Kontakt braucht eine E-Mail oder eine Kontaktseite.' },
     ] },
     { title: 'Kosten & Ressourcen', fields: [
-        { path: 'implementation.resources.totalCost', label: FIELD_LABELS.totalCost, options: COST_BAND_LABELS, hint: 'Gesamtkosten über 36 Monate — die Frage aus dem CIVITAS-Connect-Formular. Enthält die laufenden Kosten bereits; nicht zusätzlich unter „Aufbaukosten" eintragen.' },
+        { path: 'implementation.resources.totalCost', label: FIELD_LABELS.totalCost, options: COST_BAND_LABELS, hint: 'Gesamtkosten über 36 Monate - die Frage aus dem CIVITAS-Connect-Formular. Enthält die laufenden Kosten bereits; nicht zusätzlich unter „Aufbaukosten“ eintragen.' },
         { path: 'implementation.resources.setupCost', label: FIELD_LABELS.setupCost, options: COST_BAND_LABELS },
         { path: 'implementation.resources.runningCost', label: FIELD_LABELS.runningCost, options: COST_BAND_LABELS },
         { path: 'implementation.resources.effort', label: FIELD_LABELS.effort, options: EFFORT_BAND_LABELS },
@@ -41,7 +41,7 @@ export const METADATA_GROUPS: { title: string; fields: MetadataField[] }[] = [
         { path: 'implementation.resources.note', label: FIELD_LABELS.note, kind: 'multiline' },
     ] },
     { title: 'Wirkungslogik', fields: LOGIC_MODEL_STEPS.map((step) => ({
-        path: `implementation.logicModel.${step.key}`, label: `${step.label} — ${step.gloss}`, hint: step.hint, kind: 'multiline',
+        path: `implementation.logicModel.${step.key}`, label: `${step.label} - ${step.gloss}`, hint: step.hint, kind: 'multiline',
     })) },
     { title: 'Kooperation & Referenz', fields: [
         { path: 'implementation.collaboration.wanted', label: FIELD_LABELS.collaboration, options: { true: COLLABORATION_LABELS.sought, false: COLLABORATION_LABELS.notSought } },

@@ -53,7 +53,7 @@ export default async function ExportPage() {
         <div className="flex flex-col gap-6">
             <PageHeader
                 title="Teilen"
-                lead="Wähle einen Use Case dieser Instanz aus, ergänze seinen Steckbrief und teile ihn mit anderen Kommunen."
+                lead="Aus einem Datensatz dieser Instanz wird ein Paket. Nach zwei Prüfungen durch das Katalog-Team steht es im Katalog als Anwendungsfall. Die Daten selbst bleiben hier."
                 actions={
                     // The list of what was shared lives on its own page (Ewa, 2026-10-13).
                     <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
@@ -66,13 +66,13 @@ export default async function ExportPage() {
             {readiness !== 'ready' && (
                 <Notice tone="neutral" title="Teilen ist auf dieser Instanz noch nicht eingerichtet">
                     <p>
-                        Die Vorschau funktioniert. Damit ein Paket vorgeschlagen werden kann, braucht die Instanz ein
-                        Zielrepository und einen GitLab-Zugang - das richtet der Betrieb ein.
+                        Die Vorschau funktioniert. Damit ein Paket eingereicht werden kann, braucht die Instanz einen
+                        Ablageort und einen GitLab-Zugang - das richtet der Betrieb ein.
                     </p>
                     <Disclosure summary="Für den Betrieb" className="mt-1">
                         <p className="text-xs">
                             {readiness === 'missing-targets'
-                                ? (config.targetsError ?? 'Kein Zielrepository konfiguriert: EXPORT_TARGET_REPOS setzen.')
+                                ? (config.targetsError ?? 'Kein Ablageort eingerichtet: EXPORT_TARGET_REPOS setzen.')
                                 : 'Kein GitLab-Zugang hinterlegt: EXPORT_REPO_TOKEN setzen.'}
                         </p>
                     </Disclosure>

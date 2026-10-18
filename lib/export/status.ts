@@ -218,7 +218,7 @@ export async function inspectBundleIn(
 
     const removal = context.removal ? { removal: { state: context.removal.state, mrUrl: context.removal.web_url } } : {}
     if (!head) {
-        return { status: { state: 'none', reason: 'no-base-branch', detail: `Branch ${target.baseBranch} existiert nicht in ${target.url}`, ...removal } }
+        return { status: { state: 'none', reason: 'no-base-branch', detail: `Im Ablageort ${target.url} fehlt „${target.baseBranch}“`, ...removal } }
     }
     const dir = packageDir(target, slug)
     const manifestRaw = await readFile(client, projectId, `${dir}/core-ir/manifest.json`, head)
@@ -228,7 +228,7 @@ export async function inspectBundleIn(
     try {
         manifest = JSON.parse(manifestRaw) as { id?: unknown; version?: unknown }
     } catch {
-        return { status: { state: 'none', reason: 'bad-manifest', detail: 'manifest.json auf dem Basisbranch ist kein gültiges JSON', ...removal } }
+        return { status: { state: 'none', reason: 'bad-manifest', detail: 'Die manifest.json im Ablageort ist kein gültiges JSON', ...removal } }
     }
     const idMatches =
         expectedId !== undefined
@@ -240,7 +240,8 @@ export async function inspectBundleIn(
                 state: 'none',
                 reason: 'other-version',
                 onBase: { id: String(manifest.id), version: String(manifest.version) },
-                detail: `Auf ${target.baseBranch} liegt ${String(manifest.id)} ${String(manifest.version)}, nicht ${expectedId ?? slug} ${version}`,
+                // In the person's words, without the URN: what is accepted, or that the folder holds another package.
+                detail: idMatches ? `Angenommen ist Version ${String(manifest.version)}, nicht ${version}` : 'Im Ablageort liegt unter diesem Kurznamen ein anderes Paket',
                 ...removal,
             },
         }

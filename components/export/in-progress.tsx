@@ -8,10 +8,10 @@ import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog
 import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete-share-dialog'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Panel } from '@/components/ui/layout'
-import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
+import { Notice, Pending } from '@/components/ui/notice'
 import type { SharedPackageRow } from '@/lib/export-actions'
 import { compactList, inProgressItems, isMine, type InProgressItem } from '@/lib/export/in-progress-items'
-import { draftTime, type ShareDraft } from '@/lib/export/share-drafts'
+import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
 import { turnLabel, type ShareProgress } from '@/lib/export/share-stages'
 import type { ExportSource } from '@/lib/export/sources'
 
@@ -45,8 +45,10 @@ function itemTitle(item: InProgressItem): string {
  *
  * Only what is open (see `inProgressItems`), the person's own moves first,
  * and only the first few until "Alle anzeigen". Every row has one action and
- * "Löschen", which means at each stage what `share-deletion.ts` says. None
- * is a primary button, because several rows can offer one at the same time.
+ * a way out: „Verwerfen“ for what was only started, „Zurückziehen“ for what
+ * was submitted, which means at each stage what `share-deletion.ts` says
+ * (there was one "Löschen" for both until rc.5). None is a primary button,
+ * because several rows can offer one at the same time.
  */
 export function InProgress({
     drafts,
@@ -74,8 +76,10 @@ export function InProgress({
     const [expanded, setExpanded] = useState(false)
     const [deleting, setDeleting] = useState<InProgressItem | null>(null)
     const [deleted, setDeleted] = useState<DeletionDone | null>(null)
-    // The row just deleted at GitLab, until the next reading comes back (answer or failure): no stale buttons meanwhile.
+    // The row just withdrawn at GitLab, until the next reading comes back (answer or failure): no stale buttons meanwhile.
     const [settling, setSettling] = useState<{ key: string; loaded: number } | null>(null)
+    // „Erneut versuchen“ was pressed at this reading: it shows as busy until the next one comes back.
+    const [retriedAt, setRetriedAt] = useState<number | null>(null)
     const listId = useId()
     const doneRef = useRef<HTMLDivElement>(null)
 
@@ -112,7 +116,7 @@ export function InProgress({
         >
             {deleted && (
                 <div ref={doneRef} tabIndex={-1} className="outline-none">
-                    <Notice tone="success" live action={deleted.mrUrl ? <ExternalAnchor href={deleted.mrUrl}>Merge Request öffnen</ExternalAnchor> : undefined}>
+                    <Notice tone="success" live action={deleted.mrUrl ? <ExternalAnchor href={deleted.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>
                         {deleted.detail}
                     </Notice>
                 </div>
@@ -127,7 +131,7 @@ export function InProgress({
                         return (
                             <li key={item.key} className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0">
                                 {item.kind === 'draft' ? (
-                                    <DraftRow draft={item.draft} available={item.available} onContinue={onContinue} onDelete={remove} />
+                                    <DraftRow draft={item.draft} available={item.available} onContinue={onContinue} onDiscard={remove} />
                                 ) : (
                                     <SharedRow
                                         row={item.row}
@@ -136,7 +140,7 @@ export function InProgress({
                                         proposing={proposing === item.row.key}
                                         disabled={proposing !== null}
                                         onPropose={() => void propose(item.row)}
-                                        onDelete={remove}
+                                        onWithdraw={remove}
                                     />
                                 )}
                                 {item.kind === 'shared' && outcomeFor(item.row.key) && <ProposalOutcome result={outcomeFor(item.row.key)!} />}
@@ -160,14 +164,25 @@ export function InProgress({
                 </div>
             )}
             {rows === null && !error && <Pending>Stand bei GitLab wird abgefragt …</Pending>}
-            {/* Neutral: nothing on this page can fix it, and the list page tries again. */}
+            {/* Started shares above still show: they live in this browser, not at GitLab. */}
             {error && (
-                <InlineNotice tone="neutral">
-                    Was bei GitLab offen ist, ließ sich gerade nicht abfragen ({error}).{' '}
-                    <Link href="/export/shared" className="font-medium text-primary underline-offset-2 hover:underline">
-                        Geteilte Pakete öffnen
-                    </Link>
-                </InlineNotice>
+                <Notice
+                    tone="error"
+                    live
+                    action={
+                        <Button
+                            pending={retriedAt === loaded}
+                            onClick={() => {
+                                setRetriedAt(loaded)
+                                onReload()
+                            }}
+                        >
+                            Erneut versuchen
+                        </Button>
+                    }
+                >
+                    Was bei GitLab offen ist, ließ sich gerade nicht abfragen ({error}).
+                </Notice>
             )}
 
             {deleting && (
@@ -201,11 +216,15 @@ function Row({ icon: Icon, title, meta, children }: { icon: LucideIcon; title: R
     )
 }
 
-/** Quiet, and before the row's own action: deleting is offered everywhere, but nowhere first. */
-function DeleteButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
+/**
+ * The way out of a row, quiet and before the row's own action: offered
+ * everywhere, but nowhere first. „Verwerfen“ for what lives only in this
+ * browser, „Zurückziehen“ for what was submitted; both ask first.
+ */
+function EndButton({ kind, disabled, onClick }: { kind: 'discard' | 'withdraw'; disabled?: boolean; onClick: () => void }) {
     return (
-        <Button variant="ghost" icon={Trash2} disabled={disabled} onClick={onClick}>
-            Löschen
+        <Button variant="ghost" icon={kind === 'discard' ? Trash2 : Undo2} disabled={disabled} onClick={onClick}>
+            {kind === 'discard' ? 'Verwerfen' : 'Zurückziehen'}
         </Button>
     )
 }
@@ -214,12 +233,12 @@ function DraftRow({
     draft,
     available,
     onContinue,
-    onDelete,
+    onDiscard,
 }: {
     draft: ShareDraft
     available: boolean
     onContinue: (draft: ShareDraft) => void
-    onDelete: () => void
+    onDiscard: () => void
 }) {
     const title = draft.basics.displayName?.trim() || draft.datasetName
     return (
@@ -227,13 +246,14 @@ function DraftRow({
             icon={FilePen}
             title={title}
             meta={
+                // The day it was started, as „Auswählen“ names it too: the last save would give two dates for one share.
                 available
-                    ? `Entwurf vom ${draftTime(draft.savedAt)} - noch nicht geteilt · Du bist dran`
-                    : `Entwurf vom ${draftTime(draft.savedAt)} - der Datensatz „${draft.datasetName}“ ist nicht mehr verfügbar`
+                    ? `Angefangen am ${draftStartedOn(draft)} - noch nicht eingereicht · Du bist dran`
+                    : `Der Datensatz „${draft.datasetName}“ ist auf dieser Instanz nicht mehr da.`
             }
         >
-            <DeleteButton onClick={onDelete} />
-            {available && <Button onClick={() => onContinue(draft)}>Fortsetzen</Button>}
+            <EndButton kind="discard" onClick={onDiscard} />
+            {available && <Button onClick={() => onContinue(draft)}>Weitermachen</Button>}
         </Row>
     )
 }
@@ -245,16 +265,16 @@ function SharedRow({
     proposing,
     disabled,
     onPropose,
-    onDelete,
+    onWithdraw,
 }: {
     row: SharedPackageRow
     progress: ShareProgress
-    /** Just deleted; the list is being read again. */
+    /** Just withdrawn; the list is being read again. */
     settling: boolean
     proposing: boolean
     disabled: boolean
     onPropose: () => void
-    onDelete: () => void
+    onWithdraw: () => void
 }) {
     const title = (
         <>
@@ -262,12 +282,12 @@ function SharedRow({
         </>
     )
     if (settling) {
-        return <Row icon={Trash2} title={title} meta="Der Stand wird neu abgefragt …" />
+        return <Row icon={Undo2} title={title} meta="Der Stand wird neu abgefragt …" />
     }
     if (row.problem) {
-        // No "Löschen": what it would mean depends on the stage, and the stage is what could not be read.
+        // No „Zurückziehen“: what it would mean depends on the stage, and the stage is what could not be read.
         return (
-            <Row icon={TriangleAlert} title={title} meta={`Stand nicht vollständig geprüft: ${row.problem}`}>
+            <Row icon={TriangleAlert} title={title} meta={`Der Stand ließ sich nicht lesen: ${row.problem}`}>
                 <Link href="/export/shared" className={linkClass}>
                     In „Geteilte Pakete“ ansehen
                 </Link>
@@ -281,18 +301,18 @@ function SharedRow({
     const removal = row.bundle?.removal
     if (progress.removal === 'pending' && removal) {
         return (
-            <Row icon={Trash2} title={title} meta={meta}>
-                <ExternalAnchor href={removal.mrUrl}>Merge Request ansehen</ExternalAnchor>
+            <Row icon={Undo2} title={title} meta={meta}>
+                <ExternalAnchor href={removal.mrUrl}>In GitLab ansehen</ExternalAnchor>
             </Row>
         )
     }
 
-    // It would bring back what the catalogue team took out: withdrawing it is the move, in the same dialog as "Löschen".
+    // It would bring back what the catalogue team took out: withdrawing it is the move, in the same dialog as on every row.
     if (row.catalog?.state === 'mr-open' && row.catalog.bringsBack) {
         return (
             <Row icon={TriangleAlert} title={title} meta={meta}>
                 {row.catalog.mrUrl && <ExternalAnchor href={row.catalog.mrUrl}>In GitLab ansehen</ExternalAnchor>}
-                <Button icon={Undo2} disabled={disabled} onClick={onDelete}>
+                <Button icon={Undo2} disabled={disabled} onClick={onWithdraw}>
                     Zurückziehen
                 </Button>
             </Row>
@@ -304,13 +324,13 @@ function SharedRow({
     if (progress.active === 'catalog' && progress.states.catalog === 'current') {
         action = (
             <Button icon={GitMerge} pending={proposing} disabled={disabled} onClick={onPropose}>
-                In den Katalog eintragen
+                Katalog-Eintrag vorschlagen
             </Button>
         )
     } else if (progress.active === 'review') {
-        action = <ExternalAnchor href={row.bundleMr.url}>Merge Request ansehen</ExternalAnchor>
+        action = <ExternalAnchor href={row.bundleMr.url}>In GitLab ansehen</ExternalAnchor>
     } else if (progress.active === 'listing' && row.catalog?.mrUrl) {
-        action = <ExternalAnchor href={row.catalog.mrUrl}>Merge Request ansehen</ExternalAnchor>
+        action = <ExternalAnchor href={row.catalog.mrUrl}>In GitLab ansehen</ExternalAnchor>
     } else {
         action = (
             <Link href="/export/shared" className={linkClass}>
@@ -320,7 +340,7 @@ function SharedRow({
     }
     return (
         <Row icon={icon} title={title} meta={meta}>
-            <DeleteButton disabled={disabled} onClick={onDelete} />
+            <EndButton kind="withdraw" disabled={disabled} onClick={onWithdraw} />
             {action}
         </Row>
     )

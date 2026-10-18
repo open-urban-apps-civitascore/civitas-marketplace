@@ -13,7 +13,7 @@ import { requireSession } from '@/lib/session'
  */
 const HIDDEN_BECAUSE: Record<Exclude<ShareRight, 'allowed'>, string> = {
     refused:
-        'Geteilte Pakete sehen nur Personen, die auf dieser Instanz Datenstrukturen anlegen und Datensätze bearbeiten dürfen, zum Beispiel Data Owner, Data Architect oder Data Steward.',
+        'Was eingereicht ist, sehen nur Personen, die auf dieser Instanz Datenstrukturen anlegen und Datensätze bearbeiten dürfen, zum Beispiel Data Owner, Data Architect oder Data Steward.',
     unknown: 'Deine Berechtigung konnte nicht geprüft werden, weil das Portal-Backend nicht antwortet. Bitte lade die Seite später neu.',
 }
 
@@ -33,7 +33,7 @@ export default async function SharedPackagesPage() {
         <div className="flex flex-col gap-6">
             <PageHeader
                 title="Geteilte Pakete"
-                lead="Was über diesen Marketplace geteilt wurde, neueste zuerst. Nach einem Merge geht es hier weiter - ohne den Steckbrief erneut auszufüllen."
+                lead="Was über diesen Marktplatz geteilt wurde, neueste zuerst. Ist ein Paket angenommen, geht es hier weiter - ohne den Steckbrief erneut auszufüllen."
                 actions={
                     <Link href="/export" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
                         Neu teilen

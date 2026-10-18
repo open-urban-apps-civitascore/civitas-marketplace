@@ -5,28 +5,28 @@ import type { BundleVerification, CatalogStatus } from '@/lib/export/status'
 export function verificationLabel(verification: BundleVerification): string {
     switch (verification.state) {
         case 'verified':
-            return verification.changedInReview ? 'gemergter Stand, im Review geändert' : 'gemergter Stand'
+            return verification.changedInReview ? 'wie geprüft, in der Prüfung geändert' : 'wie geprüft'
         case 'changed-after-merge':
-            return 'nach dem Merge geändert'
+            return 'nach der Prüfung geändert'
         case 'no-merge-request':
-            return 'kein Export-Merge-Request'
+            return 'nicht über diesen Marktplatz geteilt'
         default:
             return 'nicht prüfbar'
     }
 }
 
 export function mergeRequestStateLabel(state: string): string {
-    return state === 'opened' ? 'MR offen' : state === 'merged' ? 'gemergt' : state === 'closed' ? 'geschlossen' : state
+    return state === 'opened' ? 'in Prüfung' : state === 'merged' ? 'angenommen' : state === 'closed' ? 'nicht angenommen' : state
 }
 
 export function catalogStateLabel(state: CatalogStatus['state']): string {
     return state === 'listed'
-        ? 'gelistet'
+        ? 'im Katalog'
         : state === 'mr-open'
-          ? 'MR offen'
+          ? 'Eintrag in Prüfung'
           : state === 'unconfigured'
-            ? 'nicht konfiguriert'
+            ? 'Katalog nicht eingerichtet'
             : state === 'withdrawn'
               ? 'aus dem Katalog genommen'
-              : 'nicht gelistet'
+              : 'noch nicht im Katalog'
 }

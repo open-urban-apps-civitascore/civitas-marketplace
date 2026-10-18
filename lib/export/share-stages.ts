@@ -7,15 +7,16 @@ import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
  * "Teilen", "In Arbeit" and "Geteilte Pakete" all say the same. Pure, for
  * client components.
  *
- * Two of the stages are the person's own move, two are someone else's: the
- * reviewers of the package repository merge the package, the reviewers of
- * the catalogue take the entry in. Saying whose move it is, is the point - a
- * person who left after proposing has to know whether anything waits for them.
+ * Two of the stages are the person's own move, two are the catalogue team's:
+ * they accept the package, and then the entry. Both proposals go to the same
+ * people, so the page names them once, "das Katalog-Team" (plan of
+ * 2026-10-18). Saying whose move it is, is the point - a person who left after
+ * proposing has to know whether anything waits for them.
  *
- * Deleting a share (see `share-deletion.ts`) adds two endings: a proposal
+ * Withdrawing a share (see `share-deletion.ts`) adds two endings: a proposal
  * closed by the marketplace itself is "Zurückgezogen", and a merged version
  * goes out again only through a merge request of its own, which the
- * repository's reviewers decide on like the first. The catalogue team adds a
+ * catalogue team decides on like the first. The catalogue team adds a
  * third: a version they took out of the catalogue (`CatalogStatus` state
  * `withdrawn`) is finished for good, and is never proposed for it again.
  *
@@ -40,17 +41,20 @@ export type StageState = 'done' | 'current' | 'waiting' | 'blocked' | 'later'
 export interface Stage {
     key: StageKey
     title: string
-    /** Whose move the stage is, as the page names them. */
+    /** Whose move the stage is, as a line starts with them. */
     who: string
     turn: 'you' | 'reviewers'
 }
 
 export const STAGES: readonly Stage[] = [
-    { key: 'propose', title: 'Paket zur Prüfung vorschlagen', who: 'Du', turn: 'you' },
-    { key: 'review', title: 'Prüfung und Merge', who: 'Prüfende im Repository', turn: 'reviewers' },
+    { key: 'propose', title: 'Paket einreichen', who: 'Du', turn: 'you' },
+    { key: 'review', title: 'Paket-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
     { key: 'catalog', title: 'Katalog-Eintrag vorschlagen', who: 'Du', turn: 'you' },
-    { key: 'listing', title: 'Aufnahme in den Katalog', who: 'Prüfende im Katalog', turn: 'reviewers' },
+    { key: 'listing', title: 'Eintrags-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
 ]
+
+/** What a stage, a row or a removal says while the catalogue team has the next move. */
+export const WAITING_FOR_TEAM = 'Wartet auf das Katalog-Team'
 
 /** What is known about one package version. Any of it may be missing. */
 export interface ShareFacts {
@@ -118,13 +122,13 @@ function takenOutSummary(takenOut: { reason?: string } | undefined): string {
 function missingFromBase(bundle: BundleStatus, version: string | undefined): string {
     switch (bundle.reason) {
         case 'no-base-branch':
-            return bundle.detail ?? 'Der Basisbranch fehlt im Repository.'
+            return `${bundle.detail ?? 'Der Ablageort ist nicht vollständig eingerichtet'} - das richtet der Betrieb ein.`
         case 'bad-manifest':
-            return 'Die manifest.json des Pakets im Repository ist kein gültiges JSON.'
+            return 'Die manifest.json des Pakets im Ablageort ist kein gültiges JSON.'
         case 'other-version':
-            return `Im Repository liegt ${bundle.onBase?.version ?? 'eine andere Version'}${version ? ` statt ${version}` : ''} - bitte prüfen.`
+            return `Im Ablageort liegt ${bundle.onBase?.version ?? 'eine andere Version'}${version ? ` statt ${version}` : ''} - bitte ansehen.`
         default:
-            return 'Das Paket liegt nicht mehr im Repository - jemand hat es nach dem Merge entfernt oder verschoben.'
+            return 'Das Paket liegt nicht mehr im Ablageort - jemand hat es nach der Annahme entfernt oder verschoben.'
     }
 }
 
@@ -166,18 +170,18 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             active: 'review',
             turn: 'reviewers',
             finished: false,
-            summary: 'Paket wartet auf Prüfung',
+            summary: 'Paket in Prüfung',
         }
     }
 
-    // Taking a merged version out again is a merge request too, so the same reviewers decide.
+    // Taking a merged version out again is a merge request too, so the catalogue team decides again.
     const removal = bundle?.removal?.state
     if (removal === 'opened') {
-        return { states: states('done', 'done', 'later', 'later'), turn: 'reviewers', removal: 'pending', finished: false, summary: 'Entfernen wartet auf Prüfung' }
+        return { states: states('done', 'done', 'later', 'later'), turn: 'reviewers', removal: 'pending', finished: false, summary: 'Entfernen vorgeschlagen' }
     }
     // Only while the version is gone: shared and merged once more, it is back.
     if (removal === 'merged' && bundle && bundle.state !== 'on-base') {
-        return { states: states('done', 'done', 'later', 'later'), removal: 'done', finished: true, summary: 'Aus dem Repository entfernt' }
+        return { states: states('done', 'done', 'later', 'later'), removal: 'done', finished: true, summary: 'Paket entfernt' }
     }
 
     if (bundle?.state === 'on-base') {
@@ -207,9 +211,9 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
                 states: states('done', 'done', 'blocked', 'later'),
                 active: 'catalog',
                 turn: 'you',
-                blockedBy: `Der Stand im Repository lässt sich nicht bestätigen (${verificationLabel(verification)}). Bitte prüfen, oder neu teilen.`,
+                blockedBy: `Das Paket im Ablageort lässt sich nicht bestätigen (${verificationLabel(verification)}). Bitte ansehen oder eine neue Version teilen.`,
                 finished: false,
-                summary: 'Paket gemergt - braucht einen Blick',
+                summary: 'Paket angenommen - braucht einen Blick',
             }
         }
         if (catalog?.state === 'listed') {
@@ -221,16 +225,16 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
                 active: 'listing',
                 turn: 'reviewers',
                 finished: false,
-                summary: 'Katalog-Eintrag wartet auf Prüfung',
+                summary: 'Katalog-Eintrag in Prüfung',
             }
         }
         if (catalog?.state === 'unconfigured') {
             return {
                 states: states('done', 'done', 'blocked', 'later'),
                 active: 'catalog',
-                blockedBy: 'Für diese Instanz ist kein Katalog-Repository eingerichtet - das richtet der Betrieb ein.',
+                blockedBy: 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.',
                 finished: false,
-                summary: 'Paket gemergt - Katalog nicht eingerichtet',
+                summary: 'Paket angenommen - Katalog nicht eingerichtet',
             }
         }
         return {
@@ -238,7 +242,7 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             active: 'catalog',
             turn: 'you',
             finished: false,
-            summary: 'Paket gemergt - jetzt in den Katalog eintragen',
+            summary: 'Paket angenommen - jetzt Katalog-Eintrag vorschlagen',
         }
     }
 
@@ -248,21 +252,21 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             return { states: states('done', 'done', 'later', 'later'), finished: true, summary: `Durch Version ${bundle.onBase.version} ersetzt` }
         }
         // Not read (the row says why), so not judged.
-        if (!bundle) return { states: states('done', 'done', 'later', 'later'), finished: false, summary: 'Paket gemergt' }
+        if (!bundle) return { states: states('done', 'done', 'later', 'later'), finished: false, summary: 'Paket angenommen' }
         // Merged, yet missing or different on the base branch: the catalogue step cannot follow, and
         // no button here changes that - sharing again can. Said where it is listed, asked of nobody.
         return {
             states: states('done', 'done', 'blocked', 'later'),
             blockedBy: missingFromBase(bundle, version),
             finished: true,
-            summary: 'Paket gemergt, aber nicht im Repository',
+            summary: 'Paket angenommen, aber nicht mehr im Ablageort',
         }
     }
     if (bundleMrState === 'closed') {
         return {
             states: states('later', 'later', 'later', 'later'),
             finished: true,
-            summary: withdrawn ? 'Zurückgezogen' : 'Merge Request ohne Merge geschlossen',
+            summary: withdrawn ? 'Zurückgezogen' : 'Nicht angenommen',
         }
     }
 
@@ -281,15 +285,14 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
         active: 'propose',
         turn: 'you',
         finished: false,
-        summary: 'Noch nicht vorgeschlagen',
+        summary: 'Noch nicht eingereicht',
     }
 }
 
-/** "Du bist dran" or who else is; undefined when nobody on either side can move. */
+/** "Du bist dran", or that the catalogue team is; undefined when nobody on either side can move. */
 export function turnLabel(progress: ShareProgress): string | undefined {
-    // The repository's reviewers decide on a removal, as they did on the merge.
-    if (progress.removal === 'pending') return STAGES.find((stage) => stage.key === 'review')?.who
+    // The catalogue team decides on a removal, as it did on the package.
+    if (progress.removal === 'pending') return WAITING_FOR_TEAM
     if (!progress.active || !progress.turn) return undefined
-    if (progress.turn === 'you') return 'Du bist dran'
-    return STAGES.find((stage) => stage.key === progress.active)?.who
+    return progress.turn === 'you' ? 'Du bist dran' : WAITING_FOR_TEAM
 }

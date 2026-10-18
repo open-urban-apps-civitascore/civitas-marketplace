@@ -32,7 +32,7 @@ import {
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
 import { SHARE_READS } from '@/lib/export/share-cache'
-import { readDeletion, runDeletion, type DeletionPlan, type DeletionResult } from '@/lib/export/share-deletion'
+import { DELETION_SCOPES, readDeletion, runDeletion, type DeletionPlan, type DeletionResult, type DeletionScope } from '@/lib/export/share-deletion'
 import { displayNameOf, withdrawerOf } from '@/lib/export/merge-request-text'
 import { isNewerVersion, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
@@ -111,28 +111,28 @@ function field(formData: FormData, name: string): string {
     return typeof value === 'string' ? value.trim() : ''
 }
 
-/** Validates the form into typed input, or names the first field that is wrong. */
+/** Validates the form into typed input, or names the first field that is wrong, by the label the Steckbrief shows. */
 function parseForm(formData: FormData): ExportForm | string {
     const intentRaw = field(formData, 'intent')
     const intent: ExportIntent =
         intentRaw === 'bundle' || intentRaw === 'catalog' || intentRaw === 'status' ? intentRaw : 'preview'
     const datasetId = field(formData, 'datasetId')
-    if (!datasetId) return 'Bitte ein Dataset auswählen.'
+    if (!datasetId) return 'Bitte einen Datensatz auswählen.'
     const targetKey = field(formData, 'targetKey')
     const publisher = field(formData, 'publisher').toLowerCase()
-    if (!SEGMENT.test(publisher)) return 'Publisher: 2-40 Kleinbuchstaben oder Ziffern (er wird URN-Owner).'
+    if (!SEGMENT.test(publisher)) return 'Herausgeber-Kürzel: 2 bis 40 Kleinbuchstaben oder Ziffern.'
     const slug = field(formData, 'slug').toLowerCase()
-    if (!SLUG.test(slug)) return 'Paket-Slug: Kleinbuchstaben, Ziffern und Bindestriche, 2-60 Zeichen, Anfang und Ende alphanumerisch.'
+    if (!SLUG.test(slug)) return 'Kurzname: 2 bis 60 Kleinbuchstaben, Ziffern oder Bindestriche, nicht am Anfang oder Ende.'
     const version = field(formData, 'version') || '1.0.0'
-    if (!VERSION.test(version)) return 'Version muss SemVer sein (z. B. 1.0.0).'
+    if (!VERSION.test(version)) return 'Version bitte als drei Zahlen mit Punkt, zum Beispiel 1.0.0.'
     const domain = field(formData, 'domain').toLowerCase() || 'general'
-    if (!SEGMENT.test(domain)) return 'Domain: 2-40 Kleinbuchstaben oder Ziffern (URN-Segment).'
+    if (!SEGMENT.test(domain)) return 'Fachgebiet: 2 bis 40 Kleinbuchstaben oder Ziffern.'
     const displayName = field(formData, 'displayName')
-    if (!displayName) return 'Anzeigename fehlt.'
+    if (!displayName) return 'Name im Katalog fehlt.'
     const description = field(formData, 'description')
-    if (!description) return 'Beschreibung fehlt.'
+    if (!description) return 'Kurzbeschreibung fehlt.'
     const maintainer = field(formData, 'maintainer')
-    if (!maintainer) return 'Maintainer fehlt.'
+    if (!maintainer) return 'Herausgeber fehlt.'
     const license = field(formData, 'license') || 'EUPL-1.2'
     const keywords = field(formData, 'keywords')
         .split(',')
@@ -311,8 +311,8 @@ async function addressAlreadyTaken(id: string): Promise<string[]> {
         )
         if (!taken) return []
         return [
-            `Die Katalogseite /use-cases/${publisher}/${slug} ist bereits von \`${taken.id}\` belegt. ` +
-                'Der Katalog-Eintrag würde später abgelehnt — bitte jetzt einen anderen Paket-Slug wählen.',
+            `Im Katalog ist die Adresse /use-cases/${publisher}/${slug} schon belegt („${taken.displayName}“). ` +
+                'Der Eintrag würde abgelehnt - bitte einen anderen Kurznamen wählen.',
         ]
     } catch {
         return []
@@ -345,8 +345,8 @@ export async function exportAction(
                 intent: 'preview',
                 status: preview.errors.length ? 'invalid' : 'ok',
                 detail: preview.errors.length
-                    ? `Das Paket würde die Validierung nicht bestehen (${preview.errors.length} Fehler) — siehe unten.`
-                    : `${preview.files.length} Dateien, ${preview.identities.length} Identitäten, ${preview.stripped.length} entfernte Geheimnisse.`,
+                    ? `Das Paket würde die Paketprüfung nicht bestehen (${preview.errors.length} Fehler) - siehe unten.`
+                    : `${preview.files.length} Dateien, ${preview.identities.length} Kennungen, ${preview.stripped.length} entfernte Zugangsdaten.`,
                 preview,
             }
         }
@@ -363,10 +363,10 @@ export async function exportAction(
                 status: 'unconfigured',
                 detail:
                     readiness === 'missing-targets'
-                        ? (config.targetsError ?? 'Kein Zielrepository konfiguriert (EXPORT_TARGET_REPOS).')
+                        ? (config.targetsError ?? 'Kein Ablageort eingerichtet (EXPORT_TARGET_REPOS).')
                         : readiness === 'missing-token'
-                          ? 'Kein Zugang zu GitLab hinterlegt (EXPORT_REPO_TOKEN) — Vorschau funktioniert, Merge Requests nicht.'
-                          : 'Bitte ein Zielrepository wählen.',
+                          ? 'Kein Zugang zu GitLab hinterlegt (EXPORT_REPO_TOKEN) - die Vorschau geht, Einreichen nicht.'
+                          : 'Bitte einen Ablageort wählen.',
             }
         }
         const token = config.token as string
@@ -393,7 +393,7 @@ export async function exportAction(
                 return {
                     intent: 'bundle',
                     status: 'unchanged',
-                    detail: `Version ${form.options.version} ist schon im Repository - Änderungen gehen jetzt nur noch mit einer neuen Version.`,
+                    detail: `Version ${form.options.version} ist schon angenommen - Änderungen gehen jetzt nur noch mit einer neuen Version.`,
                     bundle: current,
                 }
             }
@@ -401,7 +401,7 @@ export async function exportAction(
                 return {
                     intent: 'bundle',
                     status: 'already-open',
-                    detail: `Für Version ${form.options.version} ist schon ein Merge Request offen.`,
+                    detail: `Für Version ${form.options.version} ist schon ein Vorschlag in Prüfung${proposalRef(current.mrUrl)}.`,
                     mrUrl: current.mrUrl,
                     bundle: current,
                 }
@@ -421,7 +421,7 @@ export async function exportAction(
                 return {
                     intent: 'bundle',
                     status: 'invalid',
-                    detail: `Kein Merge Request: das Paket würde die Validierung nicht bestehen (${preview.errors.length} Fehler).`,
+                    detail: `Nicht eingereicht: das Paket würde die Paketprüfung nicht bestehen (${preview.errors.length} Fehler).`,
                     preview,
                 }
             }
@@ -449,7 +449,7 @@ export async function exportAction(
                 return {
                     intent: 'bundle',
                     status: 'already-open',
-                    detail: `Es liegt bereits ein offener Merge Request (!${outcome.iid}) für ${form.options.slug} ${form.options.version} vor.`,
+                    detail: `Für Version ${form.options.version} ist schon ein Vorschlag in Prüfung (!${outcome.iid}).`,
                     mrUrl: outcome.url,
                     preview,
                 }
@@ -457,7 +457,7 @@ export async function exportAction(
             return {
                 intent: 'bundle',
                 status: 'ok',
-                detail: `Merge Request !${outcome.iid} erstellt — nach dem Merge lässt sich der Katalog-Eintrag vorschlagen.`,
+                detail: `Zur Prüfung eingereicht (Vorschlag !${outcome.iid}). Sobald das Katalog-Team das Paket angenommen hat, schlägst du unter „In Arbeit“ den Katalog-Eintrag vor.`,
                 mrUrl: outcome.url,
                 preview,
                 // Read for the guard anyway; the page shows from it whether the catalogue team took a version out.
@@ -476,6 +476,12 @@ export async function exportAction(
         }
         throw error
     }
+}
+
+/** " (!12)" for a proposal's number, or nothing when its address names none. */
+function proposalRef(mrUrl: string | undefined): string {
+    const ref = mergeRequestRef(mrUrl)
+    return ref ? ` (${ref})` : ''
 }
 
 /** "1.0.3" after "1.0.2": the version to suggest instead of one that is used up. */
@@ -537,11 +543,7 @@ async function proposeCatalog(
     requestedBy: string,
 ): Promise<ExportActionResult> {
     if (!config.catalog) {
-        return {
-            intent: 'catalog',
-            status: 'unconfigured',
-            detail: 'Kein Katalog-Repository bekannt (REPO_LIST_URL oder CATALOG_REPO_URL).',
-        }
+        return { intent: 'catalog', status: 'unconfigured', detail: CATALOG_NOT_SET_UP }
     }
     const { status: bundle, manifestRaw } = await inspectBundle(
         clientFor(target.url, token),
@@ -556,17 +558,18 @@ async function proposeCatalog(
             status: 'not-merged',
             detail:
                 bundle.state === 'mr-open'
-                    ? 'Der Bundle-Merge-Request ist noch offen. Der Katalog-Eintrag kann erst auf den gemergten Stand zeigen.'
-                    : (bundle.detail ?? `Auf ${target.baseBranch} liegt noch kein Paket ${slug} ${version}.`),
+                    ? 'Das Paket ist noch in Prüfung. Der Katalog-Eintrag kann erst auf das angenommene Paket zeigen.'
+                    : sentenceOf(bundle.detail ?? `Im Ablageort liegt noch kein angenommenes Paket „${slug}“ in Version ${version}`),
             bundle,
         }
     }
     // A version someone asked to take out again is not listed meanwhile: the reviewers decide on the removal first.
     if (bundle.removal?.state === 'opened') {
+        const removal = mergeRequestRef(bundle.removal.mrUrl)
         return {
             intent: 'catalog',
             status: 'not-merged',
-            detail: `Für diese Version ist das Entfernen aus dem Repository vorgeschlagen (${mergeRequestRef(bundle.removal.mrUrl) ?? 'Merge Request'}). Einen Katalog-Eintrag gibt es erst, wenn die Prüfenden das Entfernen ablehnen.`,
+            detail: `Für diese Version ist das Entfernen vorgeschlagen (${removal ? `Vorschlag ${removal}` : 'Vorschlag bei GitLab'}). Einen Katalog-Eintrag gibt es erst, wenn das Katalog-Team das Entfernen ablehnt.`,
             mrUrl: bundle.removal.mrUrl,
             bundle,
         }
@@ -575,7 +578,7 @@ async function proposeCatalog(
         return {
             intent: 'catalog',
             status: 'invalid',
-            detail: verificationRefusal(bundle.verification, target.baseBranch),
+            detail: verificationRefusal(bundle.verification),
             bundle,
         }
     }
@@ -608,14 +611,14 @@ async function proposeCatalog(
 
     const indexRaw = catalogue.index
     if (!indexRaw) {
-        return { intent: 'catalog', status: 'error', detail: `index.json fehlt auf ${config.catalog.baseBranch} in ${config.catalog.url}.` }
+        return { intent: 'catalog', status: 'error', detail: 'Der Katalog ist gerade nicht lesbar - sein Inhaltsverzeichnis fehlt. Bitte dem Betrieb melden.' }
     }
     const edit = applyCatalogEntry(indexRaw, buildCatalogEntry(input))
     if (edit.status === 'withdrawn') {
         return {
             intent: 'catalog',
             status: 'invalid',
-            detail: `Dieser Eintrag wurde aus dem Katalog zurückgezogen${edit.reason ? `: ${edit.reason}` : ''}. Ein erneutes Teilen macht ihn nicht wieder sichtbar, bitte die Katalog-Pflege ansprechen.`,
+            detail: `Dieser Eintrag wurde aus dem Katalog zurückgezogen${edit.reason ? `: ${edit.reason}` : ''}. Ein erneutes Teilen macht ihn nicht wieder sichtbar - bitte beim Katalog-Team nachfragen.`,
             bundle,
         }
     }
@@ -623,12 +626,12 @@ async function proposeCatalog(
         return {
             intent: 'catalog',
             status: 'invalid',
-            detail: `Die Adresse dieses Anwendungsfalls ist schon belegt: \`${edit.conflictingId}\` führt zur selben Katalogseite. Bitte mit einem anderen Paket-Slug neu teilen.`,
+            detail: 'Im Katalog ist diese Adresse schon belegt: ein anderer Eintrag führt zur selben Katalogseite. Bitte mit einem anderen Kurznamen eine neue Version teilen.',
             bundle,
         }
     }
     if (edit.status === 'unchanged') {
-        return { intent: 'catalog', status: 'unchanged', detail: 'Der Katalog listet dieses Paket bereits in dieser Version an diesem Commit.', bundle }
+        return { intent: 'catalog', status: 'unchanged', detail: 'Diese Version steht schon im Katalog.', bundle }
     }
     const outcome = await openMergeRequest(catalogClient, {
         upstream: catalogProject,
@@ -652,25 +655,25 @@ async function proposeCatalog(
         existingPaths: new Set(['index.json']),
     })
     if (outcome.status === 'already-open') {
-        return { intent: 'catalog', status: 'already-open', detail: `Es liegt bereits ein offener Katalog-Merge-Request (!${outcome.iid}) vor.`, mrUrl: outcome.url, bundle }
+        return { intent: 'catalog', status: 'already-open', detail: `Für diese Version ist schon ein Katalog-Eintrag in Prüfung (Vorschlag !${outcome.iid}).`, mrUrl: outcome.url, bundle }
     }
     return {
         intent: 'catalog',
         status: 'ok',
-        detail: `Katalog-Merge-Request !${outcome.iid} erstellt. Nach dem Merge ist das Paket installierbar.`,
+        detail: `Katalog-Eintrag vorgeschlagen (Vorschlag !${outcome.iid}). Sobald das Katalog-Team ihn annimmt, steht der Anwendungsfall im Katalog und lässt sich installieren.`,
         mrUrl: outcome.url,
         bundle,
     }
 }
 
-function verificationRefusal(verification: BundleVerification | undefined, baseBranch: string): string {
+function verificationRefusal(verification: BundleVerification | undefined): string {
     switch (verification?.state) {
         case 'changed-after-merge':
-            return `Kein Katalog-Eintrag: Das Paket auf ${baseBranch} weicht vom gemergten Merge Request ab, jemand hat es danach geändert. Bitte die Änderung prüfen oder neu teilen.`
+            return 'Kein Katalog-Eintrag: Das Paket im Ablageort weicht vom angenommenen Vorschlag ab, jemand hat es danach geändert. Bitte die Änderung ansehen oder eine neue Version teilen.'
         case 'unverifiable':
-            return 'Kein Katalog-Eintrag: Der Stand des gemergten Merge Requests ist in GitLab nicht mehr lesbar, der Inhalt lässt sich nicht prüfen.'
+            return 'Kein Katalog-Eintrag: Der angenommene Vorschlag ist in GitLab nicht mehr lesbar, der Inhalt lässt sich nicht prüfen.'
         default:
-            return `Kein Katalog-Eintrag: Für dieses Paket gibt es keinen gemergten Export-Merge-Request, gegen den sich der Inhalt auf ${baseBranch} prüfen ließe.`
+            return 'Kein Katalog-Eintrag: Für dieses Paket gibt es keinen angenommenen Vorschlag dieses Marktplatzes, gegen den sich der Inhalt im Ablageort prüfen ließe.'
     }
 }
 
@@ -685,7 +688,7 @@ export interface SharedPackageRow {
     displayName: string
     /** The version's open merge request, else its merged one, else its newest. */
     bundleMr: { url: string; state: string }
-    /** Closed through "Löschen", as the marketplace's withdrawal note on it says: taken back, not turned down. */
+    /** Closed through "Zurückziehen", as the marketplace's withdrawal note on it says: taken back, not turned down. */
     withdrawn?: boolean
     /** Read for a merged bundle only; with the version's removal, if one was proposed. */
     bundle?: BundleStatus
@@ -789,7 +792,7 @@ async function sharedRowsOf(
     // Newest first, so a branch's first request is the newest. The bot names
     // the export branches, so its own requests are all there are from them:
     // asking GitLab once more per branch would add nothing. The same holds for
-    // the removals "Löschen" proposes, which belong to the row of their version.
+    // the removals "Zurückziehen" proposes, which belong to the row of their version.
     const byBranch = new Map<string, MergeRequestRef[]>()
     const removals = new Map<string, MergeRequestRef>()
     for (const mr of requests) {
@@ -912,10 +915,10 @@ export async function proposeSharedCatalogEntry(
     const config = exportConfig()
     const target = config.targets.find((candidate) => candidate.key === targetKey)
     if (exportReadiness(config) !== 'ready' || !target) {
-        return { intent: 'catalog', status: 'unconfigured', detail: 'Zielrepository oder GitLab-Zugang ist nicht konfiguriert.' }
+        return { intent: 'catalog', status: 'unconfigured', detail: SHARING_NOT_SET_UP }
     }
     if (!SLUG.test(slug) || !VERSION.test(version)) {
-        return { intent: 'catalog', status: 'invalid', detail: 'Ungültiger Paket-Slug oder ungültige Version.' }
+        return { intent: 'catalog', status: 'invalid', detail: 'Ungültiger Kurzname oder ungültige Version.' }
     }
     try {
         return await proposeCatalog(config, target, config.token as string, slug, version, undefined, requestedBy)
@@ -925,27 +928,33 @@ export async function proposeSharedCatalogEntry(
     }
 }
 
-/** The target a deletion acts in, or why there is none. Arguments are checked again: a server action answers any caller. */
+/** The target a withdrawal acts in, or why there is none. Arguments are checked again: a server action answers any caller. */
 function deletionTarget(targetKey: string, slug: string, version: string): { config: ExportConfig; target: ExportTarget; token: string } | DeletionResult {
     const config = exportConfig()
     const target = config.targets.find((candidate) => candidate.key === targetKey)
     if (exportReadiness(config) !== 'ready' || !target) {
-        return { status: 'unconfigured', detail: 'Zielrepository oder GitLab-Zugang ist nicht konfiguriert.' }
+        return { status: 'unconfigured', detail: SHARING_NOT_SET_UP }
     }
-    if (!SLUG.test(slug) || !VERSION.test(version)) return { status: 'invalid', detail: 'Ungültiger Paket-Slug oder ungültige Version.' }
+    if (!SLUG.test(slug) || !VERSION.test(version)) return { status: 'invalid', detail: 'Ungültiger Kurzname oder ungültige Version.' }
     return { config, target, token: config.token as string }
 }
 
 /**
- * What "Löschen" would do to one shared version now, for the dialog to show
- * before anything happens (see `share-deletion.ts`). Reads only.
+ * What "Zurückziehen" would do to one shared version now, for the dialog to
+ * show before anything happens (see `share-deletion.ts`): the plan of the
+ * default scope, and where the person has a choice, the other one. Reads only.
  */
-export async function planShareDeletion(targetKey: string, slug: string, version: string): Promise<{ plan?: DeletionPlan; error?: string }> {
+export async function planShareDeletion(
+    targetKey: string,
+    slug: string,
+    version: string,
+): Promise<{ plan?: DeletionPlan; alternative?: DeletionPlan; error?: string }> {
     const session = await requireSession()
     const resolved = deletionTarget(targetKey, slug, version)
     if ('status' in resolved) return { error: resolved.detail }
     try {
-        return { plan: (await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, proposerName(session.user))).plan }
+        const { plan, alternative } = await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, proposerName(session.user))
+        return { plan, ...(alternative ? { alternative } : {}) }
     } catch (error) {
         if (error instanceof GitLabError) return { error: gitlabMessage(error) }
         throw error
@@ -953,21 +962,36 @@ export async function planShareDeletion(targetKey: string, slug: string, version
 }
 
 /**
- * Deletes one shared version the way the confirmed plan said: GitLab is read
- * again, and the deletion runs only while that reading is still the plan with
- * `fingerprint`. Otherwise the new plan comes back, to be confirmed in turn.
+ * Withdraws one shared version the way the confirmed plan said: GitLab is
+ * read again for the chosen `scope`, and the withdrawal runs only while that
+ * reading is still the plan with `fingerprint`. Otherwise the new plan comes
+ * back, to be confirmed in turn - also when the choice itself is gone, say
+ * because the open proposal was closed meanwhile: the plan of the other
+ * reading has another fingerprint.
  */
-export async function deleteShare(targetKey: string, slug: string, version: string, fingerprint: string): Promise<DeletionResult> {
+export async function deleteShare(
+    targetKey: string,
+    slug: string,
+    version: string,
+    fingerprint: string,
+    scope: DeletionScope = 'proposal',
+): Promise<DeletionResult> {
     const session = await requireSession()
     const refusal = shareRefusal(await fetchShareRight())
     if (refusal) return { status: 'forbidden', detail: refusal }
+    if (!DELETION_SCOPES.includes(scope)) return { status: 'invalid', detail: 'Ungültige Auswahl.' }
     const resolved = deletionTarget(targetKey, slug, version)
     if ('status' in resolved) return resolved
     try {
         const requestedBy = proposerName(session.user)
-        const { plan, work } = await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, requestedBy)
+        const { plan, work, alternative } = await readDeletion(resolved.config, resolved.target, resolved.token, slug, version, requestedBy, scope)
         if (plan.fingerprint !== fingerprint) {
-            return { status: 'changed', detail: 'Bei GitLab hat sich der Stand gerade geändert. Bitte noch einmal ansehen, was Löschen jetzt bedeutet.', plan }
+            return {
+                status: 'changed',
+                detail: 'Bei GitLab hat sich der Stand gerade geändert. Bitte noch einmal ansehen, was Zurückziehen jetzt bedeutet.',
+                plan,
+                ...(alternative ? { alternative } : {}),
+            }
         }
         return await runDeletion(plan, work, requestedBy, gitlabMessage)
     } catch (error) {
@@ -976,24 +1000,35 @@ export async function deleteShare(targetKey: string, slug: string, version: stri
     }
 }
 
+/** Said where a catalogue step is asked for and the instance has no catalogue: one wording for every place. */
+const CATALOG_NOT_SET_UP = 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.'
+
+/** The same for sharing as a whole: no place to store packages, or no access to GitLab. */
+const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
+
 function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
     const first =
         bundle.state === 'mr-open'
-            ? 'Bundle-Merge-Request offen.'
+            ? 'Paket in Prüfung.'
             : bundle.state === 'on-base'
-              ? 'Paket liegt auf dem Basisbranch.'
-              : (bundle.detail ?? 'Noch kein Paket im Zielrepo.')
+              ? 'Paket angenommen.'
+              : sentenceOf(bundle.detail ?? 'Noch kein Paket im Ablageort.')
     const second =
         catalog.state === 'listed'
-            ? 'Im Katalog gelistet.'
+            ? 'Im Katalog.'
             : catalog.state === 'mr-open'
-              ? 'Katalog-Merge-Request offen.'
+              ? 'Katalog-Eintrag in Prüfung.'
               : catalog.state === 'unconfigured'
-                ? 'Katalog-Repo nicht konfiguriert.'
+                ? 'Katalog nicht eingerichtet.'
                 : catalog.state === 'withdrawn'
                   ? 'Aus dem Katalog genommen.'
                   : 'Noch nicht im Katalog.'
     return `${first} ${second}`
+}
+
+/** A status detail as a sentence of its own: the details end without a full stop, for use inside others. */
+function sentenceOf(text: string): string {
+    return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
 function gitlabMessage(error: GitLabError): string {
@@ -1001,11 +1036,11 @@ function gitlabMessage(error: GitLabError): string {
         case 0:
             return error.message
         case 401:
-            return 'GitLab lehnt den hinterlegten Token ab (401) — ungültig oder abgelaufen.'
+            return 'GitLab lehnt den hinterlegten Token ab (401) - ungültig oder abgelaufen.'
         case 403:
             return `GitLab verweigert die Aktion (403): ${error.message}`
         case 404:
-            return `GitLab: ${error.message} — bei privaten Projekten auch, wenn der Token dort keinen Zugriff hat.`
+            return `GitLab: ${error.message} - bei privaten Projekten auch, wenn der Token dort keinen Zugriff hat.`
         default:
             return `GitLab-Fehler (${error.status}): ${error.message}`
     }
@@ -1057,7 +1092,7 @@ function mapArtifacts(snapshot: InstanceSnapshot): InventoryArtifact[] {
             name: layer.title ?? layer.layerName,
             group: 'map',
             depth: 1,
-            detail: sink ? `zeigt Senke ${sink}` : 'ihre Senke gehört nicht zum Use Case, die Ebene wird nicht geteilt',
+            detail: sink ? `zeigt Senke ${sink}` : 'ihre Senke gehört nicht zum Datensatz, die Ebene wird nicht geteilt',
         })
         for (const id of [layer.defaultStyleId, ...layer.alternativeStyleIds]) {
             const style = id ? styles.get(id) : undefined

@@ -407,11 +407,11 @@ export function isSafeDatasetId(datasetId: string): boolean {
 
 export async function readUseCase(accessToken: string, datasetId: string): Promise<InstanceSnapshot> {
     if (!isSafeDatasetId(datasetId)) {
-        throw new PortalReadError(`Ungültige Dataset-Kennung: ${datasetId}`, 400)
+        throw new PortalReadError(`Ungültige Datensatz-Kennung: ${datasetId}`, 400)
     }
     const warnings: string[] = []
     const dataset = await getJson<Record<string, unknown>>(accessToken, `/v1/datasets/${datasetId}`)
-    if (!dataset) throw new PortalReadError(`Dataset ${datasetId} nicht gefunden`, 404)
+    if (!dataset) throw new PortalReadError(`Datensatz ${datasetId} nicht gefunden`, 404)
 
     // Pipelines: the list carries summaries, the full model comes per pipeline.
     const pipelinePage = await getJson<Page<Record<string, unknown>>>(
@@ -475,7 +475,7 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
     for (const sourceId of sourceIds) {
         const dto = await getJson<Record<string, unknown>>(accessToken, `/v1/datasources/${sourceId}`)
         if (!dto) {
-            warnings.push(`Datenquelle ${sourceId} ist verlinkt, aber nicht lesbar — ausgelassen`)
+            warnings.push(`Datenquelle ${sourceId} ist verlinkt, aber nicht lesbar - ausgelassen`)
             continue
         }
         const summary = versionSummary(dto.dataStructureVersion)
@@ -544,7 +544,7 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
             `/v1/datasets/${datasetId}/mappings?urn=${encodeURIComponent(urn)}`,
         )
         if (!document) {
-            warnings.push(`Mapping ${urn} ist referenziert, aber nicht lesbar — ausgelassen`)
+            warnings.push(`Mapping ${urn} ist referenziert, aber nicht lesbar - ausgelassen`)
             continue
         }
         mappings.push({ urn: logicalUrn(urn), document })

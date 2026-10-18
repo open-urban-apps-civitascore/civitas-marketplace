@@ -129,17 +129,18 @@ function SharedRow({
                 <Chip label={`Paket: ${row.withdrawn ? 'zurückgezogen' : mergeRequestStateLabel(row.bundleMr.state)}`} url={row.bundleMr.url} />
                 {row.bundle?.removal && <Chip label={`Entfernen: ${mergeRequestStateLabel(row.bundle.removal.state)}`} url={row.bundle.removal.mrUrl} />}
                 {row.bundle && row.bundle.state !== 'on-base' && (
-                    <Chip label={`Prüfung: ${row.bundle.detail ?? 'nicht auf dem Basisbranch'}`} />
+                    <Chip label={`Stand: ${row.bundle.detail ?? 'nicht im Ablageort'}`} />
                 )}
                 {verification && (
                     <Chip
-                        label={`Prüfung: ${verificationLabel(verification)}`}
+                        label={`Stand: ${verificationLabel(verification)}`}
                         tone={verification.state === 'verified' ? 'ok' : 'warn'}
                     />
                 )}
                 {row.catalog && (
+                    // The state names the catalogue itself ("noch nicht im Katalog"), so it needs no "Katalog:" before it.
                     <Chip
-                        label={`Katalog: ${catalogStateLabel(row.catalog.state)}`}
+                        label={upperFirst(catalogStateLabel(row.catalog.state))}
                         url={row.catalog.mrUrl}
                         tone={row.catalog.state === 'listed' ? 'ok' : undefined}
                     />
@@ -153,11 +154,15 @@ function SharedRow({
             </div>
 
             {/* The rest of the list is fine; only this package's state is unknown for now. */}
-            {row.problem && <InlineNotice tone="error">Stand nicht vollständig geprüft: {row.problem}</InlineNotice>}
+            {row.problem && <InlineNotice tone="error">Der Stand ließ sich nicht lesen: {row.problem}</InlineNotice>}
 
             {outcome && <ProposalOutcome result={outcome} />}
         </li>
     )
+}
+
+function upperFirst(text: string): string {
+    return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 function Chip({ label, url, tone }: { label: string; url?: string; tone?: 'ok' | 'warn' }) {

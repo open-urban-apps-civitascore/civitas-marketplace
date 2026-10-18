@@ -112,8 +112,8 @@ export default async function MarketplacePage() {
                 <div className="max-w-2xl">
                     <p className="text-base font-semibold text-foreground">Eigene Lösung teilen</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Läuft bei Ihnen etwas, das anderen Kommunen helfen würde? Zugangsdaten und gespeicherte Daten
-                        bleiben beim Teilen bei Ihnen.
+                        Läuft bei Ihnen ein Anwendungsfall, der anderen Kommunen helfen würde? Geteilt wird der Aufbau -
+                        Zugangsdaten und gespeicherte Daten bleiben bei Ihnen.
                     </p>
                 </div>
                 <Link href="/export" className={`${buttonClass('primary')} h-10 shrink-0 px-4`}>
