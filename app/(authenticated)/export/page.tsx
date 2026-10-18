@@ -46,7 +46,7 @@ export default async function ExportPage() {
         listExportInstallations(accessToken), getCatalogSummaries('usecase'),
     ])
     const sources = exportSources(datasets,
-        installations.status === 'fulfilled' ? installations.value : [],
+        installations.status === 'fulfilled' ? installations.value : undefined,
         catalog.status === 'fulfilled' ? catalog.value : [])
 
     return (
@@ -94,7 +94,7 @@ export default async function ExportPage() {
             ) : (
                 <ExportPanel
                     sources={sources}
-                    sourceNotice={installations.status === 'rejected' || catalog.status === 'rejected' ? 'Katalogzuordnungen konnten nicht vollständig geladen werden. Du kannst lokale Use Cases trotzdem teilen.' : undefined}
+                    sourceNotice={installations.status === 'rejected' || catalog.status === 'rejected' ? 'Katalogzuordnungen konnten nicht vollständig geladen werden. Teilen geht trotzdem - nur ohne vorbelegte Angaben aus dem Katalog.' : undefined}
                     targets={config.targets}
                     readiness={readiness}
                     mayShare={mayShare}

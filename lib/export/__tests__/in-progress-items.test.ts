@@ -8,7 +8,7 @@ const draft = (datasetId: string): ShareDraft => ({
     datasetId,
     datasetName: datasetId,
     savedAt: '2026-10-17T10:00:00.000Z',
-    step: 3,
+    step: 2,
     basics: {},
     metadata: { fields: {}, themes: [], media: [] },
     targetKey: 't',
