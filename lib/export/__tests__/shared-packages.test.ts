@@ -136,6 +136,8 @@ describe('readShareListing', () => {
         expect(current.displayName).toBe('Bäume')
         expect(current.bundle).toMatchObject({ state: 'on-base', sha: HEAD, packageId: 'urn:stadt:usecase:baeume', verification: { state: 'verified' } })
         expect(current.catalog).toEqual({ state: 'mr-open', mrUrl: `${WEB}/-/merge_requests/9` })
+        // Where a change after the review would show, built without asking GitLab.
+        expect(current.folderUrl).toBe(`${WEB}/-/commits/main/packages/baeume`)
         // The base branch carries 1.1.0, so the older version is no longer there.
         expect(older.bundle?.state).toBe('none')
         expect(older.bundle?.detail).toContain('1.1.0')
@@ -208,7 +210,7 @@ describe('readShareListing', () => {
         const current = rows.find((row) => row.version === '1.1.0')
         expect(current?.catalog).toEqual({ state: 'withdrawn', takenOut: { version: '1.1.0' } })
         expect(rowProgress(current!)).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen' })
-        expect(inProgressItems([], new Set(), rows)).toEqual([])
+        expect(inProgressItems([], new Set(), shareTabs(rows).inProgress)).toEqual([])
         // The bot's requests on the catalogue are the ones the target already read: same project, same visit.
         expect(count(gitlab.calls, 'author_id=42')).toBe(1)
         expect(count(gitlab.calls, '/user')).toBe(1)
@@ -220,7 +222,7 @@ describe('readShareListing', () => {
         const { rows } = await readShareListing()
         const current = rows.find((row) => row.version === '1.1.0')
         expect(current?.catalog).toEqual({ state: 'mr-open', mrUrl: `${WEB}/-/merge_requests/9`, takenOut: { version: '1.1.0' }, bringsBack: true })
-        const [item] = inProgressItems([], new Set(), rows)
+        const [item] = inProgressItems([], new Set(), shareTabs(rows).inProgress)
         expect(item).toMatchObject({ kind: 'shared', key: current?.key, progress: { turn: 'you', active: 'listing' } })
     })
 

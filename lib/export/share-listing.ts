@@ -105,6 +105,11 @@ export interface SharedPackageRow {
     /** Why the state could not be read completely; the row then shows its merge request only. */
     problem?: string
     /**
+     * The package folder's history on the base branch at GitLab: where a change
+     * made after the review shows („Änderung ansehen“). Absent on a row built by hand.
+     */
+    folderUrl?: string
+    /**
      * Where the share came from: the source line of the version's merge
      * request, or for an older share its package README at that request's
      * last commit. Absent when neither says.
@@ -268,6 +273,7 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         version: version.version,
         displayName: displayNameOf(mr.title, version.version) ?? version.slug,
         bundleMr: { url: mr.web_url, state: mr.state },
+        folderUrl: folderHistoryUrl(target, version.slug),
         // Closed by the account, which is also used by hand: withdrawn only with the marketplace's note.
         ...(mr.state === 'closed' && own?.withdrawnBy ? { withdrawn: true } : {}),
         ...state,
@@ -275,6 +281,12 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         ...(proposerOf(mr.description) ? { proposedBy: proposerOf(mr.description) } : {}),
         proposals,
     }
+}
+
+/** The commits that touched a package's folder on the base branch, at GitLab: built from what is known, no call. */
+function folderHistoryUrl(target: ExportTarget, slug: string): string {
+    const encoded = (path: string) => path.split('/').map(encodeURIComponent).join('/')
+    return `${target.url.replace(/\/+$/, '')}/-/commits/${encoded(target.baseBranch)}/${encoded(packageDir(target, slug))}`
 }
 
 /** The id of the same package in the version that took this one's place on the base branch, if it is the same package. */

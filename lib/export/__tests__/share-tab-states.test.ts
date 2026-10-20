@@ -19,7 +19,7 @@ import { endedLine } from '@/lib/export/ended-lines'
 import type { ShareDraft } from '@/lib/export/share-drafts'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
 import { LISTING_HIDDEN_BECAUSE } from '@/lib/export/share-permission'
-import type { EndedEntry } from '@/lib/export/share-tabs'
+import { shareTabs, type EndedEntry } from '@/lib/export/share-tabs'
 
 /** What a reader meets: the text, without markup. */
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -87,14 +87,14 @@ describe('the list „In Arbeit“', () => {
     })
 
     it('offers no way on for a started share whose dataset is gone', () => {
-        const html = list({ drafts: [draft(2)], datasetIds: ['other'] })
+        const html = list({ drafts: [draft(2)], datasets: [{ id: 'other', name: 'Andere' }] })
         expect(text(html)).toContain('Der Datensatz „Bäume“ ist auf dieser Instanz nicht mehr da.')
         expect(html).not.toContain('/export/new')
     })
 
     it('lists every row, with no cut-off and none of the links to the pages the tabs replace', () => {
         const rows = Array.from({ length: 5 }, (_, index) => ({ ...inReview, key: `${inReview.key}-${index}`, displayName: `Regen ${index}` }))
-        const html = list({ drafts: [draft(2)], rows })
+        const html = list({ drafts: [draft(2)], rows: shareTabs(rows).inProgress })
         for (let index = 0; index < 5; index++) expect(text(html)).toContain(`Regen ${index}`)
         expect(html).toContain(`href="${WEB}/7"`)
         expect(text(html)).not.toMatch(/Alle \d+ anzeigen|Weniger anzeigen|Geteilte Pakete|Alle geteilten Pakete/)

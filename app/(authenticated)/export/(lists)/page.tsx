@@ -20,14 +20,15 @@ export default async function InProgressPage() {
     const right = readiness === 'ready' ? await fetchShareRight() : undefined
     const canList = readiness === 'ready' && right === 'allowed'
 
-    // Only to tell a started share whose dataset is gone; unread, every started share can go on.
+    // To tell a started share whose dataset is gone, and to name the dataset a share came from; unread,
+    // every started share can go on and the rows name no dataset.
     // The token outside the try block: a missing one redirects to the login by throwing, which must not be swallowed.
     const accessToken = await getAccessToken()
-    let datasetIds: string[] | undefined
+    let datasets: { id: string; name: string }[] | undefined
     try {
-        datasetIds = (await listDatasets(accessToken)).map((dataset) => dataset.id)
+        datasets = (await listDatasets(accessToken)).map(({ id, name }) => ({ id, name }))
     } catch {
-        datasetIds = undefined
+        datasets = undefined
     }
 
     return (
@@ -37,7 +38,7 @@ export default async function InProgressPage() {
             {canList && !config.catalog && (
                 <Notice tone="neutral">Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.</Notice>
             )}
-            <InProgressTab enabled={canList} datasetIds={datasetIds} />
+            <InProgressTab enabled={canList} datasets={datasets} />
         </ShareTabFrame>
     )
 }

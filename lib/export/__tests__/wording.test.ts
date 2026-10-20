@@ -146,6 +146,10 @@ describe('the share pages’ wording', () => {
                 'components/layout/app-sidebar.tsx',
                 'lib/export/ended-lines.ts',
                 'lib/export/wizard-address.ts',
+                'components/export/in-progress.tsx',
+                'components/export/share-row.tsx',
+                'components/export/share-track.tsx',
+                'lib/export/in-progress-items.ts',
             ]),
         )
         expect(texts.filter((text) => languageOf(text.text) === 'german').length).toBeGreaterThan(300)
@@ -162,6 +166,11 @@ describe('the share pages’ wording', () => {
             'Was diese Instanz teilt',
             'Veröffentlicht',
             'Beendet',
+            'Weitermachen',
+            'Neue Version teilen',
+            'Katalog-Eintrag vorschlagen',
+            'Erneut versuchen',
+            'Änderung ansehen',
         ]) {
             expect(texts.some((text) => text.text === label)).toBe(true)
         }

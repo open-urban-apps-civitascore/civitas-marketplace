@@ -1,5 +1,6 @@
 import { ShareListingProvider } from '@/components/export/share-listing-provider'
 import { draftOwnerOf } from '@/lib/export/share-drafts'
+import { proposerName } from '@/lib/export/share-permission'
 import { requireSession } from '@/lib/session'
 
 /**
@@ -15,8 +16,10 @@ import { requireSession } from '@/lib/session'
 export default async function ShareLayout({ children }: { children: React.ReactNode }) {
     const session = await requireSession()
     return (
-        // The display name, as proposals are made for it: "du bist dran" only for one's own (plan, section 4).
-        <ShareListingProvider person={session.user?.name?.trim() || undefined} draftOwner={draftOwnerOf(session.user)}>
+        // The name proposals are made for, as the withdrawal dialog compares it: "du bist dran" only for one's own
+        // (plan, section 4). Without a display name that is „unbekannt“, never anyone's name, so a colleague's row
+        // still says whose move it is.
+        <ShareListingProvider person={proposerName(session.user)} draftOwner={draftOwnerOf(session.user)}>
             {children}
         </ShareListingProvider>
     )
