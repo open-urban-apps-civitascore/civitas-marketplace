@@ -123,6 +123,18 @@ export function exportConfig(env: EnvLike = process.env): ExportConfig {
     }
 }
 
+/**
+ * How this instance names itself in what it shares: the portal's address
+ * (`PORTAL_URL`), as the package README has always said it ("instance …").
+ * Proposals carry it in their source line, so the share pages can tell this
+ * instance's shares from those of the others using the same GitLab account
+ * (demo, dev and local share one). Undefined when it is not set: then
+ * nothing is claimed, and nothing can be told apart either.
+ */
+export function thisInstance(env: EnvLike = process.env): string | undefined {
+    return env.PORTAL_URL?.trim().replace(/\/+$/, '') || undefined
+}
+
 export type ExportReadiness = 'ready' | 'missing-targets' | 'missing-token'
 
 /** Composing and previewing always works; opening merge requests needs targets and a token. */

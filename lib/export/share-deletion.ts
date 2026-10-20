@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { isListed } from '@/lib/export/catalog-entry'
-import { bundleBranch, catalogBranch, packageDir, removalBranch, type CatalogRepo, type ExportConfig, type ExportTarget } from '@/lib/export/config'
+import { bundleBranch, catalogBranch, packageDir, removalBranch, thisInstance, type CatalogRepo, type ExportConfig, type ExportTarget } from '@/lib/export/config'
 import {
     branchHead,
     clientFor,
@@ -19,7 +19,7 @@ import {
     type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
-import { displayNameOf, proposerOf } from '@/lib/export/merge-request-text'
+import { displayNameOf, proposedByOther, proposerOf, shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/status'
@@ -128,6 +128,8 @@ export interface DeletionWork {
         existing: Set<string>
         /** Whether a catalogue was there to ask: without one, nobody knows whether the version is listed somewhere. */
         catalogueChecked: boolean
+        /** The dataset the version was shared from, as its proposals name it; undefined for older shares. */
+        datasetId?: string
     }
 }
 
@@ -249,7 +251,7 @@ export async function readDeletion(
     ])
     const ours = (mr: MergeRequestRef) => mr.author?.id === bot.id
     const proposedBy = proposerOf(requests.find(ours)?.description)
-    const byOther = Boolean(proposedBy && proposedBy.trim().toLowerCase() !== requestedBy.trim().toLowerCase())
+    const byOther = proposedByOther(proposedBy, requestedBy)
 
     const closes: DeletionWork['closes'] = []
     const shown = () => closes.map((step) => ({ what: step.what, ref: ref(step.mr), url: step.mr.web_url }))
@@ -352,6 +354,8 @@ export async function readDeletion(
                 deleted,
                 existing: new Set(now.keys()),
                 catalogueChecked: Boolean(config.catalog),
+                // From the proposals only: the README of an older share is not read for a line nobody shows.
+                ...datasetOf(requests.filter(ours)),
             },
         },
         // Any change to the folder since, on the base branch or before the merge, makes it another plan.
@@ -360,6 +364,12 @@ export async function readDeletion(
     if (!choice) return removing
     const keeping = planned({ kind: 'withdraw', closes: shown(), accepted: true, scope: 'proposal' })
     return scope === 'version' ? { ...removing, alternative: keeping.plan } : { ...keeping, alternative: removing.plan }
+}
+
+/** The dataset the newest of `requests` that names one was shared from. */
+function datasetOf(requests: MergeRequestRef[]): { datasetId?: string } {
+    const datasetId = requests.map((mr) => shareSourceOf(mr.description)?.id).find(Boolean)
+    return datasetId ? { datasetId } : {}
 }
 
 function withdrawalNote(what: 'bundle' | 'catalog', plan: DeletionPlan, requestedBy: string): string {
@@ -396,6 +406,8 @@ function removalBody(removal: NonNullable<DeletionWork['removal']>, plan: Deleti
         '',
         '---',
         `Branch \`${removalBranch(removal.slug, removal.version)}\` · proposed via "Zurückziehen" in the marketplace's "In Arbeit"`,
+        '',
+        shareSourceLine({ kind: 'dataset', id: removal.datasetId, instance: thisInstance() }),
     ].join('\n')
 }
 

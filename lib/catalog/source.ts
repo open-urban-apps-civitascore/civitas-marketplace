@@ -7,6 +7,7 @@ import {
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import { fetchCatalogEntry } from '@/lib/catalog/bundle'
 import {
+    expireRepoListIfOlder,
     findRepoListSummary,
     getRepoListAddons,
     getRepoListMeta,
@@ -61,6 +62,24 @@ function mockSummaries(type: 'usecase' | 'datastructure'): CatalogSummary[] {
     return mockPackages
         .filter((pkg) => pkg.manifest.type === type)
         .map((pkg) => mockSummary(pkg.manifest))
+}
+
+/**
+ * Tells the catalogue that `indexJson`, its own index read elsewhere (the
+ * share pages read it from GitLab), may be newer than what the catalogue
+ * pages have cached; see `expireRepoListIfOlder`. Never in mock mode: the
+ * fixtures are the catalogue there, and no index read anywhere replaces
+ * them. True when the cached copy was marked for a new fetch.
+ */
+export function expireCatalogIfOlder(indexJson: string): boolean {
+    if (isMockCatalog()) return false
+    let seen: unknown
+    try {
+        seen = JSON.parse(indexJson)
+    } catch {
+        return false
+    }
+    return seen !== null && typeof seen === 'object' ? expireRepoListIfOlder(seen as { version?: unknown; updatedAt?: unknown }) : false
 }
 
 /** Catalogue rows of one type, for the listing pages. */

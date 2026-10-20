@@ -4,7 +4,8 @@ import { useCallback, useState } from 'react'
 
 import { ExternalAnchor } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
-import { proposeSharedCatalogEntry, type ExportActionResult, type SharedPackageRow } from '@/lib/export-actions'
+import { proposeSharedCatalogEntry, type ExportActionResult } from '@/lib/export-actions'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { resultTone } from '@/lib/export/result-tone'
 
 /**

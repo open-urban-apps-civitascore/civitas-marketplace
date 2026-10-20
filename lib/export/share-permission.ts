@@ -20,8 +20,9 @@ export function mayShare(me: unknown): boolean {
 /** 'unknown' when the platform cannot be asked; the bot then proposes nothing either. */
 export type ShareRight = 'allowed' | 'refused' | 'unknown'
 
-export async function fetchShareRight(): Promise<ShareRight> {
-    const me = await fetchMe()
+/** `accessToken` for a route handler, which checks the session without a redirect; pages and actions leave it out. */
+export async function fetchShareRight(accessToken?: string): Promise<ShareRight> {
+    const me = await fetchMe(accessToken)
     if (me === undefined) return 'unknown'
     return mayShare(me) ? 'allowed' : 'refused'
 }
@@ -38,6 +39,17 @@ export function shareRefusal(right: ShareRight): string | undefined {
         return 'Deine Berechtigung zum Teilen konnte nicht geprüft werden, weil das Portal-Backend nicht antwortet. Die Vorschau funktioniert trotzdem.'
     }
     return undefined
+}
+
+/**
+ * Why what was submitted stays hidden from this person, in the words of the
+ * pages that list it (and of `GET /api/shares`). The share page's refusal
+ * texts end with a remark about its preview, which those do not have.
+ */
+export const LISTING_HIDDEN_BECAUSE: Record<Exclude<ShareRight, 'allowed'>, string> = {
+    refused:
+        'Was eingereicht ist, sehen nur Personen, die auf dieser Instanz Datenstrukturen anlegen und Datensätze bearbeiten dürfen, zum Beispiel Data Owner, Data Architect oder Data Steward.',
+    unknown: 'Deine Berechtigung konnte nicht geprüft werden, weil das Portal-Backend nicht antwortet. Bitte lade die Seite später neu.',
 }
 
 /**

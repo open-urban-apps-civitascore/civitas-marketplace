@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { parseCatalogAddon } from '@/lib/addon-catalog/listing'
 import {
+    expireRepoListIfOlder,
     findRepoListSummary,
     getRepoListAddons,
     getRepoListMeta,
@@ -345,5 +346,33 @@ describe('parseRepoListIndex', () => {
         expect(grafana.listing.install?.source).toMatchObject({ ref: shaB, releaseTag: 'v2.0-rc' })
         expect(nodered.listing.install).toBeUndefined()
         expect(nodered.missingForInstall.join(' ')).toMatch(/Commit-Pin/)
+    })
+})
+
+describe('expireRepoListIfOlder', () => {
+    it('makes the next read fetch again when a newer index was seen, and serves the old one if that fails', async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(VALID_INDEX)).mockRejectedValue(new Error('network down'))
+        vi.stubGlobal('fetch', fetchMock)
+        await getRepoListSummaries('usecase')
+
+        expect(expireRepoListIfOlder({ version: '3.0.1' })).toBe(true)
+        // Marked once: a second sighting before the next read changes nothing.
+        expect(expireRepoListIfOlder({ version: '3.0.2' })).toBe(false)
+        expect(await getRepoListSummaries('usecase')).toHaveLength(1)
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect((await getRepoListMeta()).stale).toBe(true)
+    })
+
+    it('counts a later updatedAt as newer, and nothing older, equal or unreadable', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(VALID_INDEX)))
+        await getRepoListSummaries('usecase')
+        for (const seen of [{ version: '3.0.0' }, { version: '2.9.9' }, { version: 'drei' }, {}, { updatedAt: '2026-08-28T00:00:00Z' }, { updatedAt: 'gestern' }]) {
+            expect(expireRepoListIfOlder(seen), JSON.stringify(seen)).toBe(false)
+        }
+        expect(expireRepoListIfOlder({ version: '3.0.0', updatedAt: '2026-08-30T00:00:00Z' })).toBe(true)
+    })
+
+    it('has nothing to do before anything was fetched', () => {
+        expect(expireRepoListIfOlder({ version: '9.9.9' })).toBe(false)
     })
 })

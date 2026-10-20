@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { SharedPackageRow } from '@/lib/export-actions'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { compactList, inProgressItems, isMine } from '@/lib/export/in-progress-items'
 import type { ShareDraft } from '@/lib/export/share-drafts'
 

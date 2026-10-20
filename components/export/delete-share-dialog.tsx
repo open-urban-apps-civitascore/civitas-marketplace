@@ -6,10 +6,11 @@ import { Trash2, Undo2, X } from 'lucide-react'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Notice, Pending, type NoticeTone } from '@/components/ui/notice'
-import { deleteShare, planShareDeletion, type SharedPackageRow } from '@/lib/export-actions'
+import { deleteShare, planShareDeletion } from '@/lib/export-actions'
 import type { InProgressItem } from '@/lib/export/in-progress-items'
 import { fileCount, type DeletionPlan, type DeletionScope } from '@/lib/export/share-deletion'
 import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 
 /** What a withdrawal tells the list it came from. */
 export interface DeletionDone {

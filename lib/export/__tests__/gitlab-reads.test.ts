@@ -5,6 +5,7 @@ import {
     directoryTrees,
     GitLabError,
     GitLabReadCache,
+    listMergeRequestsBy,
     listOpenMergeRequests,
     mergeRequestCommits,
     mergeRequestNotes,
@@ -132,5 +133,28 @@ describe('listOpenMergeRequests', () => {
         const open = await listOpenMergeRequests(clientFor('https://gitlab.example/group/packages', 'token', gitlab.fetchImpl), 7)
         expect(open).toHaveLength(103)
         expect(gitlab.urls.every((url) => url.includes('state=opened'))).toBe(true)
+    })
+})
+
+describe('listMergeRequestsBy', () => {
+    const pages = (sizes: number[]) =>
+        counting((url) => {
+            const page = Number(url.searchParams.get('page'))
+            const size = sizes[page - 1] ?? 0
+            return new Response(JSON.stringify(Array.from({ length: size }, (_, n) => ({ iid: page * 1000 + n, state: 'merged' }))), { status: 200 })
+        })
+
+    it('reads one author’s requests newest created first, 100 a page, and stops at three pages', async () => {
+        const gitlab = pages([100, 100, 100, 100])
+        const requests = await listMergeRequestsBy(clientFor('https://gitlab.example/group/packages', 'token', gitlab.fetchImpl), 7, 42)
+        expect(requests).toHaveLength(300)
+        expect(gitlab.urls).toEqual([1, 2, 3].map((page) => `/api/v4/projects/7/merge_requests?author_id=42&state=all&order_by=created_at&sort=desc&per_page=100&page=${page}`))
+    })
+
+    it('stops at the first page that is not full', async () => {
+        const gitlab = pages([100, 7])
+        const requests = await listMergeRequestsBy(clientFor('https://gitlab.example/group/packages', 'token', gitlab.fetchImpl), 7, 42)
+        expect(requests).toHaveLength(107)
+        expect(gitlab.urls).toHaveLength(2)
     })
 })

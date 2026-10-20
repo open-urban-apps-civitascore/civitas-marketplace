@@ -131,6 +131,8 @@ async function readTrees(
 export interface BundleInspection {
     status: BundleStatus
     manifestRaw?: string
+    /** For a package on the base branch: the newest merged request from its branch, whose description names its source. */
+    merged?: MergeRequestRef
 }
 
 /**
@@ -247,14 +249,16 @@ export async function inspectBundleIn(
         }
     }
 
-    if (context.verify === false) {
-        return { status: { state: 'on-base', sha: head, packageId: String(manifest.id), ...removal }, manifestRaw }
-    }
     const merged = requests.find((mr) => mr.state === 'merged')
+    const mergedRef = merged ? { merged } : {}
+    if (context.verify === false) {
+        return { status: { state: 'on-base', sha: head, packageId: String(manifest.id), ...removal }, manifestRaw, ...mergedRef }
+    }
     const verification = judgeBundle(merged, await readTrees(client, projectId, dir, context.treeOnBase, merged))
     return {
         status: { state: 'on-base', sha: head, packageId: String(manifest.id), verification, ...removal },
         manifestRaw,
+        ...mergedRef,
     }
 }
 
