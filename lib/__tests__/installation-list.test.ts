@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
     activeInstallationOf,
+    installationTitle,
     partitionInstallations,
     readAllInstallations,
+    recordsArtifactActions,
 } from '@/lib/installation-list'
 
 interface Row {
@@ -129,5 +131,64 @@ describe('activeInstallationOf', () => {
 
         expect(activeInstallationOf(installations, 'pkg')).toBeNull()
         expect(activeInstallationOf(installations, 'unknown')).toBeNull()
+    })
+})
+
+describe('installationTitle', () => {
+    const STRUCTURE =
+        'urn:core:standard:openurbanapps:datastructure:environment:baumkataster:hc1l880p1w'
+
+    it('names a use case after the dataset it installed', () => {
+        expect(
+            installationTitle({
+                id: 'installation',
+                packageId: 'urn:openurbanapps:usecase:verkehrszaehlung',
+                dataSetName: 'Verkehrszählung',
+                artifacts: [{ name: 'Zählstellen-Feed' }],
+            }),
+        ).toBe('Verkehrszählung')
+    })
+
+    it('names a structure after its one artifact, not after the package id', () => {
+        // The case that put the URN into the heading: a structure installs no dataset.
+        expect(
+            installationTitle({
+                id: 'installation',
+                packageId: STRUCTURE,
+                artifacts: [{ name: 'Baumkataster' }],
+            }),
+        ).toBe('Baumkataster')
+    })
+
+    it('falls back to the package id when no single artifact names the installation', () => {
+        const titleWith = (artifacts?: { name?: string }[]) =>
+            installationTitle({ id: 'installation', packageId: STRUCTURE, artifacts })
+
+        expect(titleWith([{ name: 'Baum' }, { name: 'Standort' }])).toBe(STRUCTURE)
+        expect(titleWith([{}])).toBe(STRUCTURE)
+        expect(titleWith([])).toBe(STRUCTURE)
+        expect(titleWith(undefined)).toBe(STRUCTURE)
+    })
+
+    it('never leaves the heading empty', () => {
+        expect(installationTitle({ id: 'installation', dataSetName: '' })).toBe('installation')
+    })
+})
+
+describe('recordsArtifactActions', () => {
+    it('is true when the platform says what the install did with each artifact', () => {
+        expect(recordsArtifactActions([{ action: 'CREATED' }, { action: 'REUSED' }])).toBe(true)
+    })
+
+    it('is false when the platform records no action', () => {
+        expect(recordsArtifactActions([{}, { action: null }])).toBe(false)
+    })
+
+    it('is true as soon as one artifact carries an action', () => {
+        expect(recordsArtifactActions([{}, { action: 'CREATED' }])).toBe(true)
+    })
+
+    it('is false for an installation without artifacts', () => {
+        expect(recordsArtifactActions([])).toBe(false)
     })
 })

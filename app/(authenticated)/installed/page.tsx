@@ -6,7 +6,12 @@ import { InstallationModal } from '@/components/installed/installation-modal'
 import { ReactivateDemoPanel } from '@/components/installed/reactivate-demo-panel'
 import { SimulatorPanel } from '@/components/installed/simulator-panel'
 import { UninstallButton } from '@/components/installed/uninstall-button'
-import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
+import {
+    installationTitle,
+    partitionInstallations,
+    readAllInstallations,
+    recordsArtifactActions,
+} from '@/lib/installation-list'
 import { loadInstallationView } from '@/lib/installation-view'
 import { getAccessToken, requireSession } from '@/lib/session'
 import { isSimulatorConfigured, listSimulations, type SimulationStatus } from '@/lib/simulator/client'
@@ -28,7 +33,8 @@ interface InstalledArtifactRow {
     urn?: string
     /** The identity the member carried inside the package it came from. */
     origin?: string
-    action: 'CREATED' | 'REUSED' | string
+    /** What the install did with it. Absent where the platform does not record it. */
+    action?: 'CREATED' | 'REUSED' | string
 }
 
 interface InstallationRow {
@@ -117,12 +123,14 @@ function InstallationCard({
     simulatorLive: boolean
     simulatorUiBase?: string
 }) {
+    const showsActions = recordsArtifactActions(installation.artifacts)
+
     return (
         <div className="overflow-hidden rounded-xl border bg-card">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b bg-muted/50 px-4 py-3">
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <span className="font-medium text-foreground">
-                        {installation.dataSetName ?? installation.packageId ?? NO_VALUE}
+                        {installationTitle(installation)}
                     </span>
                     {/* Packages the assistant generated carry their own id prefix (lib/assistant/usecase). */}
                     {installation.packageId?.startsWith('urn:openurbanapps:usecase:assistent-') && (
@@ -193,7 +201,7 @@ function InstallationCard({
                             <th className="px-4 py-2 font-medium">Typ</th>
                             <th className="px-4 py-2 font-medium">Name</th>
                             <th className="px-4 py-2 font-medium">URN</th>
-                            <th className="px-4 py-2 font-medium">Aktion</th>
+                            {showsActions && <th className="px-4 py-2 font-medium">Aktion</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -213,17 +221,23 @@ function InstallationCard({
                                         </span>
                                     )}
                                 </td>
-                                <td className="px-4 py-2">
-                                    <span
-                                        className={
-                                            artifact.action === 'CREATED'
-                                                ? 'rounded bg-success/10 dark:bg-success/20 px-1.5 py-0.5 text-xs text-success'
-                                                : 'rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
-                                        }
-                                    >
-                                        {ACTION_LABELS[artifact.action] ?? artifact.action}
-                                    </span>
-                                </td>
+                                {showsActions && (
+                                    <td className="px-4 py-2">
+                                        {artifact.action ? (
+                                            <span
+                                                className={
+                                                    artifact.action === 'CREATED'
+                                                        ? 'rounded bg-success/10 dark:bg-success/20 px-1.5 py-0.5 text-xs text-success'
+                                                        : 'rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
+                                                }
+                                            >
+                                                {ACTION_LABELS[artifact.action] ?? artifact.action}
+                                            </span>
+                                        ) : (
+                                            NO_VALUE
+                                        )}
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>

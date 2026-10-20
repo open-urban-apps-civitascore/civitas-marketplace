@@ -1,5 +1,5 @@
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
-import { readAllInstallations } from '@/lib/installation-list'
+import { installationTitle, readAllInstallations } from '@/lib/installation-list'
 import { installationMapHref, isMapPreviewConfigured, packageMapOf } from '@/lib/installation-map'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import type { ActiveInstallation } from '@/lib/installations'
@@ -22,7 +22,7 @@ interface InstallationRow {
     uninstalledAt?: string | null
     dataSetId?: string
     dataSetName?: string
-    artifacts?: { artifactType?: string }[]
+    artifacts?: { artifactType?: string; name?: string }[]
 }
 
 export interface InstallationView {
@@ -74,7 +74,7 @@ export async function loadInstallationView(installationId: string): Promise<Inst
 
     return {
         installation,
-        title: row.dataSetName ?? row.packageId ?? row.id,
+        title: installationTitle(row),
         ...(row.packageId ? { packageId: row.packageId } : {}),
         ...(row.packageVersion ? { packageVersion: row.packageVersion } : {}),
         generated: Boolean(row.packageId?.startsWith('urn:openurbanapps:usecase:assistent-')),
