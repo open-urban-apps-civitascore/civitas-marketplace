@@ -7,7 +7,7 @@ import {
     LayoutGrid,
     type LucideIcon,
     PackageCheck,
-    Share2,
+    PackagePlus,
     Sparkles,
 } from 'lucide-react'
 
@@ -20,6 +20,8 @@ interface NavItem {
     href: string
     icon: LucideIcon
     children?: { title: string; href: string }[]
+    /** Lit on every page below `href` too: one item for a section whose pages have their own navigation. */
+    matchPrefix?: boolean
 }
 
 interface NavSection {
@@ -44,13 +46,12 @@ const NAV_SECTIONS: NavSection[] = [
             },
             { title: 'Installiert', href: '/installed', icon: PackageCheck },
             {
+                // One item: the pages of "Teilen" have their own tab bar, and a second navigation for
+                // the same thing would be one too many (plan of 2026-10-18). PackagePlus means "contribute".
                 title: 'Teilen',
                 href: '/export',
-                icon: Share2,
-                children: [
-                    { title: 'Neu teilen', href: '/export' },
-                    { title: 'Geteilte Pakete', href: '/export/shared' },
-                ],
+                icon: PackagePlus,
+                matchPrefix: true,
             },
             { title: 'Assistent', href: '/assistent', icon: Sparkles },
         ],
@@ -60,6 +61,13 @@ const NAV_SECTIONS: NavSection[] = [
         items: [{ title: 'Dokumentation', href: '/docs', icon: FileQuestion }],
     },
 ]
+
+/** Whether a menu item is lit for the page at `pathname`: its own page, one of its children, or one below it. */
+export function isNavItemActive(item: Pick<NavItem, 'href' | 'children' | 'matchPrefix'>, pathname: string): boolean {
+    if (pathname === item.href) return true
+    if (item.matchPrefix && pathname.startsWith(`${item.href}/`)) return true
+    return item.children?.some((child) => pathname === child.href) ?? false
+}
 
 export function AppSidebar({
     userName,
@@ -105,14 +113,13 @@ export function AppSidebar({
                             {section.title}
                         </span>
                         {section.items.filter((item) => assistant || item.href !== '/assistent').map((item) => {
-                            const active =
-                                pathname === item.href ||
-                                item.children?.some((child) => pathname === child.href)
+                            const active = isNavItemActive(item, pathname)
 
                             return (
                                 <div key={item.title} className="flex flex-col">
                                     <Link
                                         href={item.href}
+                                        aria-current={active ? 'page' : undefined}
                                         className={cn(
                                             'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
                                             active

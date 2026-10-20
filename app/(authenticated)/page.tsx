@@ -1,13 +1,15 @@
 import Link from 'next/link'
-import { Share2 } from 'lucide-react'
+import { PackagePlus } from 'lucide-react'
 
 import { CatalogFreshness } from '@/components/catalog/catalog-freshness'
 import { CatalogHighlights } from '@/components/catalog/catalog-highlights'
 import { buttonClass } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/layout'
+import { NumberedSteps } from '@/components/ui/numbered-steps'
 import { listAddons } from '@/lib/addon-catalog'
 import { catalogPreview } from '@/lib/catalog/highlights'
 import { getCatalogMeta, getCatalogSummaries } from '@/lib/catalog/source'
+import { WIZARD_PATH } from '@/lib/export/wizard-address'
 import { requireSession } from '@/lib/session'
 import { catalogEntryHref } from '@/lib/use-case-catalog/path'
 
@@ -17,9 +19,8 @@ import { catalogEntryHref } from '@/lib/use-case-catalog/path'
  * four things, in this order: what you can do here (title), why (one
  * sentence), how it works (three steps), and what is in the catalogue.
  *
- * The steps are editorial type, not boxes: boxes forced equal heights onto
- * unequal text and left tiles half empty. A numbered sequence with a rule per
- * column cannot look half empty, because nothing in it is a container.
+ * The steps are editorial type, not boxes (`NumberedSteps`, shared with
+ * „So läuft Teilen ab“ on the share pages).
  *
  * The steps name what a reader meets later: the "Nachnutzen" button, the
  * demo-data choice in its dialog, the switch to their own data.
@@ -92,17 +93,7 @@ export default async function MarketplacePage() {
                 <h2 id="ablauf-heading" className="text-xl font-semibold text-foreground">
                     So funktioniert’s
                 </h2>
-                <ol className="mt-8 grid grid-cols-1 gap-x-10 gap-y-10 sm:grid-cols-3">
-                    {STEPS.map((step, position) => (
-                        <li key={step.title} className="border-t-2 border-primary/70 pt-5">
-                            <p aria-hidden className="text-sm font-semibold tabular-nums text-primary">
-                                {String(position + 1).padStart(2, '0')}
-                            </p>
-                            <h3 className="mt-3 text-lg font-semibold leading-snug text-foreground">{step.title}</h3>
-                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
-                        </li>
-                    ))}
-                </ol>
+                <NumberedSteps steps={STEPS} className="mt-8" />
             </section>
 
             <CatalogHighlights sections={sections} heading="Im Katalog" />
@@ -116,8 +107,9 @@ export default async function MarketplacePage() {
                         Zugangsdaten und gespeicherte Daten bleiben bei Ihnen.
                     </p>
                 </div>
-                <Link href="/export" className={`${buttonClass('primary')} h-10 shrink-0 px-4`}>
-                    <Share2 aria-hidden className="size-4" />
+                {/* Straight into the wizard; PackagePlus means "contribute" (design system §6). */}
+                <Link href={WIZARD_PATH} className={`${buttonClass('primary')} h-10 shrink-0 px-4`}>
+                    <PackagePlus aria-hidden className="size-4" />
                     Neu teilen
                 </Link>
             </section>

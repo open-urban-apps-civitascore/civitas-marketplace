@@ -56,14 +56,19 @@ export function useShareDraftActions(ownerTag: string | undefined) {
  * One person's drafts of the "Teilen" form, live: saving in the editor updates
  * the list on the first step, and another tab's save arrives too. The server
  * knows no drafts, so the first render shows none and the browser fills them in.
+ *
+ * `ready` is false until the browser was read: on the server and while the
+ * page hydrates. Whoever decides from the drafts - which step an address
+ * opens, whether "In Arbeit" is empty - waits for it, or a reload would
+ * start a fresh form before the saved one arrived.
  */
 export function useShareDrafts(ownerTag: string | undefined) {
-    // A string, so React can tell an unchanged list from a changed one by value.
-    const snapshot = useSyncExternalStore(
+    // A string, so React can tell an unchanged list from a changed one by value; null before the browser was read.
+    const snapshot = useSyncExternalStore<string | null>(
         subscribe,
         () => (ownerTag ? JSON.stringify(readDrafts(browserStorage(), ownerTag)) : '[]'),
-        () => '[]',
+        () => null,
     )
-    const drafts = useMemo(() => JSON.parse(snapshot) as ShareDraft[], [snapshot])
-    return { drafts, ...useShareDraftActions(ownerTag) }
+    const drafts = useMemo(() => (snapshot === null ? [] : (JSON.parse(snapshot) as ShareDraft[])), [snapshot])
+    return { drafts, ready: snapshot !== null, ...useShareDraftActions(ownerTag) }
 }

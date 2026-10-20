@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SharedPackageRow } from '@/lib/export/share-listing'
-import { compactList, inProgressItems, isMine } from '@/lib/export/in-progress-items'
+import { inProgressItems, isMine } from '@/lib/export/in-progress-items'
 import type { ShareDraft } from '@/lib/export/share-drafts'
 
 const draft = (datasetId: string): ShareDraft => ({
@@ -57,19 +57,5 @@ describe('inProgressItems', () => {
     it('marks a draft whose dataset is gone, and keeps it to be deleted', () => {
         const [item] = inProgressItems([draft('gone')], new Set(), [])
         expect(item).toMatchObject({ kind: 'draft', available: false })
-    })
-})
-
-describe('compactList', () => {
-    const items = ['a', 'b', 'c', 'd', 'e']
-    const mine = (item: string) => item === 'a' || item === 'e'
-
-    it('shows the first few and counts the rest, and how many of them are the person’s', () => {
-        expect(compactList(items, false, 3, mine)).toEqual({ shown: ['a', 'b', 'c'], more: 2, moreMine: 1 })
-    })
-
-    it('shows everything when asked to, or when it fits', () => {
-        expect(compactList(items, true, 3, mine)).toEqual({ shown: items, more: 0, moreMine: 0 })
-        expect(compactList(['a', 'b'], false, 3, mine)).toEqual({ shown: ['a', 'b'], more: 0, moreMine: 0 })
     })
 })

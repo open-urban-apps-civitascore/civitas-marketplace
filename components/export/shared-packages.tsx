@@ -1,72 +1,41 @@
 'use client'
 
-import Link from 'next/link'
-import { ExternalLink, GitMerge, RefreshCw } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 
-import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
-import { useSharedListing } from '@/components/export/use-shared-listing'
-import { Button } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/layout'
+import { useShareView } from '@/components/export/share-listing-provider'
+import { EmptyTab } from '@/components/export/share-tab-states'
 import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 
-import type { ExportActionResult } from '@/lib/export-actions'
-import type { SharedPackageRow } from '@/lib/export/share-listing'
-import { rowProgress } from '@/lib/export/in-progress-items'
 import { catalogStateLabel, mergeRequestStateLabel, verificationLabel } from '@/lib/export/labels'
 import { turnLabel } from '@/lib/export/share-stages'
+import type { TabRow } from '@/lib/export/share-tabs'
 
 /**
- * Everything shared through this marketplace, and where each package stands.
- * The catalogue step lives here too, one click per merged and verified
- * package: it reads the merged manifest, so nobody fills in the export form
- * again days after the merge. Loaded after the page from `GET /api/shares`,
- * because it asks GitLab a few questions per package (see
- * `readShareListing`). The page around it (/export/shared) carries the
- * heading.
+ * „Veröffentlicht“: what this instance put into the catalogue through this
+ * marketplace, one row per catalogue entry at its listed version (the tab
+ * rules in `share-tabs.ts`). The rows are today's; their own content - the
+ * catalogue link, „Neue Version teilen“, earlier versions - comes with rc.7.
+ * Read from the share pages' one listing (`useShareView`), so coming here
+ * from another tab does not ask GitLab again.
  */
 export function SharedPackages() {
-    const { rows, error, pending: loading, reload: load } = useSharedListing(true)
-    const { proposing, propose, outcomeFor } = useCatalogProposal(load)
-
+    const view = useShareView(true)
+    if (view.rows === null) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
+    const rows = view.tabs.published
     return (
         <div className="flex flex-col gap-4">
-            <div className="flex justify-end">
-                <Button icon={RefreshCw} pending={loading} onClick={load}>
-                    Aktualisieren
-                </Button>
-            </div>
-
-            {error && (
+            {/* In the words the other two tabs use; „Aktualisieren“ above asks again. */}
+            {view.error && (
                 <Notice tone="error" live>
-                    {error}
+                    Was im Katalog steht, ließ sich gerade nicht abfragen ({view.error}).
                 </Notice>
             )}
-
-            {rows === null ? (
-                <Pending>Stand wird bei GitLab abgefragt …</Pending>
-            ) : rows.length === 0 ? (
-                !error && (
-                    <EmptyState
-                        action={
-                            <Link href="/export" className="font-medium text-primary underline-offset-2 hover:underline">
-                                Ersten Datensatz teilen
-                            </Link>
-                        }
-                    >
-                        Noch nichts geteilt.
-                    </EmptyState>
-                )
+            {rows.length === 0 ? (
+                !view.error && <EmptyTab tab="published" />
             ) : (
                 <ul className="divide-y rounded-lg border bg-card">
-                    {rows.map((row) => (
-                        <SharedRow
-                            key={row.key}
-                            row={row}
-                            proposing={proposing === row.key}
-                            disabled={proposing !== null || loading}
-                            outcome={outcomeFor(row.key)}
-                            onPropose={() => void propose(row)}
-                        />
+                    {rows.map((entry) => (
+                        <SharedRow key={entry.row.key} entry={entry} />
                     ))}
                 </ul>
             )}
@@ -74,25 +43,11 @@ export function SharedPackages() {
     )
 }
 
-function SharedRow({
-    row,
-    proposing,
-    disabled,
-    outcome,
-    onPropose,
-}: {
-    row: SharedPackageRow
-    proposing: boolean
-    disabled: boolean
-    outcome?: ExportActionResult
-    onPropose: () => void
-}) {
+function SharedRow({ entry }: { entry: TabRow }) {
+    const { row, progress } = entry
     const verification = row.bundle?.verification
     // The same words as "In Arbeit" and the last step of "Teilen": where it stands, and whose move it is.
-    const progress = rowProgress(row)
     const turn = row.problem ? undefined : turnLabel(progress)
-    // Merged, verified, not in the catalogue - and not on its way out of the repository.
-    const canPropose = progress.active === 'catalog' && progress.states.catalog === 'current'
 
     return (
         <li className="flex flex-col gap-2 px-4 py-3">
@@ -121,25 +76,17 @@ function SharedRow({
                     />
                 )}
                 {row.catalog && (
-                    // The state names the catalogue itself ("noch nicht im Katalog"), so it needs no "Katalog:" before it.
+                    // The state names the catalogue itself ("im Katalog"), so it needs no "Katalog:" before it.
                     <Chip
                         label={upperFirst(catalogStateLabel(row.catalog.state))}
                         url={row.catalog.mrUrl}
                         tone={row.catalog.state === 'listed' ? 'ok' : undefined}
                     />
                 )}
-                {/* Not primary: several rows can offer it at once, and a surface has one main action. */}
-                {canPropose && (
-                    <Button icon={GitMerge} pending={proposing} disabled={disabled} onClick={onPropose} className="ml-auto">
-                        Katalog-Eintrag vorschlagen
-                    </Button>
-                )}
             </div>
 
             {/* The rest of the list is fine; only this package's state is unknown for now. */}
             {row.problem && <InlineNotice tone="error">Der Stand ließ sich nicht lesen: {row.problem}</InlineNotice>}
-
-            {outcome && <ProposalOutcome result={outcome} />}
         </li>
     )
 }
