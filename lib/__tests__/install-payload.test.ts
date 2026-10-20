@@ -168,11 +168,13 @@ function referencesOf(member: PackageMemberRequest): string[] {
 
 describe('buildInstallationRequest', () => {
     it('sends the package header and the chosen datapool', () => {
-        const request = buildInstallationRequest(bundleOf(TRAFFIC), POOL)
+        const entry = bundleOf(TRAFFIC)
+        const request = buildInstallationRequest(entry, POOL)
         expect(request.datapoolId).toBe(POOL)
         expect(request.package).toMatchObject({
             id: TRAFFIC,
-            version: '1.6.0',
+            // From the fixture, which moves with every release of the package.
+            version: entry.manifest.version,
             title: 'Verkehrszählung',
         })
     })
@@ -303,12 +305,9 @@ describe('buildInstallationRequest', () => {
         const request = buildInstallationRequest(entry, POOL)
         // The platform refuses these three kinds without a description, and one missing sentence
         // is no reason to fail a whole install.
-        expect(membersOf(request, 'datastructure')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.6.0',
-        )
-        expect(membersOf(request, 'datasource')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.6.0',
-        )
+        const provenance = `Aus Paket Verkehrszählung ${entry.manifest.version}`
+        expect(membersOf(request, 'datastructure')[0].description).toBe(provenance)
+        expect(membersOf(request, 'datasource')[0].description).toBe(provenance)
     })
 
     it('sends the same request for the same package, every time', () => {
