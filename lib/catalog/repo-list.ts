@@ -262,6 +262,37 @@ async function loadIndex(): Promise<CacheEntry> {
     }
 }
 
+/** True when `candidate` is a higher x.y.z than `current`; false whenever either is no plain version. */
+function isHigherVersion(candidate: unknown, current: string): boolean {
+    const parse = (value: unknown) => (typeof value === 'string' ? value.match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number) : undefined)
+    const a = parse(candidate)
+    const b = parse(current)
+    if (!a || !b) return false
+    for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index] > b[index]
+    return false
+}
+
+/**
+ * Lets the next read fetch the index again when someone saw a newer one than
+ * the cached copy: the share pages read `index.json` straight from GitLab,
+ * and without this "Im Katalog ansehen" could land on an empty page for up
+ * to the TTL after a catalogue entry was accepted (plan of 2026-10-18,
+ * section 5). Newer means a higher index version or a later `updatedAt`,
+ * both of which every catalogue proposal bumps. The cached copy is only
+ * marked stale, not dropped: if the fetch fails, it is still served as
+ * last-known-good. True when it was marked.
+ *
+ * The caller vouches that `seen` is the same index this module fetches (same
+ * project, same branch); this module cannot tell.
+ */
+export function expireRepoListIfOlder(seen: { version?: unknown; updatedAt?: unknown }): boolean {
+    if (!cache || cache.stale) return false
+    const seenAt = typeof seen.updatedAt === 'string' ? Date.parse(seen.updatedAt) : Number.NaN
+    const newer = isHigherVersion(seen.version, cache.index.version) || seenAt > Date.parse(cache.index.updatedAt)
+    if (newer) cache = { ...cache, stale: true }
+    return newer
+}
+
 /** Freshness metadata for the "catalogue as of …" hint in the UI. */
 export async function getRepoListMeta(): Promise<CatalogMeta> {
     const { index, fetchedAt, origin, stale } = await loadIndex()

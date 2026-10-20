@@ -5,7 +5,7 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { bundleBranch, catalogBranch, removalBranch } from '@/lib/export/config'
-import { displayNameOf, proposerOf, withdrawerOf } from '@/lib/export/merge-request-text'
+import { displayNameOf, proposerOf, shareSourceLine, shareSourceOf, withdrawerOf } from '@/lib/export/merge-request-text'
 
 /**
  * The share pages' words, checked where they are written (plan of
@@ -44,6 +44,8 @@ function sources(): string[] {
         ...under('app/(authenticated)/export', true),
         ...under('lib/export', false).filter((file) => !file.endsWith('validate-bundle-script.ts')),
         'lib/export-actions.ts',
+        // The listing's route: its refusals are shown on the share pages.
+        ...under('app/api/shares', true),
     ]
 }
 
@@ -117,7 +119,17 @@ describe('the share pages’ wording', () => {
     const texts = files.flatMap(textsOf)
 
     it('reads the files it is meant to, so an empty scan cannot pass for a clean one', () => {
-        expect(files).toEqual(expect.arrayContaining(['components/export/delete-share-dialog.tsx', 'components/export/export-panel.tsx', 'lib/export-actions.ts']))
+        expect(files).toEqual(
+            expect.arrayContaining([
+                'components/export/delete-share-dialog.tsx',
+                'components/export/export-panel.tsx',
+                'components/export/use-shared-listing.ts',
+                'lib/export-actions.ts',
+                'lib/export/share-listing.ts',
+                'lib/export/share-tabs.ts',
+                'app/api/shares/route.ts',
+            ]),
+        )
         expect(texts.filter((text) => languageOf(text.text) === 'german').length).toBeGreaterThan(300)
         for (const label of ['Zur Prüfung einreichen', 'In GitLab ansehen', 'Behalten', 'Verwerfen', 'Zurückziehen', 'Adresse ändern']) {
             expect(texts.some((text) => text.text === label)).toBe(true)
@@ -177,6 +189,11 @@ describe('the English texts the listing reads back', () => {
         expect(displayNameOf('Export use case: Bäume 1.1.0', '1.1.0')).toBe('Bäume')
         expect(proposerOf('Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.')).toBe('Ewa')
         expect(withdrawerOf('Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**.')).toBe('Ewa')
+        // The hidden source line of every proposal since rc.6: changing its form would lose where those shares came from.
+        expect(shareSourceLine({ kind: 'dataset', id: 'ds', instance: 'https://portal.example' })).toBe('<!-- oua-share {"kind":"dataset","id":"ds","instance":"https://portal.example"} -->')
+        expect(shareSourceOf('<!-- oua-share {"kind":"dataset","id":"ds","instance":"https://portal.example"} -->')).toEqual({ kind: 'dataset', id: 'ds', instance: 'https://portal.example' })
+        expect(actions.match(/shareSourceLine\(/g)).toHaveLength(2)
+        expect(deletion).toContain('shareSourceLine(')
         expect([bundleBranch('baeume', '1.1.0'), catalogBranch('baeume', '1.1.0'), removalBranch('baeume', '1.1.0')]).toEqual([
             'export/baeume-1.1.0',
             'catalog/baeume-1.1.0',

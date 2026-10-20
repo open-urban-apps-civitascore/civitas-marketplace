@@ -9,9 +9,9 @@ import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Panel } from '@/components/ui/layout'
 import { Notice, Pending } from '@/components/ui/notice'
-import type { SharedPackageRow } from '@/lib/export-actions'
 import { compactList, inProgressItems, isMine, type InProgressItem } from '@/lib/export/in-progress-items'
 import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { turnLabel, type ShareProgress } from '@/lib/export/share-stages'
 import type { ExportSource } from '@/lib/export/sources'
 

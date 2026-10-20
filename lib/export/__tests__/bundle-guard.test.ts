@@ -22,6 +22,7 @@ vi.mock('@/lib/export/package-check', () => ({ checkPackage: vi.fn(() => []) }))
 
 import { exportAction } from '@/lib/export-actions'
 import { openMergeRequest } from '@/lib/export/gitlab'
+import { proposerOf, readmeSourceOf, shareSourceOf } from '@/lib/export/merge-request-text'
 import { readUseCase } from '@/lib/export/portal-reader'
 import { readBundleStatus } from '@/lib/export/status'
 
@@ -202,5 +203,31 @@ describe('a new version in an existing folder', () => {
         expect(input.existingPaths.has(`${DIR}/README.md`)).toBe(true)
         expect(Object.keys(input.files)).toContain(`${DIR}/README.md`)
         expect(input.description).toContain(`removes 1 file below \`core-ir/\` that version 1.1.0 no longer contains: \`${DIR}/core-ir/structures/alter-baum.json\``)
+    })
+})
+
+describe('the source line of a package proposal', () => {
+    it('names the dataset and this instance, hidden at the end, as the README names them', async () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.example.org/')
+        vi.mocked(readBundleStatus).mockResolvedValue({ state: 'none', reason: 'no-package' })
+        vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [], folder: [] }).fetchImpl)
+        expect((await exportAction(null, bundleForm('1.0.0'))).status).toBe('ok')
+
+        const input = vi.mocked(openMergeRequest).mock.calls[0][1]
+        // The instance without its trailing slash, the same in both places.
+        expect(shareSourceOf(input.description)).toEqual({ kind: 'dataset', id: 'local', instance: 'https://portal.example.org' })
+        expect(input.description.trimEnd().split('\n').at(-1)).toMatch(/^<!-- oua-share \{.*\} -->$/)
+        expect(readmeSourceOf(input.files[`${DIR}/README.md`])).toEqual(shareSourceOf(input.description))
+        // The first line, which the listing reads the proposer from, is untouched.
+        expect(proposerOf(input.description)).toBe('Test')
+        expect(input.title).toBe('Export use case: Bäume 1.0.0')
+    })
+
+    it('names no instance where none is set', async () => {
+        vi.stubEnv('PORTAL_URL', '')
+        vi.mocked(readBundleStatus).mockResolvedValue({ state: 'none', reason: 'no-package' })
+        vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [], folder: [] }).fetchImpl)
+        await exportAction(null, bundleForm('1.0.0'))
+        expect(shareSourceOf(vi.mocked(openMergeRequest).mock.calls[0][1].description)).toEqual({ kind: 'dataset', id: 'local' })
     })
 })

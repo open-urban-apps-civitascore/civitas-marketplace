@@ -1,15 +1,16 @@
 'use client'
 
-import { useCallback, useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { ExternalLink, GitMerge, RefreshCw } from 'lucide-react'
 
 import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog-proposal'
+import { useSharedListing } from '@/components/export/use-shared-listing'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/layout'
 import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 
-import { listSharedPackages, type ExportActionResult, type SharedPackageRow } from '@/lib/export-actions'
+import type { ExportActionResult } from '@/lib/export-actions'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { rowProgress } from '@/lib/export/in-progress-items'
 import { catalogStateLabel, mergeRequestStateLabel, verificationLabel } from '@/lib/export/labels'
 import { turnLabel } from '@/lib/export/share-stages'
@@ -18,31 +19,13 @@ import { turnLabel } from '@/lib/export/share-stages'
  * Everything shared through this marketplace, and where each package stands.
  * The catalogue step lives here too, one click per merged and verified
  * package: it reads the merged manifest, so nobody fills in the export form
- * again days after the merge. Loaded after the page, because it asks GitLab
- * a few questions per package (see `listSharedPackages`). The page around it
- * (/export/shared) carries the heading.
+ * again days after the merge. Loaded after the page from `GET /api/shares`,
+ * because it asks GitLab a few questions per package (see
+ * `readShareListing`). The page around it (/export/shared) carries the
+ * heading.
  */
 export function SharedPackages() {
-    const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
-    const [error, setError] = useState<string>()
-    const [loading, startLoading] = useTransition()
-
-    const load = useCallback(() => {
-        startLoading(async () => {
-            try {
-                const listing = await listSharedPackages()
-                setRows(listing.rows)
-                setError(listing.error)
-            } catch {
-                setError('Die Liste konnte nicht geladen werden. Bitte erneut versuchen.')
-            }
-        })
-    }, [])
-
-    useEffect(() => {
-        load()
-    }, [load])
-
+    const { rows, error, pending: loading, reload: load } = useSharedListing(true)
     const { proposing, propose, outcomeFor } = useCatalogProposal(load)
 
     return (

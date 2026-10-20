@@ -23,6 +23,22 @@ export class GitLabError extends Error {
     }
 }
 
+/** A GitLab failure in the person's words, for every page and action that shows one. */
+export function gitlabMessage(error: GitLabError): string {
+    switch (error.status) {
+        case 0:
+            return error.message
+        case 401:
+            return 'GitLab lehnt den hinterlegten Token ab (401) - ungültig oder abgelaufen.'
+        case 403:
+            return `GitLab verweigert die Aktion (403): ${error.message}`
+        case 404:
+            return `GitLab: ${error.message} - bei privaten Projekten auch, wenn der Token dort keinen Zugriff hat.`
+        default:
+            return `GitLab-Fehler (${error.status}): ${error.message}`
+    }
+}
+
 export interface GitLabClient {
     /** `https://gitlab.com/api/v4` — derived from the repository URL, so self-hosted instances work. */
     apiBase: string
@@ -143,8 +159,15 @@ export interface MergeRequestRef {
     author?: { id: number; username?: string } | null
     /** Who closed it, for a closed one. */
     closed_by?: { id: number; username?: string } | null
+    /** Who merged it; GitLab names it in `merge_user`, older versions only in the deprecated `merged_by`. */
+    merge_user?: { id: number; username?: string } | null
+    merged_by?: { id: number; username?: string } | null
+    created_at?: string
+    closed_at?: string | null
     merged_at?: string | null
     updated_at?: string
+    /** How many comments people wrote on it, GitLab's own notes not counted. */
+    user_notes_count?: number
 }
 
 /** Splits a project web URL into API base and `group/project` path. */
@@ -397,16 +420,35 @@ export async function currentUser(client: GitLabClient): Promise<{ id: number; u
     return gl<{ id: number; username: string }>(client, '/user')
 }
 
-/** Merge requests into `targetProjectId` opened by one author, newest first, any state. */
+/**
+ * How many pages of one author's merge requests are read: 300 proposals, the
+ * marketplace's whole record for a long while. The share pages list every
+ * one of them (plan of 2026-10-18, section 10), where the first 50 were read
+ * until rc.5.
+ */
+export const AUTHOR_PAGES = 3
+
+/**
+ * Merge requests into `targetProjectId` opened by one author, newest created
+ * first, any state, up to {@link AUTHOR_PAGES} pages of 100. Ordered by
+ * creation, not by the last change: a comment on an old proposal must not
+ * push a newer one off the last page.
+ */
 export async function listMergeRequestsBy(
     client: GitLabClient,
     targetProjectId: number,
     authorId: number,
 ): Promise<MergeRequestRef[]> {
-    return gl<MergeRequestRef[]>(
-        client,
-        `/projects/${targetProjectId}/merge_requests?author_id=${authorId}&state=all&order_by=updated_at&sort=desc&per_page=50`,
-    )
+    const requests: MergeRequestRef[] = []
+    for (let page = 1; page <= AUTHOR_PAGES; page++) {
+        const batch = await gl<MergeRequestRef[]>(
+            client,
+            `/projects/${targetProjectId}/merge_requests?author_id=${authorId}&state=all&order_by=created_at&sort=desc&per_page=100&page=${page}`,
+        )
+        requests.push(...batch)
+        if (batch.length < 100) break
+    }
+    return requests
 }
 
 /**

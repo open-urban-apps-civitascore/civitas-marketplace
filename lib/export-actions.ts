@@ -8,35 +8,23 @@ import {
     exportConfig,
     exportReadiness,
     packageDir,
-    parseBundleBranch,
-    parseCatalogBranch,
-    parseRemovalBranch,
-    type CatalogRepo,
+    thisInstance,
     type ExportConfig,
     type ExportTarget,
 } from '@/lib/export/config'
 import {
     clientFor,
-    currentUser,
     getProject,
     GitLabError,
-    listMergeRequestsBy,
-    listOpenMergeRequests,
+    gitlabMessage,
     listTree,
-    mergeRequestNotes,
     openMergeRequest,
     parseProjectUrl,
-    readFile,
-    type GitLabClient,
-    type GitLabProject,
-    type MergeRequestRef,
 } from '@/lib/export/gitlab'
-import { SHARE_READS } from '@/lib/export/share-cache'
 import { DELETION_SCOPES, readDeletion, runDeletion, type DeletionPlan, type DeletionResult, type DeletionScope } from '@/lib/export/share-deletion'
-import { displayNameOf, withdrawerOf } from '@/lib/export/merge-request-text'
+import { shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
 import { isNewerVersion, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { mapWithLimit } from '@/lib/concurrency'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
@@ -45,16 +33,12 @@ import { PortalReadError, readUseCase, type InstanceSnapshot } from '@/lib/expor
 import {
     catalogStatusIn,
     inspectBundle,
-    inspectBundleIn,
     inspectCatalog,
-    packageFolder,
-    readBaseTrees,
     readBundleStatus,
     readCatalogStatus,
     readVersionCatalog,
     type BundleStatus,
     type BundleVerification,
-    type CatalogContext,
     type CatalogInspection,
     type CatalogStatus,
 } from '@/lib/export/status'
@@ -198,7 +182,8 @@ async function buildPackage(
         provenance: {
             datasetId: snapshot.dataset.id,
             datasetName: snapshot.dataset.name,
-            instance: process.env.PORTAL_URL,
+            // The same name the proposal's source line gives this instance (see `thisInstance`).
+            instance: thisInstance(),
             exportedBy,
             exportedAt: new Date().toISOString().slice(0, 10),
         },
@@ -295,6 +280,9 @@ function mergeRequestBody(
         '---',
         `Branch \`${preview.branch}\` · exported via the marketplace export`,
         `Publisher \`${form.options.publisher}\`, domain \`${form.options.domain}\``,
+        '',
+        // Hidden on GitLab; the share pages read it back to tell which dataset and instance this came from.
+        shareSourceLine({ kind: 'dataset', id: form.datasetId, instance: thisInstance() }),
     ].join('\n')
 }
 
@@ -466,7 +454,7 @@ export async function exportAction(
         }
 
         // intent === 'catalog'
-        return await proposeCatalog(config, target, token, form.options.slug, form.options.version, id, requestedBy)
+        return await proposeCatalog(config, target, token, form.options.slug, form.options.version, id, requestedBy, form.datasetId)
     } catch (error) {
         if (error instanceof PortalReadError) {
             return { intent: form.intent, status: 'error', detail: `Portal-Backend: ${error.message}` }
@@ -541,11 +529,13 @@ async function proposeCatalog(
     version: string,
     expectedId: string | undefined,
     requestedBy: string,
+    /** The dataset the form shares, where there is a form; the listing's step has none, and the package's proposal names it. */
+    datasetId?: string,
 ): Promise<ExportActionResult> {
     if (!config.catalog) {
         return { intent: 'catalog', status: 'unconfigured', detail: CATALOG_NOT_SET_UP }
     }
-    const { status: bundle, manifestRaw } = await inspectBundle(
+    const { status: bundle, manifestRaw, merged } = await inspectBundle(
         clientFor(target.url, token),
         target,
         slug,
@@ -650,6 +640,9 @@ async function proposeCatalog(
             `Index version bumped to ${edit.indexVersion}.`,
             '',
             'Check: `python3 ci/validate-index.py`',
+            '',
+            // The entry belongs to the share of the accepted package: the same dataset as its proposal names, this instance proposing.
+            shareSourceLine({ kind: 'dataset', id: shareSourceOf(merged?.description)?.id ?? datasetId, instance: thisInstance() }),
         ].join('\n'),
         files: { 'index.json': edit.content },
         existingPaths: new Set(['index.json']),
@@ -675,227 +668,6 @@ function verificationRefusal(verification: BundleVerification | undefined): stri
         default:
             return 'Kein Katalog-Eintrag: Für dieses Paket gibt es keinen angenommenen Vorschlag dieses Marktplatzes, gegen den sich der Inhalt im Ablageort prüfen ließe.'
     }
-}
-
-/** One shared package version in one target repository. */
-export interface SharedPackageRow {
-    /** `<target url>#<branch>`. */
-    key: string
-    targetKey: string
-    targetLabel: string
-    slug: string
-    version: string
-    displayName: string
-    /** The version's open merge request, else its merged one, else its newest. */
-    bundleMr: { url: string; state: string }
-    /** Closed through "Zurückziehen", as the marketplace's withdrawal note on it says: taken back, not turned down. */
-    withdrawn?: boolean
-    /** Read for a merged bundle only; with the version's removal, if one was proposed. */
-    bundle?: BundleStatus
-    catalog?: CatalogStatus
-    /** Why the state could not be read completely; the row then shows its merge request only. */
-    problem?: string
-}
-
-/**
- * The list stops at the newest: it is a look at what happened lately, not an
- * archive. A merged row costs two to four GitLab requests, since what all rows
- * share is read once per visit.
- */
-const MAX_SHARED_ROWS = 15
-
-/** How many packages are checked at once: side by side, but not every request at the same moment. */
-const ROW_CONCURRENCY = 5
-
-/**
- * What one visit of the list asks GitLab once, however many targets and the
- * catalogue need it: the projects, the bot's account, and its merge requests
- * per project - target and catalogue are often the same repository.
- */
-interface Visit {
-    project: (client: GitLabClient, url: string) => Promise<GitLabProject>
-    bot: (client: GitLabClient) => Promise<{ id: number; username: string }>
-    /** The bot's merge requests into one project, newest first, any state. */
-    botRequests: (client: GitLabClient, projectId: number) => Promise<MergeRequestRef[]>
-}
-
-function newVisit(): Visit {
-    const asked = new Map<string, Promise<unknown>>()
-    const once = <T>(key: string, load: () => Promise<T>): Promise<T> => {
-        let answer = asked.get(key) as Promise<T> | undefined
-        if (!answer) {
-            answer = load()
-            asked.set(key, answer)
-        }
-        return answer
-    }
-    const visit: Visit = {
-        project: (client, url) => once(`${client.apiBase}|project|${parseProjectUrl(url).projectPath}`, () => getProject(client, parseProjectUrl(url).projectPath)),
-        bot: (client) => once(`${client.apiBase}|bot`, () => currentUser(client)),
-        botRequests: (client, projectId) =>
-            once(`${client.apiBase}|requests|${projectId}`, async () => listMergeRequestsBy(client, projectId, (await visit.bot(client)).id)),
-    }
-    return visit
-}
-
-/**
- * What this marketplace's bot has proposed, newest first, and where each
- * stands. Read from GitLab every time, like the status: the bot's merge
- * requests on `export/…` branches are the record, no marketplace bookkeeping.
- * A merged bundle is checked and gets its catalogue state, so the list can
- * offer the catalogue step without the form.
- *
- * Asked the way that keeps the page quick (it took about half a minute with
- * nine merged packages, Ewa 2026-10-14): what every row shares - the
- * project, the base branch with its package folders, the catalogue's open
- * merge requests and index - is read once per visit; the rows are then
- * checked side by side; and what a commit or a merged request holds is kept
- * in memory (`SHARE_READS`), because it cannot change.
- */
-export async function listSharedPackages(): Promise<{ rows: SharedPackageRow[]; error?: string }> {
-    await requireSession()
-    const config = exportConfig()
-    if (exportReadiness(config) !== 'ready') return { rows: [] }
-    const token = config.token as string
-    const visit = newVisit()
-
-    // Started at once, awaited by the rows that need it; a failure there is reported per row.
-    const catalog = readCatalogContext(config.catalog, token, visit)
-    catalog.catch(() => {})
-
-    try {
-        const rows: SharedPackageRow[] = []
-        for (const target of config.targets) rows.push(...(await sharedRowsOf(target, token, visit, catalog)))
-        return { rows }
-    } catch (error) {
-        if (error instanceof GitLabError) return { rows: [], error: gitlabMessage(error) }
-        throw error
-    }
-}
-
-/**
- * One target's shared packages. The bot's merge requests and the base branch
- * with its package folders are asked once, side by side; then the rows.
- */
-async function sharedRowsOf(
-    target: ExportTarget,
-    token: string,
-    visit: Visit,
-    catalog: Promise<CatalogContext | undefined>,
-): Promise<SharedPackageRow[]> {
-    const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS }
-    const [project, bot] = await Promise.all([visit.project(client, target.url), visit.bot(client)])
-    const base = readBaseTrees(client, project.id, target)
-    base.catch(() => {})
-    const requests = await visit.botRequests(client, project.id)
-
-    // Newest first, so a branch's first request is the newest. The bot names
-    // the export branches, so its own requests are all there are from them:
-    // asking GitLab once more per branch would add nothing. The same holds for
-    // the removals "Zurückziehen" proposes, which belong to the row of their version.
-    const byBranch = new Map<string, MergeRequestRef[]>()
-    const removals = new Map<string, MergeRequestRef>()
-    for (const mr of requests) {
-        const removal = parseRemovalBranch(mr.source_branch)
-        if (removal) {
-            const version = `${removal.slug}@${removal.version}`
-            if (!removals.has(version)) removals.set(version, mr)
-            continue
-        }
-        if (!parseBundleBranch(mr.source_branch)) continue
-        const known = byBranch.get(mr.source_branch)
-        if (known) known.push(mr)
-        else if (byBranch.size < MAX_SHARED_ROWS) byBranch.set(mr.source_branch, [mr])
-    }
-    return mapWithLimit([...byBranch.values()], ROW_CONCURRENCY, (branchRequests) =>
-        sharedPackageRow(target, client, project.id, base, branchRequests, catalog, { removals, botId: bot.id }),
-    )
-}
-
-async function sharedPackageRow(
-    target: ExportTarget,
-    client: GitLabClient,
-    projectId: number,
-    base: Promise<{ head: string | undefined; trees: Map<string, string> }>,
-    requests: MergeRequestRef[],
-    catalog: Promise<CatalogContext | undefined>,
-    { removals, botId }: { removals: Map<string, MergeRequestRef>; botId: number },
-): Promise<SharedPackageRow> {
-    // An open request is the version's present; else a merge, which a later closed duplicate does not undo.
-    const mr = requests.find((request) => request.state === 'opened') ?? requests.find((request) => request.state === 'merged') ?? requests[0]
-    const parsed = parseBundleBranch(mr.source_branch) as { slug: string; version: string }
-    const row: SharedPackageRow = {
-        key: `${target.key}#${mr.source_branch}`,
-        targetKey: target.key,
-        targetLabel: target.label,
-        slug: parsed.slug,
-        version: parsed.version,
-        displayName: displayNameOf(mr.title, parsed.version) ?? parsed.slug,
-        bundleMr: { url: mr.web_url, state: mr.state },
-    }
-    if (mr.state === 'closed') {
-        // Closed by the bot, which is also used by hand: withdrawn only with the marketplace's note.
-        return mr.closed_by?.id === botId && (await withdrawnThroughMarketplace(client, projectId, mr)) ? { ...row, withdrawn: true } : row
-    }
-    if (mr.state !== 'merged') return row
-
-    try {
-        const { head, trees } = await base
-        const { status: bundle } = await inspectBundleIn(client, target, parsed.slug, parsed.version, undefined, {
-            projectId,
-            requests,
-            head,
-            treeOnBase: async () => trees.get(packageFolder(target, parsed.slug).name),
-            removal: removals.get(`${parsed.slug}@${parsed.version}`),
-        })
-        if (!bundle.packageId) return { ...row, bundle }
-        const context = await catalog
-        return {
-            ...row,
-            bundle,
-            catalog: context ? catalogStatusIn(context, parsed.slug, parsed.version, bundle.packageId) : { state: 'unconfigured' },
-        }
-    } catch (error) {
-        // One package GitLab cannot answer for does not take the list down with it.
-        if (error instanceof GitLabError) return { ...row, problem: gitlabMessage(error) }
-        throw error
-    }
-}
-
-/**
- * Whether the marketplace withdrew a request the bot closed: its withdrawal
- * note is there. Kept until the request changes again (`mergeRequestNotes`),
- * so each closed request is read once. Unreadable counts as not withdrawn,
- * which is what GitLab shows too, and the next visit asks again.
- */
-async function withdrawnThroughMarketplace(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<boolean> {
-    try {
-        return (await mergeRequestNotes(client, projectId, mr.iid, mr.updated_at)).some((note) => withdrawerOf(note.body) !== undefined)
-    } catch (error) {
-        if (error instanceof GitLabError) return false
-        throw error
-    }
-}
-
-/**
- * The catalogue repository's open merge requests, its index and the bot's
- * merged catalogue proposals - what was listed once, to tell a version the
- * catalogue team took out - for every row of a listing at once.
- */
-async function readCatalogContext(
-    repo: CatalogRepo | undefined,
-    token: string,
-    visit: Visit,
-): Promise<CatalogContext | undefined> {
-    if (!repo) return undefined
-    const client: GitLabClient = { ...clientFor(repo.url, token), cache: SHARE_READS }
-    const project = await visit.project(client, repo.url)
-    const [openRequests, index, byBot] = await Promise.all([
-        listOpenMergeRequests(client, project.id),
-        readFile(client, project.id, 'index.json', repo.baseBranch),
-        visit.botRequests(client, project.id),
-    ])
-    return { openRequests, index, merged: byBot.filter((mr) => mr.state === 'merged' && parseCatalogBranch(mr.source_branch)) }
 }
 
 /**
@@ -1029,21 +801,6 @@ function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
 /** A status detail as a sentence of its own: the details end without a full stop, for use inside others. */
 function sentenceOf(text: string): string {
     return /[.!?]$/.test(text) ? text : `${text}.`
-}
-
-function gitlabMessage(error: GitLabError): string {
-    switch (error.status) {
-        case 0:
-            return error.message
-        case 401:
-            return 'GitLab lehnt den hinterlegten Token ab (401) - ungültig oder abgelaufen.'
-        case 403:
-            return `GitLab verweigert die Aktion (403): ${error.message}`
-        case 404:
-            return `GitLab: ${error.message} - bei privaten Projekten auch, wenn der Token dort keinen Zugriff hat.`
-        default:
-            return `GitLab-Fehler (${error.status}): ${error.message}`
-    }
 }
 
 /** One row of the inventory: `type` for the code to decide on, `kind` as the page shows it. */

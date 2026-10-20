@@ -6,8 +6,9 @@ vi.mock('@/lib/export/share-permission', async (importOriginal) => ({
     fetchShareRight: vi.fn(async () => 'allowed'),
 }))
 
-import { deleteShare, listSharedPackages, planShareDeletion, proposeSharedCatalogEntry } from '@/lib/export-actions'
-import { withdrawerOf } from '@/lib/export/merge-request-text'
+import { deleteShare, planShareDeletion, proposeSharedCatalogEntry } from '@/lib/export-actions'
+import { readShareListing } from '@/lib/export/share-listing'
+import { shareSourceLine, shareSourceOf, withdrawerOf } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import type { DeletionScope } from '@/lib/export/share-deletion'
 import { fetchShareRight } from '@/lib/export/share-permission'
@@ -604,7 +605,7 @@ describe('the list after a deletion', () => {
             notes: { 4: [WITHDRAWAL_NOTE] },
         })
         vi.stubGlobal('fetch', fakeGitLab(state).fetchImpl)
-        const { rows } = await listSharedPackages()
+        const { rows } = await readShareListing()
         const baeume = rows.find((row) => row.slug === 'baeume')
         expect(baeume).toMatchObject({ bundleMr: { state: 'merged' }, bundle: { state: 'on-base', removal: { state: 'opened', mrUrl: `${WEB}/-/merge_requests/12` } } })
         expect(baeume?.withdrawn).toBeUndefined()
@@ -614,7 +615,7 @@ describe('the list after a deletion', () => {
     it('does not call a request withdrawn that the bot’s account closed without the marketplace’s note', async () => {
         const state = world({ exportMrs: [mr(4, 'closed', 'export/pegel-1.0.0', { closed_by: { id: 42 }, title: 'Export use case: Pegelkarte 1.0.0' })], notes: { 4: [{ body: 'closed' }] } })
         vi.stubGlobal('fetch', fakeGitLab(state).fetchImpl)
-        const { rows } = await listSharedPackages()
+        const { rows } = await readShareListing()
         expect(rows[0]).toMatchObject({ slug: 'pegel', bundleMr: { state: 'closed' } })
         expect(rows[0].withdrawn).toBeUndefined()
     })
@@ -623,5 +624,49 @@ describe('the list after a deletion', () => {
         const { calls } = await planAndDelete(world({ exportMrs: [mr(4, 'opened', 'export/pegel-1.0.0', { title: 'Export use case: Pegelkarte 1.0.0' })] }), 'pegel', '1.0.0')
         const note = String(writes(calls)[1].body?.body)
         expect(withdrawerOf(note)).toBe('Test')
+    })
+})
+
+describe('the source line of the proposals after the package’s', () => {
+    /** The version's export as rc.6 writes it: its description ends in the source line. */
+    const sourced = mr(3, 'merged', 'export/baeume-1.1.0', {
+        sha: MERGED_HEAD,
+        merge_commit_sha: MERGE,
+        title: 'Export use case: Bäume 1.1.0',
+        description: `Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n## Bäume\n\n${shareSourceLine({ kind: 'dataset', id: 'ds-baeume', instance: 'https://portal.alt.example' })}`,
+    })
+
+    it('names the package’s dataset and this instance on a removal', async () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.hier.example')
+        const { calls } = await planAndDelete(world({ exportMrs: [sourced] }))
+        const opened = writes(calls).find((call) => call.path === '/projects/7/merge_requests')?.body as { description: string }
+        // The dataset is the share's; the instance is the one proposing.
+        expect(shareSourceOf(opened.description)).toEqual({ kind: 'dataset', id: 'ds-baeume', instance: 'https://portal.hier.example' })
+    })
+
+    it('names this instance alone on the removal of an older share, without reading its README for it', async () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.hier.example')
+        const { calls } = await planAndDelete(world())
+        const opened = writes(calls).find((call) => call.path === '/projects/7/merge_requests')?.body as { description: string }
+        expect(shareSourceOf(opened.description)).toEqual({ kind: 'dataset', instance: 'https://portal.hier.example' })
+        expect(calls.some((call) => call.path.includes('README.md'))).toBe(false)
+    })
+
+    it('names the package’s dataset and this instance on a catalogue entry', async () => {
+        vi.stubEnv('PORTAL_URL', 'https://portal.hier.example')
+        const full = JSON.stringify({ id: 'urn:stadt:usecase:baeume', version: '1.1.0', displayName: 'Bäume', description: 'Stadtbäume', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: [] })
+        const state = world({
+            exportMrs: [sourced],
+            files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: full, 'main|index.json': index() },
+        })
+        const gitlab = fakeGitLab(state)
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({ intent: 'catalog', status: 'ok' })
+        const opened = writes(gitlab.calls).find((call) => call.path === '/projects/7/merge_requests')?.body as { title: string; description: string }
+        expect(opened.title).toBe('Add use case: Bäume 1.1.0')
+        expect(shareSourceOf(opened.description)).toEqual({ kind: 'dataset', id: 'ds-baeume', instance: 'https://portal.hier.example' })
+        // The pin sentence the withdrawal and the listing read back is still there.
+        expect(opened.description).toContain(`\`${HEAD}\` of ${WEB} (path \`${DIR}\`).`)
     })
 })

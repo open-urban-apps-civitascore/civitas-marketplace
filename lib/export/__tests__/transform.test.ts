@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { readmeSourceOf } from '@/lib/export/merge-request-text'
 import { checkPackage } from '@/lib/export/package-check'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
 import { transformSnapshot, type ExportOptions } from '@/lib/export/transform'
@@ -148,6 +149,12 @@ describe('transformSnapshot', () => {
             'baumkataster-zeile.datastructure.json',
             'kiez-baum.datastructure.json',
         ])
+    })
+
+    it('names the dataset in its README the way the share pages read it back for an older share', () => {
+        expect(readmeSourceOf(pkg.files['README.md'])).toEqual({ kind: 'dataset', id: 'ds-1' })
+        const named = transformSnapshot(snapshot(), { ...options, provenance: { ...options.provenance, instance: 'https://portal.demo.example', exportedBy: 'Ewa' } })
+        expect(readmeSourceOf(named.files['README.md'])).toEqual({ kind: 'dataset', id: 'ds-1', instance: 'https://portal.demo.example' })
     })
 
     it('passes the package validator — the round trip is installable', () => {
