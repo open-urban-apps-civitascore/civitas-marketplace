@@ -37,7 +37,7 @@ export function ShareListingProvider({
     draftOwner,
     children,
 }: {
-    /** Who is looking, by the name proposals are made for; undefined without one. */
+    /** Who is looking, by the name proposals are made for (`proposerName`). */
     person?: string
     /** Whose drafts these are (`draftOwnerOf`). */
     draftOwner?: string

@@ -41,16 +41,18 @@ export type StageState = 'done' | 'current' | 'waiting' | 'blocked' | 'later'
 export interface Stage {
     key: StageKey
     title: string
+    /** The stage in one or two words, as the progress line of „In Arbeit“ and its status sentence name it. */
+    short: string
     /** Whose move the stage is, as a line starts with them. */
     who: string
     turn: 'you' | 'reviewers'
 }
 
 export const STAGES: readonly Stage[] = [
-    { key: 'propose', title: 'Paket einreichen', who: 'Du', turn: 'you' },
-    { key: 'review', title: 'Paket-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
-    { key: 'catalog', title: 'Katalog-Eintrag vorschlagen', who: 'Du', turn: 'you' },
-    { key: 'listing', title: 'Eintrags-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
+    { key: 'propose', title: 'Paket einreichen', short: 'Einreichen', who: 'Du', turn: 'you' },
+    { key: 'review', title: 'Paket-Prüfung', short: 'Paket-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
+    { key: 'catalog', title: 'Katalog-Eintrag vorschlagen', short: 'Katalog-Eintrag', who: 'Du', turn: 'you' },
+    { key: 'listing', title: 'Eintrags-Prüfung', short: 'Eintrags-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
 ]
 
 /** What a stage, a row or a removal says while the catalogue team has the next move. */
