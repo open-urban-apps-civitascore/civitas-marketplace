@@ -461,10 +461,12 @@ describe('describeInstallFailure', () => {
         })
     })
 
-    it('names the missing permission when the gateway denies the install', () => {
+    it('names the permissions to check when the gateway denies the install', () => {
         const failure = describeInstallFailure(403, 'Forbidden', 'permission_denied')
         expect(failure.status).toBe('error')
+        // The gateway does not say which one is missing, and the route may require both.
         expect(failure.detail).toContain('INSTALLATION_CREATE')
+        expect(failure.detail).toContain('DATASTRUCTURE_CREATE')
     })
 
     it('keeps the backend’s sentence when the backend itself refuses', () => {
