@@ -71,6 +71,12 @@ export function draftOwnerTag(owner: string): string {
     return hash.toString(36)
 }
 
+/** Whose drafts these are, as a tag; none without e-mail or name, and then no drafts are kept at all. */
+export function draftOwnerOf(user: { email?: string | null; name?: string | null } | undefined): string | undefined {
+    const owner = user?.email?.trim() || user?.name?.trim()
+    return owner ? draftOwnerTag(owner) : undefined
+}
+
 export function draftKey(ownerTag: string, datasetId: string): string {
     return `${PREFIX}${ownerTag}:${datasetId}`
 }

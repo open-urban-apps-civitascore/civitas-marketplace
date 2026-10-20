@@ -46,6 +46,9 @@ function sources(): string[] {
         'lib/export-actions.ts',
         // The listing's route: its refusals are shown on the share pages.
         ...under('app/api/shares', true),
+        // The menu item that leads there, and the steps the share page shares with the front page.
+        'components/layout/app-sidebar.tsx',
+        'components/ui/numbered-steps.tsx',
     ]
 }
 
@@ -128,10 +131,38 @@ describe('the share pages’ wording', () => {
                 'lib/export/share-listing.ts',
                 'lib/export/share-tabs.ts',
                 'app/api/shares/route.ts',
+                'app/(authenticated)/export/layout.tsx',
+                'app/(authenticated)/export/(lists)/layout.tsx',
+                'app/(authenticated)/export/(lists)/page.tsx',
+                'app/(authenticated)/export/(lists)/shared/page.tsx',
+                'app/(authenticated)/export/(lists)/ended/page.tsx',
+                'app/(authenticated)/export/new/page.tsx',
+                'components/export/share-tabs-nav.tsx',
+                'components/export/share-process.tsx',
+                'components/export/share-tab-states.tsx',
+                'components/export/share-tab-frame.tsx',
+                'components/export/ended-shares.tsx',
+                'components/export/listing-refresh.tsx',
+                'components/layout/app-sidebar.tsx',
+                'lib/export/ended-lines.ts',
+                'lib/export/wizard-address.ts',
             ]),
         )
         expect(texts.filter((text) => languageOf(text.text) === 'german').length).toBeGreaterThan(300)
-        for (const label of ['Zur Prüfung einreichen', 'In GitLab ansehen', 'Behalten', 'Verwerfen', 'Zurückziehen', 'Adresse ändern']) {
+        for (const label of [
+            'Zur Prüfung einreichen',
+            'In GitLab ansehen',
+            'Behalten',
+            'Verwerfen',
+            'Zurückziehen',
+            'Adresse ändern',
+            'Neues Paket teilen',
+            'Zurück zu Teilen',
+            'So läuft Teilen ab',
+            'Was diese Instanz teilt',
+            'Veröffentlicht',
+            'Beendet',
+        ]) {
             expect(texts.some((text) => text.text === label)).toBe(true)
         }
     })

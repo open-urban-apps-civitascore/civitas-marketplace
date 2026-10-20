@@ -240,7 +240,7 @@ function planWords(plan: DeletionPlan): { lead: ReactNode; happens: ReactNode[];
             return {
                 lead: 'Das Paket wartet noch auf die Prüfung. Zurückziehen schließt den Vorschlag.',
                 happens: closeLines(plan),
-                stays: ['Der geschlossene Vorschlag, als Protokoll bei GitLab. „Geteilte Pakete“ zeigt die Version als „Zurückgezogen“, und einreichen kannst du sie jederzeit wieder.'],
+                stays: ['Der geschlossene Vorschlag, als Protokoll bei GitLab. Unter „Beendet“ steht die Version als „Zurückgezogen“, und einreichen kannst du sie jederzeit wieder.'],
                 confirm: withdrawLabel(plan),
             }
         case 'remove': {

@@ -19,12 +19,12 @@ export function isMine(item: InProgressItem): boolean {
 /**
  * The drafts, and the shared versions that belong in „In Arbeit“ by the tab
  * rules (`share-tabs.ts`): waiting for a review, for the catalogue entry, for
- * a removal, or needing a look. What is in the catalogue, replaced,
- * withdrawn, removed or taken out stays in "Geteilte Pakete". The person's
- * own moves first, then what waits on others; within each, the order given
- * (newest first).
+ * a removal, or needing a look. What is in the catalogue goes to
+ * „Veröffentlicht“; what was withdrawn, removed or taken out to „Beendet“.
+ * The person's own moves first, then what waits on others; within each, the
+ * order given (newest first). `available`: which datasets are still here.
  */
-export function inProgressItems(drafts: ShareDraft[], available: ReadonlySet<string>, rows: SharedPackageRow[]): InProgressItem[] {
+export function inProgressItems(drafts: ShareDraft[], available: { has(datasetId: string): boolean }, rows: SharedPackageRow[]): InProgressItem[] {
     const shared = rows.flatMap((row): InProgressItem[] => {
         const progress = rowProgress(row)
         return TAB_OF[rowOutcome(row, progress)] === 'in-progress' ? [{ kind: 'shared', key: row.key, row, progress }] : []
@@ -33,11 +33,4 @@ export function inProgressItems(drafts: ShareDraft[], available: ReadonlySet<str
         ...drafts.map((draft): InProgressItem => ({ kind: 'draft', key: `draft:${draft.datasetId}`, draft, available: available.has(draft.datasetId) })),
         ...shared,
     ].sort((a, b) => Number(isMine(b)) - Number(isMine(a)))
-}
-
-/** The first `limit` items unless all are wanted, how many stay out of sight, and how many of those are the person's move. */
-export function compactList<T>(items: T[], expanded: boolean, limit: number, mine: (item: T) => boolean) {
-    const shown = expanded ? items : items.slice(0, limit)
-    const rest = items.slice(shown.length)
-    return { shown, more: rest.length, moreMine: rest.filter(mine).length }
 }

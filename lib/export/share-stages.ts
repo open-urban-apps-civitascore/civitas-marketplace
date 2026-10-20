@@ -4,7 +4,7 @@ import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
 /**
  * Where a shared package version stands, in the four stages of sharing (Ewa's
  * plan of 2026-10-13, point 8): one place that tells it, so the last step of
- * "Teilen", "In Arbeit" and "Geteilte Pakete" all say the same. Pure, for
+ * the wizard, "In Arbeit" and "Veröffentlicht" all say the same. Pure, for
  * client components.
  *
  * Two of the stages are the person's own move, two are the catalogue team's:

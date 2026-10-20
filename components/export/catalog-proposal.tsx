@@ -9,11 +9,10 @@ import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { resultTone } from '@/lib/export/result-tone'
 
 /**
- * The catalogue step from a list of shared packages, one click per merged and
- * verified package: "Geteilte Pakete" and "In Arbeit" offer it the same way,
- * so they share one implementation. `onProposed` runs after a proposal that
- * changed something (a new or an already open merge request), to read the
- * list again.
+ * The catalogue step from the list „In Arbeit“, one click per merged and
+ * verified package, with its answer kept for the row it answers.
+ * `onProposed` runs after a proposal that changed something (a new or an
+ * already open merge request), to read the list again.
  */
 export function useCatalogProposal(onProposed: () => void) {
     const [proposing, setProposing] = useState<string | null>(null)

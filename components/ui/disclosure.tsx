@@ -37,10 +37,13 @@ export function Disclosure({
     defaultOpen = false,
     open: openProp,
     onOpenChange,
+    summaryClassName,
 }: {
     summary: ReactNode
     children: ReactNode
     className?: string
+    /** For a summary that stands in for a heading („So läuft Teilen ab“) rather than a quiet "show more". */
+    summaryClassName?: string
     defaultOpen?: boolean
     /** Kept by the caller instead, to open it when something inside needs attention (a field that is wrong). */
     open?: boolean
@@ -75,7 +78,10 @@ export function Disclosure({
                     if (openProp === undefined) setOwnOpen(!open)
                     onOpenChange?.(!open)
                 }}
-                className="flex items-center gap-1 text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                className={cn(
+                    'flex items-center gap-1 text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline',
+                    summaryClassName,
+                )}
             >
                 <ChevronDown
                     aria-hidden

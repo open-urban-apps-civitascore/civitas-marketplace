@@ -30,7 +30,7 @@ export function PageHeader({
     title: string
     /** One sentence under the title. */
     lead?: ReactNode
-    /** A quiet link or button at the right, not the page's main action. */
+    /** A link or button at the right: usually a quiet one; the page's one primary where the page is about it ("Teilen"). */
     actions?: ReactNode
     className?: string
 }) {

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 
 import { ExportPanel } from '@/components/export/export-panel'
 import { Disclosure } from '@/components/ui/disclosure'
@@ -8,24 +9,26 @@ import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { exportSources } from '@/lib/export/sources'
-import { draftOwnerTag } from '@/lib/export/share-drafts'
+import { draftOwnerOf } from '@/lib/export/share-drafts'
 import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
 import { getAccessToken, requireSession } from '@/lib/session'
 
-/** Whose drafts these are, as a tag; none without e-mail or name (see the panel's drafts). */
-function draftOwner(user: { email?: string | null; name?: string | null } | undefined): string | undefined {
-    const owner = user?.email?.trim() || user?.name?.trim()
-    return owner ? draftOwnerTag(owner) : undefined
-}
-
 /**
+ * „Neues Paket teilen“: the wizard on a page of its own, without the tab bar
+ * (decision of 18.10., option A: two stacked rows of tabs and steps would
+ * read as two tab bars). A way back to the lists at the top, then the three
+ * steps; each step is an address of this page (`wizard-address.ts`).
+ *
  * Sharing starts at the instance's INVENTORY, not at an installation: what a
  * municipality wants to hand on is usually what it modelled by hand in the
  * portal, and no install record exists for that. Every dataset the signed-in
  * user may read is offered; the platform's own permissions decide, the
  * marketplace adds none.
+ *
+ * Moving between the steps changes only the address, so this page's reads of
+ * the portal run once per visit, not once per step.
  */
-export default async function ExportPage() {
+export default async function NewSharePage() {
     const session = await requireSession()
     const accessToken = await getAccessToken()
     const config = exportConfig()
@@ -51,15 +54,13 @@ export default async function ExportPage() {
 
     return (
         <div className="flex flex-col gap-6">
+            <Link href="/export" className="inline-flex items-center gap-1 self-start text-sm font-medium text-primary underline-offset-2 hover:underline">
+                <ArrowLeft aria-hidden className="size-4" />
+                Zurück zu Teilen
+            </Link>
             <PageHeader
-                title="Teilen"
+                title="Neues Paket teilen"
                 lead="Aus einem Datensatz dieser Instanz wird ein Paket. Nach zwei Prüfungen durch das Katalog-Team steht es im Katalog als Anwendungsfall. Die Daten selbst bleiben hier."
-                actions={
-                    // The list of what was shared lives on its own page (Ewa, 2026-10-13).
-                    <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
-                        Geteilte Pakete ansehen
-                    </Link>
-                }
             />
 
             {/* Neutral: setting it up is the operator's task, nothing the person here can supply. */}
@@ -106,8 +107,7 @@ export default async function ExportPage() {
                     }}
                     // A tag, not the address: drafts are filed under it in the browser. Without
                     // e-mail or name there is nothing to keep two people apart, so no drafts.
-                    draftOwner={draftOwner(session.user)}
-                    canListShares={readiness === 'ready' && right === 'allowed'}
+                    draftOwner={draftOwnerOf(session.user)}
                 />
             )}
         </div>
