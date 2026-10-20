@@ -35,7 +35,7 @@ export function InstallButton({
     installed = false,
 }: {
     entryId: string
-    /** Already present in this instance — the action is then closed. */
+    /** Already present in this instance: the card's badge then stands in for the button. */
     installed?: boolean
 }) {
     const [result, formAction, pending] = useActionState(installEntry, null)
@@ -43,20 +43,29 @@ export function InstallButton({
     // waiting for the revalidated page to arrive.
     const done = installed || result?.status === 'created'
 
+    // Installed: a disabled button would only repeat the badge. An install from
+    // here re-renders the page as installed (revalidatePath) while this
+    // component stays mounted, so its message stays readable.
+    if (installed && !result) return null
+
     return (
         <div className="flex flex-col gap-2">
-            <form action={formAction}>
-                <input type="hidden" name="entryId" value={entryId} />
-                <SubmitButton
-                    pending={pending}
-                    icon={Download}
-                    label="Installieren"
-                    pendingLabel="Installiere …"
-                    disabled={done}
-                />
-            </form>
+            {!done && (
+                <form action={formAction}>
+                    <input type="hidden" name="entryId" value={entryId} />
+                    <SubmitButton
+                        pending={pending}
+                        icon={Download}
+                        label="Installieren"
+                        pendingLabel="Installiere …"
+                    />
+                </form>
+            )}
+            {/* The minted URN has almost no break opportunities. Unlike
+                `break-words`, `wrap-anywhere` also lets the card's flex row
+                shrink the line below the width of the URN. */}
             {result && (
-                <p className={`text-xs leading-relaxed ${FEEDBACK_STYLES[result.status]}`}>
+                <p className={`text-xs leading-relaxed wrap-anywhere ${FEEDBACK_STYLES[result.status]}`}>
                     {feedbackText(result)}
                 </p>
             )}
