@@ -1,0 +1,611 @@
+{
+  "tool": "superset",
+  "supersetVersion": "6.1.0",
+  "files": {
+    "metadata.yaml": {
+      "version": "1.0.0",
+      "type": "Dashboard",
+      "timestamp": "2026-10-13T10:00:00+00:00"
+    },
+    "dashboards/Verkehrszahlung_1.yaml": {
+      "dashboard_title": "Verkehrszählung",
+      "description": null,
+      "css": "",
+      "slug": null,
+      "certified_by": "",
+      "certification_details": "",
+      "published": false,
+      "uuid": "e4b2cf56-f4d1-4a86-bc87-6c46c5e2064c",
+      "position": {
+        "DASHBOARD_VERSION_KEY": "v2",
+        "ROOT_ID": { "type": "ROOT", "id": "ROOT_ID", "children": ["GRID_ID"] },
+        "HEADER_ID": { "type": "HEADER", "id": "HEADER_ID", "meta": { "text": "Verkehrszählung" } },
+        "GRID_ID": {
+          "type": "GRID",
+          "id": "GRID_ID",
+          "children": ["ROW-kennzahlen", "ROW-verlauf", "ROW-vergleich"],
+          "parents": ["ROOT_ID"]
+        },
+        "ROW-kennzahlen": {
+          "type": "ROW",
+          "id": "ROW-kennzahlen",
+          "children": ["CHART-fahrzeuge", "CHART-geschwindigkeit", "CHART-messungen"],
+          "parents": ["ROOT_ID", "GRID_ID"],
+          "meta": { "background": "BACKGROUND_TRANSPARENT" }
+        },
+        "CHART-fahrzeuge": {
+          "type": "CHART",
+          "id": "CHART-fahrzeuge",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-kennzahlen"],
+          "meta": { "chartId": 1, "uuid": "3f6c1d2a-8b4e-4c71-9a35-6d2e8f0b7a14", "sliceName": "Fahrzeuge im Zeitraum", "width": 4, "height": 22 }
+        },
+        "CHART-geschwindigkeit": {
+          "type": "CHART",
+          "id": "CHART-geschwindigkeit",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-kennzahlen"],
+          "meta": { "chartId": 2, "uuid": "7a2e9c40-1d5b-4f83-b6e2-0c9d4a7f3e58", "sliceName": "Ø Geschwindigkeit (km/h)", "width": 4, "height": 22 }
+        },
+        "CHART-messungen": {
+          "type": "CHART",
+          "id": "CHART-messungen",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-kennzahlen"],
+          "meta": { "chartId": 3, "uuid": "c41b7e93-5a08-4d26-8f1c-2e7b9d0a6c35", "sliceName": "Messungen im Zeitraum", "width": 4, "height": 22 }
+        },
+        "ROW-verlauf": {
+          "type": "ROW",
+          "id": "ROW-verlauf",
+          "children": ["CHART-verkehrsstaerke", "CHART-geschwindigkeit-verlauf"],
+          "parents": ["ROOT_ID", "GRID_ID"],
+          "meta": { "background": "BACKGROUND_TRANSPARENT" }
+        },
+        "CHART-verkehrsstaerke": {
+          "type": "CHART",
+          "id": "CHART-verkehrsstaerke",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-verlauf"],
+          "meta": { "chartId": 4, "uuid": "9e05d3b7-62c4-4a1f-a8d9-3b7c1e5f0a82", "sliceName": "Verkehrsstärke je Zählstelle (Ø Fahrzeuge je Messung)", "width": 6, "height": 50 }
+        },
+        "CHART-geschwindigkeit-verlauf": {
+          "type": "CHART",
+          "id": "CHART-geschwindigkeit-verlauf",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-verlauf"],
+          "meta": { "chartId": 5, "uuid": "2d8f4a61-b9e3-47c0-9f25-8a1c6e3d7b40", "sliceName": "Ø Geschwindigkeit je Zählstelle (km/h)", "width": 6, "height": 50 }
+        },
+        "ROW-vergleich": {
+          "type": "ROW",
+          "id": "ROW-vergleich",
+          "children": ["CHART-zaehlstellen", "CHART-letzte-messungen"],
+          "parents": ["ROOT_ID", "GRID_ID"],
+          "meta": { "background": "BACKGROUND_TRANSPARENT" }
+        },
+        "CHART-zaehlstellen": {
+          "type": "CHART",
+          "id": "CHART-zaehlstellen",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-vergleich"],
+          "meta": { "chartId": 6, "uuid": "5b3e7c19-d04a-4e68-b1f7-9c2a5d8e0f63", "sliceName": "Fahrzeuge je Zählstelle", "width": 5, "height": 50 }
+        },
+        "CHART-letzte-messungen": {
+          "type": "CHART",
+          "id": "CHART-letzte-messungen",
+          "children": [],
+          "parents": ["ROOT_ID", "GRID_ID", "ROW-vergleich"],
+          "meta": { "chartId": 7, "uuid": "e8a1f6d2-3c79-4b05-a4e8-1f6d9b2c7a90", "sliceName": "Letzte Messungen", "width": 7, "height": 50 }
+        }
+      },
+      "metadata": {
+        "refresh_frequency": 30,
+        "timed_refresh_immune_slices": [],
+        "expanded_slices": {},
+        "color_scheme": "",
+        "label_colors": {
+          "Promenade (Z-001)": "#2a78d6",
+          "Wolbecker Straße (Z-002)": "#eb6834",
+          "Ring (Z-003)": "#1baf7a",
+          "Hafen (Z-004)": "#eda100"
+        },
+        "shared_label_colors": [],
+        "color_scheme_domain": [],
+        "native_filter_configuration": [
+          {
+            "id": "NATIVE_FILTER-zeitraum",
+            "type": "NATIVE_FILTER",
+            "name": "Zeitraum",
+            "filterType": "filter_time",
+            "targets": [{}],
+            "controlValues": {},
+            "defaultDataMask": {
+              "extraFormData": { "time_range": "DATEADD(DATETIME(\"now\"), -1, hour) : now" },
+              "filterState": { "value": "DATEADD(DATETIME(\"now\"), -1, hour) : now" },
+              "ownState": {}
+            },
+            "cascadeParentIds": [],
+            "scope": { "rootPath": ["ROOT_ID"], "excluded": [] },
+            "description": ""
+          },
+          {
+            "id": "NATIVE_FILTER-zaehlstelle",
+            "type": "NATIVE_FILTER",
+            "name": "Zählstelle",
+            "filterType": "filter_select",
+            "targets": [{ "datasetUuid": "2b05a9ed-9d31-4227-9829-218cd02bf661", "column": { "name": "zaehlstelle" } }],
+            "controlValues": {
+              "enableEmptyFilter": false,
+              "defaultToFirstItem": false,
+              "multiSelect": true,
+              "searchAllOptions": false,
+              "inverseSelection": false
+            },
+            "defaultDataMask": { "extraFormData": {}, "filterState": {}, "ownState": {} },
+            "cascadeParentIds": [],
+            "scope": { "rootPath": ["ROOT_ID"], "excluded": [] },
+            "description": ""
+          }
+        ],
+        "filter_bar_orientation": "HORIZONTAL",
+        "cross_filters_enabled": false,
+        "default_filters": "{}"
+      },
+      "theme_uuid": null,
+      "version": "1.0.0"
+    },
+    "charts/Fahrzeuge_im_Zeitraum_1.yaml": {
+      "slice_name": "Fahrzeuge im Zeitraum",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "big_number_total",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "big_number_total",
+        "metric": "fahrzeuge",
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "header_font_size": 0.4,
+        "subtitle": "alle gewählten Zählstellen",
+        "subtitle_font_size": 0.15,
+        "subheader": "alle gewählten Zählstellen",
+        "subheader_font_size": 0.15,
+        "y_axis_format": "SMART_NUMBER",
+        "time_format": "smart_date",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "3f6c1d2a-8b4e-4c71-9a35-6d2e8f0b7a14",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Geschwindigkeit_2.yaml": {
+      "slice_name": "Ø Geschwindigkeit (km/h)",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "big_number",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "big_number",
+        "x_axis": "observedAt_local",
+        "time_grain_sqla": "PT1M",
+        "metric": "geschwindigkeit",
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "show_trend_line": true,
+        "start_y_axis_at_zero": false,
+        "compare_lag": "",
+        "compare_suffix": "",
+        "rolling_type": "None",
+        "header_font_size": 0.4,
+        "subtitle": "nach Fahrzeugen gewichtet, letzte Minute",
+        "subtitle_font_size": 0.15,
+        "subheader_font_size": 0.15,
+        "show_timestamp": false,
+        "y_axis_format": ",.1f",
+        "time_format": "%H:%M",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "7a2e9c40-1d5b-4f83-b6e2-0c9d4a7f3e58",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Messungen_im_Zeitraum_3.yaml": {
+      "slice_name": "Messungen im Zeitraum",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "big_number_total",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "big_number_total",
+        "metric": "messungen",
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "header_font_size": 0.4,
+        "subtitle": "Datensätze aus der Pipeline",
+        "subtitle_font_size": 0.15,
+        "subheader": "Datensätze aus der Pipeline",
+        "subheader_font_size": 0.15,
+        "y_axis_format": "SMART_NUMBER",
+        "time_format": "smart_date",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "c41b7e93-5a08-4d26-8f1c-2e7b9d0a6c35",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Verkehrsstarke_je_Zahlstelle_4.yaml": {
+      "slice_name": "Verkehrsstärke je Zählstelle (Ø Fahrzeuge je Messung)",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "echarts_timeseries_line",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "echarts_timeseries_line",
+        "x_axis": "observedAt_local",
+        "time_grain_sqla": "PT1M",
+        "metrics": ["verkehrsstaerke"],
+        "groupby": ["zaehlstelle"],
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "row_limit": 10000,
+        "order_desc": true,
+        "truncate_metric": true,
+        "show_legend": true,
+        "legendType": "scroll",
+        "legendOrientation": "top",
+        "rich_tooltip": true,
+        "tooltipSortByMetric": true,
+        "tooltipTimeFormat": "%H:%M",
+        "x_axis_time_format": "%H:%M",
+        "y_axis_format": ",.1f",
+        "markerEnabled": false,
+        "zoomable": false,
+        "area": false,
+        "color_scheme": "supersetColors",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "9e05d3b7-62c4-4a1f-a8d9-3b7c1e5f0a82",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Geschwindigkeit_je_Zahlstelle_5.yaml": {
+      "slice_name": "Ø Geschwindigkeit je Zählstelle (km/h)",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "echarts_timeseries_line",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "echarts_timeseries_line",
+        "x_axis": "observedAt_local",
+        "time_grain_sqla": "PT1M",
+        "metrics": ["geschwindigkeit"],
+        "groupby": ["zaehlstelle"],
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "row_limit": 10000,
+        "order_desc": true,
+        "truncate_metric": true,
+        "show_legend": true,
+        "legendType": "scroll",
+        "legendOrientation": "top",
+        "rich_tooltip": true,
+        "tooltipSortByMetric": true,
+        "tooltipTimeFormat": "%H:%M",
+        "x_axis_time_format": "%H:%M",
+        "y_axis_format": ",.1f",
+        "markerEnabled": false,
+        "zoomable": false,
+        "area": false,
+        "color_scheme": "supersetColors",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "2d8f4a61-b9e3-47c0-9f25-8a1c6e3d7b40",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Fahrzeuge_je_Zahlstelle_6.yaml": {
+      "slice_name": "Fahrzeuge je Zählstelle",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "echarts_timeseries_bar",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "echarts_timeseries_bar",
+        "x_axis": "zaehlstelle",
+        "metrics": ["fahrzeuge"],
+        "groupby": [],
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "orientation": "horizontal",
+        "color_by_primary_axis": true,
+        "row_limit": 100,
+        "order_desc": true,
+        "truncate_metric": true,
+        "show_value": true,
+        "show_legend": false,
+        "rich_tooltip": false,
+        "y_axis_format": "SMART_NUMBER",
+        "zoomable": false,
+        "color_scheme": "supersetColors",
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "5b3e7c19-d04a-4e68-b1f7-9c2a5d8e0f63",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "charts/Letzte_Messungen_7.yaml": {
+      "slice_name": "Letzte Messungen",
+      "description": null,
+      "certified_by": null,
+      "certification_details": null,
+      "viz_type": "table",
+      "params": {
+        "datasource": "1__table",
+        "viz_type": "table",
+        "query_mode": "raw",
+        "all_columns": ["observedAt_local", "zaehlstelle", "vehicleCount", "avgSpeedKmh", "richtung"],
+        "order_by_cols": ["[\"observedAt\", false]"],
+        "adhoc_filters": [
+          { "clause": "WHERE", "comparator": "No filter", "expressionType": "SIMPLE", "operator": "TEMPORAL_RANGE", "subject": "observedAt" }
+        ],
+        "row_limit": 15,
+        "server_pagination": false,
+        "table_timestamp_format": "%H:%M:%S",
+        "include_search": false,
+        "show_cell_bars": false,
+        "align_pn": false,
+        "color_pn": false,
+        "allow_rearrange_columns": false,
+        "column_config": { "avgSpeedKmh": { "d3NumberFormat": ",.1f" } },
+        "conditional_formatting": [],
+        "extra_form_data": {}
+      },
+      "query_context": null,
+      "cache_timeout": 30,
+      "uuid": "e8a1f6d2-3c79-4b05-a4e8-1f6d9b2c7a90",
+      "version": "1.0.0",
+      "dataset_uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661"
+    },
+    "datasets/CIVITAS_Payload/verkehrsmessung.yaml": {
+      "table_name": "verkehrsmessung",
+      "main_dttm_col": "observedAt",
+      "currency_code_column": null,
+      "description": "Normalisierte Messungen der Zählstellen, eine Zeile je Messintervall und Zählstelle.",
+      "default_endpoint": null,
+      "offset": 0,
+      "cache_timeout": 30,
+      "catalog": null,
+      "schema": "public",
+      "sql": "",
+      "params": null,
+      "template_params": null,
+      "filter_select_enabled": true,
+      "fetch_values_predicate": null,
+      "extra": null,
+      "normalize_columns": false,
+      "always_filter_main_dttm": false,
+      "folders": null,
+      "uuid": "2b05a9ed-9d31-4227-9829-218cd02bf661",
+      "metrics": [
+        {
+          "metric_name": "count",
+          "verbose_name": "COUNT(*)",
+          "metric_type": "count",
+          "expression": "COUNT(*)",
+          "description": null,
+          "d3format": null,
+          "currency": null,
+          "extra": { "warning_markdown": "" },
+          "warning_text": null
+        },
+        {
+          "metric_name": "fahrzeuge",
+          "verbose_name": "Fahrzeuge",
+          "metric_type": null,
+          "expression": "SUM(\"vehicleCount\")",
+          "description": "Gezählte Fahrzeuge, über alle Messintervalle summiert.",
+          "d3format": ",d",
+          "currency": null,
+          "extra": { "warning_markdown": "" },
+          "warning_text": null
+        },
+        {
+          "metric_name": "messungen",
+          "verbose_name": "Messungen",
+          "metric_type": null,
+          "expression": "COUNT(*)",
+          "description": "Anzahl der Messungen (Zeilen) aus der Pipeline.",
+          "d3format": ",d",
+          "currency": null,
+          "extra": { "warning_markdown": "" },
+          "warning_text": null
+        },
+        {
+          "metric_name": "verkehrsstaerke",
+          "verbose_name": "Ø Fahrzeuge je Messung",
+          "metric_type": null,
+          "expression": "AVG(\"vehicleCount\")",
+          "description": "Durchschnitt der Fahrzeuge je Messintervall. Anders als eine Summe knickt er am Rand des Zeitraums nicht ein, wenn das letzte Intervall noch läuft.",
+          "d3format": ",.1f",
+          "currency": null,
+          "extra": { "warning_markdown": "" },
+          "warning_text": null
+        },
+        {
+          "metric_name": "geschwindigkeit",
+          "verbose_name": "Ø Geschwindigkeit (km/h)",
+          "metric_type": null,
+          "expression": "SUM(\"avgSpeedKmh\" * \"vehicleCount\") / NULLIF(SUM(\"vehicleCount\"), 0)",
+          "description": "Durchschnittsgeschwindigkeit, nach Fahrzeugen gewichtet: ein Intervall ohne Fahrzeuge zählt nicht mit.",
+          "d3format": ",.1f",
+          "currency": null,
+          "extra": { "warning_markdown": "" },
+          "warning_text": null
+        }
+      ],
+      "columns": [
+        {
+          "column_name": "observedAt",
+          "verbose_name": "Messzeit (UTC)",
+          "is_dttm": true,
+          "is_active": true,
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": "Messzeitpunkt, gespeichert in UTC. Der Zeitfilter des Dashboards greift hier.",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "stationId",
+          "verbose_name": "Kennung",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": "Kennung der Zählstelle (aus counterId)",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "vehicleCount",
+          "verbose_name": "Fahrzeuge",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "INTEGER",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": "Fahrzeuge im Messintervall",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "avgSpeedKmh",
+          "verbose_name": "Ø km/h",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "DOUBLE PRECISION",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": "Durchschnittsgeschwindigkeit in km/h",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "direction",
+          "verbose_name": "Richtung (Rohwert)",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "",
+          "description": "Fahrtrichtung, inbound oder outbound",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "observedAt_local",
+          "verbose_name": "Messzeit",
+          "is_dttm": true,
+          "is_active": true,
+          "type": "TIMESTAMP WITHOUT TIME ZONE",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "\"observedAt\" AT TIME ZONE 'Europe/Berlin'",
+          "description": "Messzeitpunkt in Ortszeit (Europe/Berlin), für die Zeitachse. Gefiltert wird auf der UTC-Spalte, weil Superset 'jetzt' in UTC rechnet.",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "zaehlstelle",
+          "verbose_name": "Zählstelle",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "CASE \"stationId\" WHEN 'Z-001' THEN 'Promenade (Z-001)' WHEN 'Z-002' THEN 'Wolbecker Straße (Z-002)' WHEN 'Z-003' THEN 'Ring (Z-003)' WHEN 'Z-004' THEN 'Hafen (Z-004)' ELSE \"stationId\" END",
+          "description": "Name und Kennung der Zählstelle. Die Namen gehören zu den Demo-Zählstellen des Pakets; andere Kennungen erscheinen unverändert.",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        },
+        {
+          "column_name": "richtung",
+          "verbose_name": "Richtung",
+          "is_dttm": false,
+          "is_active": true,
+          "type": "TEXT",
+          "advanced_data_type": null,
+          "groupby": true,
+          "filterable": true,
+          "expression": "CASE \"direction\" WHEN 'inbound' THEN 'stadteinwärts' WHEN 'outbound' THEN 'stadtauswärts' ELSE \"direction\" END",
+          "description": "Fahrtrichtung auf Deutsch",
+          "python_date_format": null,
+          "datetime_format": null,
+          "extra": { "warning_markdown": null }
+        }
+      ],
+      "version": "1.0.0",
+      "database_uuid": "6205a38e-f83c-4b7f-aed2-2ebcad0cb8b2"
+    },
+    "databases/CIVITAS_Payload.yaml": {
+      "database_name": "CIVITAS Payload (Platzhalter)",
+      "sqlalchemy_uri": "postgresql+psycopg2://payload:XXXXXXXXXX@platzhalter:5432/payload",
+      "cache_timeout": null,
+      "expose_in_sqllab": true,
+      "allow_run_async": false,
+      "allow_ctas": false,
+      "allow_cvas": false,
+      "allow_dml": false,
+      "allow_file_upload": false,
+      "extra": { "allows_virtual_table_explore": true },
+      "impersonate_user": false,
+      "configuration_method": "dynamic_form",
+      "uuid": "6205a38e-f83c-4b7f-aed2-2ebcad0cb8b2",
+      "version": "1.0.0"
+    }
+  }
+}

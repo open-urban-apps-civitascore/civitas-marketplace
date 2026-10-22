@@ -1,0 +1,18 @@
+{
+  "mappingUrn": "urn:core:standard:openurbanapps:mapping:environment:messungzufeuchtewert:bhs19gzuki",
+  "name": "Messung → Feuchtewert",
+  "description": "Zieht die verschachtelten Messwerte der MQTT-Nachricht auf flache Spalten — eine Zeile je Sensor und Zeitpunkt, wie sie eine Auswertung braucht.",
+  "document": {
+    "title": "Messung → Feuchtewert",
+    "source": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtemessung:gpslwk9jh7",
+    "target": "urn:core:standard:openurbanapps:datastructure:environment:bodenfeuchtewert:g3b4znbtw9",
+    "fields": {
+      "$.baumId": "$.baumId",
+      "$.sensorId": "$.sensorId",
+      "$.gemessenAm": "$.timestamp",
+      "$.feuchteProzent": { "op": "toFloat", "input": "$.feuchte.value" },
+      "$.bodentemperaturC": { "op": "toFloat", "input": "$.bodentemperatur.value" },
+      "$.batterieProzent": { "op": "toFloat", "input": "$.batterie.value" }
+    }
+  }
+}

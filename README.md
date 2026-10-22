@@ -52,13 +52,90 @@ browser ──▶ marketplace ──▶ APISIX :9080 ──▶ portal-backend :8
 | `auth.ts` / `auth.config.ts` | NextAuth setup: Keycloak provider, session-cookie callbacks, federated sign-out |
 | `lib/session.ts` | `requireSession()` guard and `getAccessToken()` for server-side backend calls |
 | `lib/tokenUtils.ts` | Access-token refresh against Keycloak |
+| `lib/addon-catalog/` | Add-on rows from the repo-list: normalisation and installability (`listing.ts`), package fetching (`package-source.ts`), package facts for the detail page (`package-facts.ts`) |
+| `lib/deployment-repo/` | Composing an add-on install as a deployment-repo change and opening it as a pull request |
+| `lib/export/` | Exporting a dataset as a CORE-IR package: reading the instance (`portal-reader.ts`), the package transformation (`transform.ts`), the validator port (`package-check.ts`), the catalogue row (`catalog-entry.ts`), GitLab merge requests incl. the fork flow (`gitlab.ts`) |
 | `app/(authenticated)/` | Route group for signed-in pages: shared shell plus sign-out |
 | `app/login/` | Sign-in page, deliberately outside that group |
 
-### Where auth checks belong
+## Add-ons
+
+Add-ons come from the **same repo-list** as use cases and data structures — one
+catalogue, one fetch, one freshness state. Their rows carry the catalogue's
+usual fields plus what an install needs: a pinned `ref` on the
+`deploymentRef`, an `install` block (component name + subdomain) and a
+`curation` verdict.
+
+Listing and installability are separate questions. A row without those extra
+fields is still listed, and its detail page names precisely what is missing —
+which is the case for every v1-era entry today. Only a complete row offers
+"Installation vorschlagen", which then
+
+1. fetches the package from the add-on's own repository at the pinned ref
+   (binary files stay binary - see `lib/package-file.ts`),
+2. composes the change: the package under
+   `deployment/addons/<componentName>/` plus one line in the environment's
+   `components:` list,
+3. opens a pull request against the deployment repository. Nothing merges -
+   that stays with the operator.
+
+The detail page additionally reads the add-on's own package at that ref to show
+what it really brings: Keycloak roles, container images, Helm charts, parts
+(`lib/addon-catalog/package-facts.ts`).
+
+## Exporting a use case ("Teilen")
+
+The inverse of the install: `/export` reads a dataset of this instance with
+the signed-in user's token — pipelines with their models, the sources and
+sinks they link, the structure versions those reference, the mappings the
+graphs name — and turns it into a CORE-IR package in the exact layout the
+artifact repositories use (`core-ir/manifest.json` + one file per member,
+plus `README.md` and `ci/validate-bundle.py`).
+
+Three things change on the way out, all shown in the preview before anything
+leaves the instance:
+
+1. **Identity.** Artifacts that came from a catalogue package (URN scope
+   `standard`) keep their identity. Everything the instance minted itself is
+   re-identified as `urn:core:standard:<publisher>:<type>:<domain>:<name>:<derived>`,
+   with the disambiguator derived exactly as Model Forge does (SHA-256 over
+   `<publisher>#<name>`) — so every instance computes the same identity, and a
+   later install elsewhere reuses instead of duplicating.
+2. **References.** Versioned URNs become logical ones; pipeline source/sink
+   references become the bundle-local titles the package format demands.
+3. **Credentials never travel.** Fields whose name says secret, values the
+   platform masked on read, and passwords inside URL-shaped values are
+   stripped and declared as install parameters instead.
+
+Proposing is a **two-step** flow by construction: the bundle goes as a merge
+request into a configured target repository (`EXPORT_TARGET_REPOS` — the
+catalogue repository itself works, in a sub-folder, because rows carry a
+`path`); only once that merge request is merged can the catalogue entry be
+proposed, because its `ref` pins the merged commit and nothing else. The
+status of both steps is read fresh from GitLab on every click. A target the
+bot token cannot push to is served through the bot's fork — the usual way to
+contribute to a public repository one has no rights on.
+
+## Where auth checks belong
 
 Every protected page calls `requireSession()` itself. The `(authenticated)` layout
 also checks, but only so the shell is not rendered for signed-out visitors - it
 cannot be the guard, because layouts are cached client-side and do not re-render
 when navigating between pages that share them (see the Next.js authentication
 guide, "Layouts and auth checks").
+
+## License
+
+[EUPL-1.2](./LICENSE) - the licence CIVITAS/CORE uses upstream.
+
+The funder logos in `logo/` are the trademarks of their owners. They are supplied
+for the funding notice and are not licensed under the EUPL.
+
+## Funding
+
+This project is funded by the **Federal Ministry of Research, Technology and Space (BMFTR)** as part of the **[Prototype Fund](https://prototypefund.de/)**, an initiative by the Open Knowledge Foundation Germany. 
+
+<div style="display: flex; gap: 20px; align-items: center; margin-top: 20px;">
+  <a href="https://www.bmbf.de/" target="_blank"><img src="./logo/bmftr.svg" height="110" alt="BMFTR Logo" /></a>
+  <a href="https://prototypefund.de/" target="_blank"><img src="./logo/ptf.svg" height="110" alt="Prototype Fund Logo" /></a>
+</div>
