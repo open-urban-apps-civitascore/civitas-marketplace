@@ -110,7 +110,7 @@ describe('the progress line', () => {
 describe('a row of „In Arbeit“', () => {
     it('says where it stands in a sentence a screen reader hears, with the line beside it for the eye', () => {
         const html = list([row('baeume', { bundle: onBase(), catalog: { state: 'none' } })])
-        const sentence = 'Katalog-Eintrag (3 von 4) - du bist dran'
+        const sentence = 'Katalog-Eintrag (3 von 4) - Paket angenommen · du bist dran: Katalog-Eintrag vorschlagen'
         expect(text(heard(html))).toContain(sentence)
         // The labels under the marks are not heard: the sentence says it once.
         expect(text(heard(html))).not.toContain('Einreichen')
@@ -129,8 +129,17 @@ describe('a row of „In Arbeit“', () => {
 
     it('names the colleague whose move it is', () => {
         const html = list([row('baeume', { bundle: onBase(), catalog: { state: 'none' } })], {}, 'Kim')
-        expect(text(html)).toContain('Katalog-Eintrag (3 von 4) - Ewa ist dran')
+        expect(text(html)).toContain('Katalog-Eintrag (3 von 4) - Paket angenommen · Ewa ist dran: Katalog-Eintrag vorschlagen')
         expect(text(html)).not.toContain('du bist dran')
+    })
+
+    it('says why a proposal that would bring back a taken-out version should go, and offers „Zurückziehen“ for it', () => {
+        const html = list([row('baeume', { bundle: onBase(), catalog: { state: 'mr-open', mrUrl: `${WEB}/29`, takenOut: { version: '1.1.0' }, bringsBack: true } })])
+        expect(text(heard(html))).toContain(
+            'Eintrags-Prüfung (4 von 4) - das Katalog-Team hat diese Version aus dem Katalog genommen, der offene Vorschlag würde sie zurückbringen · du bist dran: Vorschlag zurückziehen Vorschlag ansehen',
+        )
+        expect(text(heard(html))).toMatch(/Zurückziehen$/)
+        expect(html).toContain('lucide-undo2')
     })
 
     it('leads a stage that waits for the catalogue team to its proposal at GitLab, not to a button', () => {

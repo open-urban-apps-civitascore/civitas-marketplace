@@ -50,7 +50,7 @@ describe('an empty tab', () => {
     it('has a lead for every tab', () => {
         expect(TAB_LEADS['in-progress']).toBe('Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist.')
         expect(TAB_LEADS.published).toContain('Herausnehmen kann einen Eintrag nur das Katalog-Team.')
-        expect(TAB_LEADS.ended).toContain('Was du nur angefangen und verworfen hast, steht hier nicht')
+        expect(TAB_LEADS.ended).toBe('Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.')
     })
 })
 
