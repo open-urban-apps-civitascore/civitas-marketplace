@@ -15,7 +15,9 @@ import { resumeHref, WIZARD_PATH, wizardHref } from '@/lib/export/wizard-address
  * Whose move a row waits for decides its group and its words: „du bist dran“
  * only on what the person looking proposed (or what names nobody), „Ewa ist
  * dran“ on a colleague's, „wartet auf das Katalog-Team“ while the reviewers
- * have it. The tab bar's „1 bei dir“ counts the same rows (`TabRow.mine`).
+ * have it - and a move names what to do, in the words of its button: „du bist
+ * dran: Katalog-Eintrag vorschlagen“. The tab bar's „1 bei dir“ counts the
+ * same rows (`TabRow.mine`).
  */
 
 export type InProgressItem =
@@ -218,13 +220,18 @@ function stepName(key: StageKey): string {
     return `${STAGES[index].short} (${index + 1} von ${STAGES.length})`
 }
 
-/** Who has the next move, as the status sentence ends: „du bist dran“, „Ewa ist dran“, „wartet auf das Katalog-Team“. */
-export function whoseMove(item: InProgressItem): string | undefined {
+/**
+ * Who has the next move, as the status sentence ends: „du bist dran“, „Ewa ist
+ * dran“, „wartet auf das Katalog-Team“. `move` says what to do when it is the
+ * sharing side's: „du bist dran: Vorschlag zurückziehen“.
+ */
+export function whoseMove(item: InProgressItem, move?: string): string | undefined {
+    const what = move ? `: ${move}` : ''
     switch (turnOf(item)) {
         case 'yours':
-            return 'du bist dran'
+            return `du bist dran${what}`
         case 'colleague':
-            return item.kind === 'shared' && item.row.proposedBy ? `${item.row.proposedBy} ist dran` : undefined
+            return item.kind === 'shared' && item.row.proposedBy ? `${item.row.proposedBy} ist dran${what}` : undefined
         case 'team':
             return 'wartet auf das Katalog-Team'
         default:
@@ -258,7 +265,7 @@ const withRef = (sentence: string, url: string | undefined) => {
 /** „Paket-Prüfung (2 von 4) - wartet auf das Katalog-Team“: a stage, then who has it. */
 const dash = (stage: string, who: string | undefined) => (who ? `${stage} - ${who}` : stage)
 
-/** „Paket angenommen, danach bei GitLab geändert - bitte ansehen · du bist dran“: a sentence that has its dash already. */
+/** „Paket angenommen, danach aber direkt in GitLab geändert - … · du bist dran: …“: a sentence that has its dash already. */
 const dot = (sentence: string, who: string | undefined) => (who ? `${sentence} · ${who}` : sentence)
 
 /**
@@ -281,7 +288,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             origin: `aus Datensatz „${draft.datasetName}“`,
             track: trackOf({ propose: 'current', review: 'later', catalog: 'later', listing: 'later' }),
             // The day it was started, as „Auswählen“ names it too: the last save would give two dates for one share.
-            status: { text: `Angefangen am ${draftStartedOn(draft)} - noch nicht eingereicht · du bist dran`, tone: 'plain' },
+            status: { text: `Angefangen am ${draftStartedOn(draft)} - noch nicht eingereicht · ${whoseMove(item, 'weitermachen und zur Prüfung einreichen')}`, tone: 'plain' },
             main: { kind: 'resume', look: 'button', href: resumeHref(draft) },
             quiet: [discard],
         }
@@ -324,18 +331,27 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             }
         case 'accepted':
             // „Zurückziehen“ proposes taking the accepted package out again; the dialog says so.
-            return { ...base, track, status: plain(dash(stepName('catalog'), who)), main: { kind: 'propose-entry', look: 'button' }, quiet: [newVersion, withdraw] }
+            return {
+                ...base,
+                track,
+                status: plain(dot(`${stepName('catalog')} - Paket angenommen`, whoseMove(item, 'Katalog-Eintrag vorschlagen'))),
+                main: { kind: 'propose-entry', look: 'button' },
+                quiet: [newVersion, withdraw],
+            }
         case 'needs-look': {
             const verification = row.bundle?.verification
             const changed = verification?.state === 'changed-after-merge'
             const text = changed
-                ? 'Paket angenommen, danach bei GitLab geändert - bitte ansehen'
-                : `Paket angenommen, lässt sich aber nicht bestätigen (${verification ? verificationLabel(verification) : 'nicht prüfbar'}) - bitte ansehen`
+                ? 'Paket angenommen, danach aber direkt in GitLab geändert - es ist nicht mehr der geprüfte Stand, deshalb lässt sich der Katalog-Eintrag nicht vorschlagen'
+                : `Paket angenommen, lässt sich aber nicht bestätigen (${verification ? verificationLabel(verification) : 'nicht prüfbar'})`
             const where = row.folderUrl ?? verification?.mergedMrUrl ?? row.bundleMr.url
+            const atChange = changed && Boolean(row.folderUrl)
+            // A new version goes through the package check again; then the catalogue entry can follow.
+            const move = `${atChange ? 'Änderung ansehen' : 'in GitLab ansehen'} und eine neue Version teilen, die wieder geprüft wird`
             return {
                 ...base,
                 track,
-                status: plain(dot(text, who), { label: changed && row.folderUrl ? 'Änderung ansehen' : 'In GitLab ansehen', href: where }),
+                status: plain(dot(text, whoseMove(item, move)), { label: atChange ? 'Änderung ansehen' : 'In GitLab ansehen', href: where }),
                 main: { ...newVersion, look: 'button' },
                 quiet: [withdraw],
             }
@@ -355,12 +371,15 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             // „Zurückziehen“ withdraws only the entry; the package stays accepted unless the person chooses otherwise.
             return { ...base, track, status: plain(withRef(dash(stepName('listing'), who), row.catalog?.mrUrl)), main: gitlab(row.catalog?.mrUrl), quiet: [withdraw] }
         case 'brings-back':
-            // Withdrawing it is the move: it would bring back what the catalogue team took out.
+            // Withdrawing it is the move: it would bring back what the catalogue team took out. Said as the dialog says it.
             return {
                 ...base,
                 track,
                 status: plain(
-                    dot(`${stepName('listing')} - bringt einen herausgenommenen Eintrag zurück`, who),
+                    dot(
+                        `${stepName('listing')} - das Katalog-Team hat diese Version aus dem Katalog genommen, der offene Vorschlag würde sie zurückbringen`,
+                        whoseMove(item, 'Vorschlag zurückziehen'),
+                    ),
                     row.catalog?.mrUrl ? { label: 'Vorschlag ansehen', href: row.catalog.mrUrl } : undefined,
                 ),
                 main: { kind: 'withdraw', look: 'button' },

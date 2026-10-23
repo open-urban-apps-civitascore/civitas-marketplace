@@ -662,7 +662,7 @@ async function proposeCatalog(
 function verificationRefusal(verification: BundleVerification | undefined): string {
     switch (verification?.state) {
         case 'changed-after-merge':
-            return 'Kein Katalog-Eintrag: Das Paket im Ablageort weicht vom angenommenen Vorschlag ab, jemand hat es danach geändert. Bitte die Änderung ansehen oder eine neue Version teilen.'
+            return 'Kein Katalog-Eintrag: Das Paket im Ablageort weicht vom angenommenen Vorschlag ab, jemand hat es danach geändert. Bitte die Änderung ansehen und eine neue Version teilen, die wieder geprüft wird.'
         case 'unverifiable':
             return 'Kein Katalog-Eintrag: Der angenommene Vorschlag ist in GitLab nicht mehr lesbar, der Inhalt lässt sich nicht prüfen.'
         default:

@@ -131,7 +131,7 @@ const TABLE: [string, { track?: TrackMark[]; status: string; tone?: string; main
         'accepted',
         {
             track: ['done', 'done', 'yours', 'later'],
-            status: 'Katalog-Eintrag (3 von 4) - du bist dran',
+            status: 'Katalog-Eintrag (3 von 4) - Paket angenommen · du bist dran: Katalog-Eintrag vorschlagen',
             main: 'button:propose-entry',
             quiet: ['new-version', 'withdraw'],
         },
@@ -140,7 +140,8 @@ const TABLE: [string, { track?: TrackMark[]; status: string; tone?: string; main
         'needs-look',
         {
             track: ['done', 'done', 'problem', 'later'],
-            status: 'Paket angenommen, danach bei GitLab geändert - bitte ansehen · du bist dran',
+            status:
+                'Paket angenommen, danach aber direkt in GitLab geändert - es ist nicht mehr der geprüfte Stand, deshalb lässt sich der Katalog-Eintrag nicht vorschlagen · du bist dran: Änderung ansehen und eine neue Version teilen, die wieder geprüft wird',
             main: 'button:new-version',
             quiet: ['withdraw'],
         },
@@ -171,7 +172,8 @@ const TABLE: [string, { track?: TrackMark[]; status: string; tone?: string; main
         'brings-back',
         {
             track: ['done', 'done', 'done', 'problem'],
-            status: 'Eintrags-Prüfung (4 von 4) - bringt einen herausgenommenen Eintrag zurück · du bist dran',
+            status:
+                'Eintrags-Prüfung (4 von 4) - das Katalog-Team hat diese Version aus dem Katalog genommen, der offene Vorschlag würde sie zurückbringen · du bist dran: Vorschlag zurückziehen',
             main: 'button:withdraw',
             quiet: [],
         },
@@ -196,7 +198,7 @@ describe('the stage → action table of „In Arbeit“', () => {
         const [started] = inProgressItems([draft('ds-a')], DATASETS, [])
         expect(summary(rowView(started, DATASETS))).toEqual({
             track: ['yours', 'later', 'later', 'later'],
-            status: 'Angefangen am 12.10. - noch nicht eingereicht · du bist dran',
+            status: 'Angefangen am 12.10. - noch nicht eingereicht · du bist dran: weitermachen und zur Prüfung einreichen',
             tone: 'plain',
             main: 'button:resume',
             quiet: ['discard'],
@@ -253,7 +255,7 @@ describe('whose move it is', () => {
         const theirs = itemOf(STAGE_ROWS.accepted, 'Kim')
         expect(turnOf(theirs)).toBe('colleague')
         expect(isMine(theirs)).toBe(false)
-        expect(rowView(theirs, DATASETS).status.text).toBe('Katalog-Eintrag (3 von 4) - Ewa ist dran')
+        expect(rowView(theirs, DATASETS).status.text).toBe('Katalog-Eintrag (3 von 4) - Paket angenommen · Ewa ist dran: Katalog-Eintrag vorschlagen')
         // Anyone with the right may still take the step.
         expect(rowView(theirs, DATASETS).main).toEqual({ kind: 'propose-entry', look: 'button' })
         // Names are compared as the person sees them, case aside.
@@ -268,7 +270,7 @@ describe('whose move it is', () => {
         // The layout passes `proposerName(session.user)`: „unbekannt“ is nobody's name, so it owns no named share.
         const nameless = proposerName({ name: '  ' })
         expect(turnOf(itemOf(STAGE_ROWS.accepted, nameless))).toBe('colleague')
-        expect(rowView(itemOf(STAGE_ROWS.accepted, nameless), DATASETS).status.text).toBe('Katalog-Eintrag (3 von 4) - Ewa ist dran')
+        expect(rowView(itemOf(STAGE_ROWS.accepted, nameless), DATASETS).status.text).toBe('Katalog-Eintrag (3 von 4) - Paket angenommen · Ewa ist dran: Katalog-Eintrag vorschlagen')
         // What they proposed themselves names nobody, and stays theirs.
         expect(turnOf(itemOf(row('a', { bundle: onBase(), catalog: { state: 'none' }, proposedBy: undefined }), nameless))).toBe('yours')
     })

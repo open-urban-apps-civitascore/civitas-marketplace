@@ -15,9 +15,7 @@ import { WIZARD_PATH } from '@/lib/export/wizard-address'
 export const TAB_LEADS: Record<ShareTab, string> = {
     'in-progress': 'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist.',
     published: 'Was aus dieser Instanz im Katalog steht - beide Prüfungen sind durch. Herausnehmen kann einen Eintrag nur das Katalog-Team.',
-    ended:
-        'Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten. ' +
-        'Was du nur angefangen und verworfen hast, steht hier nicht - es lag nur in deinem Browser.',
+    ended: 'Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.',
 }
 
 /** The tab names, for the heading screen readers find on each tab's page. */
