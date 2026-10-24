@@ -13,6 +13,8 @@
  * proposed (`withdrawMergeRequest`). No code path merges.
  */
 
+import { declineReasonOf, withdrawalMarkIn, withdrawalNoteIn, type DeclineReason } from '@/lib/export/merge-request-text'
+
 export class GitLabError extends Error {
     constructor(
         message: string,
@@ -20,6 +22,17 @@ export class GitLabError extends Error {
     ) {
         super(message)
         this.name = 'GitLabError'
+    }
+}
+
+/** The branch is held by an earlier proposal that was turned down: it stays, so the catalogue team can reopen that proposal. */
+export class HeldBranchError extends GitLabError {
+    constructor(readonly held: MergeRequestRef) {
+        super(
+            `Vorschlag !${held.iid} wurde geschlossen, ohne angenommen zu werden. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.`,
+            0,
+        )
+        this.name = 'HeldBranchError'
     }
 }
 
@@ -168,6 +181,20 @@ export interface MergeRequestRef {
     updated_at?: string
     /** How many comments people wrote on it, GitLab's own notes not counted. */
     user_notes_count?: number
+}
+
+/** One comment on a merge request, as far as the share pages read it. */
+export interface MergeRequestNote {
+    body: string
+    /** GitLab's own note ("closed", "reopened"), which nobody wrote. */
+    system?: boolean
+    author?: { id: number; username?: string } | null
+    created_at?: string
+}
+
+/** Newest created first; stable, so entries without a date keep GitLab's order. */
+export function newestFirst<T extends { created_at?: string | null }>(requests: readonly T[]): T[] {
+    return [...requests].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
 }
 
 /** Splits a project web URL into API base and `group/project` path. */
@@ -387,15 +414,22 @@ export function readFile(
     })
 }
 
-/** Merge requests into `targetProjectId` from `sourceBranch`, newest first, any state. */
+/**
+ * Merge requests into `targetProjectId` from `sourceBranch`, newest created
+ * first, any state. By creation, not last change: a late comment on an older
+ * proposal must not make it "the newest", which decides whether a version was
+ * turned down. Sorted here again, so the first one is always the newest.
+ */
 export async function findMergeRequests(
     client: GitLabClient,
     targetProjectId: number,
     sourceBranch: string,
 ): Promise<MergeRequestRef[]> {
-    return gl<MergeRequestRef[]>(
-        client,
-        `/projects/${targetProjectId}/merge_requests?source_branch=${encode(sourceBranch)}&state=all&order_by=updated_at&sort=desc&per_page=20`,
+    return newestFirst(
+        await gl<MergeRequestRef[]>(
+            client,
+            `/projects/${targetProjectId}/merge_requests?source_branch=${encode(sourceBranch)}&state=all&order_by=created_at&sort=desc&per_page=20`,
+        ),
     )
 }
 
@@ -468,8 +502,9 @@ export function mergeRequestCommits(
 
 /**
  * The newest comments on a merge request, newest first, GitLab's own
- * ("closed") among them. Kept per `updatedAt`: a new comment, a reopen or
- * any other change moves it, so the key changes with the answer. Without
+ * ("closed") among them, with who wrote each and when. Kept per `updatedAt`:
+ * a new comment, a reopen or any other change moves it, so the key changes
+ * with the answer - a closed request that stays closed is read once. Without
  * `updatedAt` nothing is kept.
  */
 export function mergeRequestNotes(
@@ -477,10 +512,32 @@ export function mergeRequestNotes(
     projectId: number,
     iid: number,
     updatedAt: string | undefined,
-): Promise<{ body: string }[]> {
+): Promise<MergeRequestNote[]> {
     return readOnce(client, `mr-notes|${projectId}|${iid}|${updatedAt}`, Boolean(updatedAt), () =>
-        gl<{ body: string }[]>(client, `/projects/${projectId}/merge_requests/${iid}/notes?sort=desc&order_by=created_at&per_page=100`),
+        gl<MergeRequestNote[]>(client, `/projects/${projectId}/merge_requests/${iid}/notes?sort=desc&order_by=created_at&per_page=100`),
     )
+}
+
+/** How a closed merge request ended: withdrawn through the marketplace for `withdrawnBy`, else the catalogue team's `reason`. */
+export interface Closing {
+    withdrawnBy?: string
+    reason?: DeclineReason
+}
+
+/**
+ * Reads how a closed request ended: the withdrawal mark in its description
+ * first, which needs no call; its comments only where people wrote any, for
+ * an old withdrawal note or the team's reason. An unreadable comment list
+ * throws, so nothing is claimed about the team.
+ */
+export async function readClosing(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<Closing> {
+    const marked = withdrawalMarkIn(mr.description, mr.closed_at)
+    if (marked) return { withdrawnBy: marked }
+    // No comments: no reason, and no old withdrawal note either - the note is a comment too.
+    if (mr.user_notes_count === 0) return { reason: { kind: 'none' } }
+    const notes = await mergeRequestNotes(client, projectId, mr.iid, mr.updated_at)
+    const noted = withdrawalNoteIn(mr, notes)
+    return noted ? { withdrawnBy: noted } : { reason: declineReasonOf(mr, notes) }
 }
 
 /**
@@ -538,8 +595,10 @@ export async function treeIdOf(
  * Takes back a merge request the bot opened: the close, then a note on whose
  * behalf, then its branch. Withdrawing one's own proposal needs no review on
  * any forge, which is why this is the one write besides proposing. Closing
- * is what counts and comes first, so no note claims a withdrawal that did
- * not happen; the note and the branch are courtesies, whose failure does not
+ * is what counts and comes first, and it writes `mark` into the description
+ * in the same request: a close without it reads as the catalogue team's "no",
+ * so a failed close fails the whole withdrawal, and none is claimed that did
+ * not happen. The note and the branch are courtesies, whose failure does not
  * fail it - a leftover branch is replaced by the next proposal anyway (see
  * `openMergeRequest`).
  */
@@ -547,13 +606,27 @@ export async function withdrawMergeRequest(
     client: GitLabClient,
     projectId: number,
     mr: MergeRequestRef,
-    note: string,
+    { note, mark }: { note: string; mark: string },
 ): Promise<void> {
-    await gl(client, `/projects/${projectId}/merge_requests/${mr.iid}`, { method: 'PUT', body: { state_event: 'close' } })
+    const description = mr.description?.trimEnd() ? `${mr.description.trimEnd()}\n\n${mark}` : mark
+    await gl(client, `/projects/${projectId}/merge_requests/${mr.iid}`, { method: 'PUT', body: { state_event: 'close', description } })
     await gl(client, `/projects/${projectId}/merge_requests/${mr.iid}/notes`, { method: 'POST', body: { body: note } }).catch(() => undefined)
     await gl(client, `/projects/${mr.source_project_id ?? projectId}/repository/branches/${encode(mr.source_branch)}`, {
         method: 'DELETE',
     }).catch(() => undefined)
+}
+
+/**
+ * The request whose branch must stay: the newest of the account's own requests
+ * from it (of any package), when it was closed without being withdrawn - even
+ * after an earlier merge, as the team reopening a later "no" needs its branch.
+ */
+async function heldBy(client: GitLabClient, projectId: number, requests: MergeRequestRef[]): Promise<MergeRequestRef | undefined> {
+    if (!requests.some((mr) => mr.state === 'closed')) return undefined
+    const account = await currentUser(client)
+    const newest = requests.find((mr) => mr.author?.id === account.id)
+    if (newest?.state !== 'closed') return undefined
+    return (await readClosing(client, projectId, newest)).withdrawnBy ? undefined : newest
 }
 
 export type MergeRequestOutcome =
@@ -585,17 +658,20 @@ export async function openMergeRequest(
         deletedPaths?: string[]
     },
 ): Promise<MergeRequestOutcome> {
-    const open = (await findMergeRequests(client, input.upstream.id, input.branch)).find(
-        (mr) => mr.state === 'opened',
-    )
+    const requests = await findMergeRequests(client, input.upstream.id, input.branch)
+    const open = requests.find((mr) => mr.state === 'opened')
     if (open) return { status: 'already-open', url: open.web_url, iid: open.iid }
 
     const source = canPush(input.upstream) ? input.upstream : await ensureFork(client, input.upstream)
 
-    // A leftover branch without an open MR (closed, or a previous run failed
+    // A leftover branch without an open MR (withdrawn, or a previous run failed
     // after the commit) is replaced, never appended to: the merge request must
     // show exactly this export, not this export on top of an older attempt.
     if (await branchHead(client, source.id, input.branch)) {
+        // Never the branch of a turned-down proposal: the catalogue team takes their "no" back by reopening it,
+        // which needs the branch. The callers refuse such a version first.
+        const held = await heldBy(client, input.upstream.id, requests)
+        if (held) throw new HeldBranchError(held)
         await gl(client, `/projects/${source.id}/repository/branches/${encode(input.branch)}`, {
             method: 'DELETE',
         })

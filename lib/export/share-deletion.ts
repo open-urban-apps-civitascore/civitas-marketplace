@@ -19,7 +19,7 @@ import {
     type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
-import { displayNameOf, proposedByOther, proposerOf, shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
+import { displayNameOf, proposedByOther, proposerOf, shareSourceLine, shareSourceOf, withdrawalMark } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/status'
@@ -447,7 +447,11 @@ export async function runDeletion(
     const closed: string[] = []
     try {
         for (const step of work.closes) {
-            await withdrawMergeRequest(step.client, step.projectId, step.mr, withdrawalNote(step.what, plan, requestedBy))
+            // The mark goes with the close: without it, the listing would read the close as the catalogue team's "no".
+            await withdrawMergeRequest(step.client, step.projectId, step.mr, {
+                note: withdrawalNote(step.what, plan, requestedBy),
+                mark: withdrawalMark(requestedBy, new Date()),
+            })
             closed.push(ref(step.mr))
         }
         if (!removal) {

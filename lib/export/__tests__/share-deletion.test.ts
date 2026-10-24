@@ -7,8 +7,9 @@ vi.mock('@/lib/export/share-permission', async (importOriginal) => ({
 }))
 
 import { deleteShare, planShareDeletion, proposeSharedCatalogEntry } from '@/lib/export-actions'
+import type { MergeRequestNote } from '@/lib/export/gitlab'
 import { readShareListing } from '@/lib/export/share-listing'
-import { shareSourceLine, shareSourceOf, withdrawerOf } from '@/lib/export/merge-request-text'
+import { shareSourceLine, shareSourceOf, withdrawalMarkIn, withdrawerOf } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import type { DeletionScope } from '@/lib/export/share-deletion'
 import { fetchShareRight } from '@/lib/export/share-permission'
@@ -39,8 +40,12 @@ const mr = (iid: number, state: string, branch: string, extra: Record<string, un
 const catalogMr = (iid: number, repo = WEB, dir = DIR, state = 'opened') =>
     mr(iid, state, 'catalog/baeume-1.1.0', { description: `Proposed by ...\n\nAdds \`urn:stadt:usecase:baeume\` in \`useCases\`, pinned to\n\`${HEAD}\` of ${repo} (path \`${dir}\`).` })
 
-/** The note `withdrawalNote` leaves on what it closes. */
-const WITHDRAWAL_NOTE = { body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. Sharing the use case again opens a new merge request.' }
+/** The note `withdrawalNote` left on what it closed until rc.6, two seconds after the close at 10:00. */
+const WITHDRAWAL_NOTE = {
+    body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. Sharing the use case again opens a new merge request.',
+    author: { id: 42 },
+    created_at: '2026-10-17T10:00:02Z',
+}
 
 const MERGED_EXPORT = mr(3, 'merged', 'export/baeume-1.1.0', { sha: MERGED_HEAD, merge_commit_sha: MERGE, title: 'Export use case: Bäume 1.1.0' })
 const manifest = (version: string) => JSON.stringify({ id: 'urn:stadt:usecase:baeume', version })
@@ -57,9 +62,11 @@ interface World {
     /** Commit parents, first parent first. */
     parents: Record<string, string[]>
     /** Comments per merge request, newest first. */
-    notes?: Record<number, { body: string }[]>
+    notes?: Record<number, MergeRequestNote[]>
     /** `<METHOD> <path>` parts that answer 500. */
     failing?: string[]
+    /** Branches besides the base branch that exist, by name. */
+    branches?: string[]
 }
 
 function world(overrides: Partial<World> = {}): World {
@@ -109,7 +116,9 @@ function fakeGitLab(state: World) {
                 }
             }
             if (path === '/projects/7/repository/branches/main') return json({ commit: { id: HEAD } })
-            if (path.startsWith('/projects/7/repository/branches/')) return json({ message: '404 Branch Not Found' }, 404)
+            const branch = path.startsWith('/projects/7/repository/branches/') ? decodeURIComponent(path.slice('/projects/7/repository/branches/'.length)) : undefined
+            if (branch && state.branches?.includes(branch)) return json({ commit: { id: 'old' } })
+            if (branch) return json({ message: '404 Branch Not Found' }, 404)
             if (path === '/projects/7/repository/tree') {
                 const ref = query.get('ref') ?? ''
                 if (query.get('recursive') === 'true') {
@@ -196,8 +205,20 @@ describe('deleting a version that waits for review', () => {
             'POST /projects/7/merge_requests/4/notes',
             'DELETE /projects/7/repository/branches/export%2Fpegel-1.0.0',
         ])
-        expect(writes(calls)[0].body).toEqual({ state_event: 'close' })
+        // The close carries the mark that tells the listing it was withdrawn, not turned down.
+        const close = writes(calls)[0].body as { state_event: string; description: string }
+        expect(close.state_event).toBe('close')
+        expect(close.description.startsWith('Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n## Bäume\n\n')).toBe(true)
+        expect(close.description.split('\n').at(-1)).toMatch(/^Withdrawn through the Open Urban Apps marketplace on behalf of \*\*Test\*\* at \S+Z\.$/)
+        expect(withdrawalMarkIn(close.description, new Date().toISOString())).toBe('Test')
         expect(writes(calls)[1].body?.body).toContain('on behalf of **Test**')
+    })
+
+    it('fails as a whole, visibly, when the close with its mark is refused, and writes nothing else', async () => {
+        const { result, calls } = await planAndDelete(world({ ...waiting(), failing: ['PUT /projects/7/merge_requests/4'] }), 'pegel', '1.0.0')
+        expect(result.status).toBe('error')
+        expect(result.detail).toContain('500')
+        expect(sent(calls)).toEqual(['PUT /projects/7/merge_requests/4'])
     })
 
     it('says when the share is someone else’s, outside the fingerprint', async () => {
@@ -599,7 +620,7 @@ describe('the list after a deletion', () => {
             exportMrs: [
                 mr(5, 'closed', 'export/baeume-1.1.0', { closed_by: { id: 42 } }),
                 MERGED_EXPORT,
-                mr(4, 'closed', 'export/pegel-1.0.0', { closed_by: { id: 42 }, title: 'Export use case: Pegelkarte 1.0.0' }),
+                mr(4, 'closed', 'export/pegel-1.0.0', { closed_by: { id: 42 }, closed_at: '2026-10-17T10:00:00Z', title: 'Export use case: Pegelkarte 1.0.0' }),
             ],
             removalMrs: [mr(12, 'opened', 'remove/baeume-1.1.0')],
             notes: { 4: [WITHDRAWAL_NOTE] },

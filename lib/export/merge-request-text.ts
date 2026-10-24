@@ -1,12 +1,21 @@
+import type { MergeRequestNote, MergeRequestRef } from '@/lib/export/gitlab'
+
 /**
  * What the marketplace's own merge requests say about themselves, read back:
  * the titles and descriptions are written by `exportAction`, so the list of
  * shared packages can take names from them instead of asking GitLab for more.
+ *
+ * And how one of them ended when it was closed without a merge: withdrawn
+ * through the marketplace, or a "no" from the catalogue team. Pure;
+ * `readClosing` in gitlab.ts reads what these need.
  */
 
-/** The display name inside an export request's title ("Export use case: <name> <version>"). */
+/** GitLab's draft markers in a title, any case: a reviewer may set one. */
+const DRAFT_PREFIX = /^\s*(?:draft:|\[draft\]|\(draft\))\s*/i
+
+/** The display name inside an export request's title ("Export use case: <name> <version>"), also behind a "Draft: ". */
 export function displayNameOf(title: string | undefined, version: string): string | undefined {
-    const match = title?.match(/^Export use case: (.+) (\d+\.\d+\.\d+)$/)
+    const match = title?.replace(DRAFT_PREFIX, '').match(/^Export use case: (.+) (\d+\.\d+\.\d+)$/)
     return match && match[2] === version ? match[1] : undefined
 }
 
@@ -20,11 +29,118 @@ export function proposerOf(description: string | null | undefined): string | und
  * Whom a withdrawal was made for, from the note the marketplace leaves on a
  * merge request it closes (`withdrawalNote` in share-deletion.ts); undefined
  * for any other comment. The bot account is also used by hand, so a request
- * it closed counts as withdrawn only with this note.
+ * it closed counts as withdrawn only with this note - or with the mark its
+ * close writes ({@link withdrawalMark}).
  */
 export function withdrawerOf(body: string | null | undefined): string | undefined {
     const name = body?.match(/^Withdrawn through the Open Urban Apps marketplace on behalf of \*\*(.+?)\*\*\./m)?.[1]?.trim()
     return name || undefined
+}
+
+/** How far the withdrawal mark's time may lie from the close it was written with: the same request, two clocks. */
+export const MARK_WINDOW_MS = 2 * 60_000
+
+/** How far an old withdrawal note (from before the mark) may lie from the close: it followed it, as a request of its own. */
+export const NOTE_WINDOW_MS = 10 * 60_000
+
+/**
+ * The line added to a request's description by the very request that closes
+ * it, so a withdrawal cannot lose it the way it lost its note (written
+ * afterwards, failing quietly). The time ties it to that close.
+ */
+export function withdrawalMark(by: string, at: Date): string {
+    return `Withdrawn through the Open Urban Apps marketplace on behalf of **${by}** at ${at.toISOString()}.`
+}
+
+const MARK_LINE = /^Withdrawn through the Open Urban Apps marketplace on behalf of \*\*(.+?)\*\* at (\S+)\.\r?$/gm
+
+function timeOf(iso: string | null | undefined): number | undefined {
+    const time = iso ? Date.parse(iso) : NaN
+    return Number.isNaN(time) ? undefined : time
+}
+
+/**
+ * Whom a request was withdrawn for, from its {@link withdrawalMark}. Counts only
+ * within {@link MARK_WINDOW_MS} of `closedAt`: a request reopened and closed
+ * again by someone else keeps the old mark.
+ */
+export function withdrawalMarkIn(description: string | null | undefined, closedAt: string | null | undefined): string | undefined {
+    const closed = timeOf(closedAt)
+    if (closed === undefined || !description) return undefined
+    for (const [, by, at] of [...description.matchAll(MARK_LINE)].reverse()) {
+        const time = timeOf(at)
+        if (time !== undefined && Math.abs(time - closed) <= MARK_WINDOW_MS && by.trim()) return by.trim()
+    }
+    return undefined
+}
+
+/** When the request's last stretch of being open began: its last reopen before the close, else its creation. */
+function openedAt(mr: Pick<MergeRequestRef, 'created_at' | 'closed_at'>, notes: readonly MergeRequestNote[]): number | undefined {
+    const closed = timeOf(mr.closed_at)
+    const reopens = notes
+        .filter((note) => note.system && /^reopened\b/i.test(note.body.trim()))
+        .map((note) => timeOf(note.created_at))
+        .filter((time): time is number => time !== undefined && (closed === undefined || time <= closed))
+    return reopens.length ? Math.max(...reopens) : timeOf(mr.created_at)
+}
+
+/**
+ * Whom a request was withdrawn for, from the note withdrawals left before the
+ * mark existed: within {@link NOTE_WINDOW_MS} of the close and after the last
+ * reopen, so an old note does not make a later close by the team a withdrawal.
+ */
+export function withdrawalNoteIn(mr: Pick<MergeRequestRef, 'created_at' | 'closed_at'>, notes: readonly MergeRequestNote[]): string | undefined {
+    const closed = timeOf(mr.closed_at)
+    if (closed === undefined) return undefined
+    const since = openedAt(mr, notes)
+    for (const note of notes) {
+        const by = note.system ? undefined : withdrawerOf(note.body)
+        const at = timeOf(note.created_at)
+        if (by && at !== undefined && Math.abs(at - closed) <= NOTE_WINDOW_MS && (since === undefined || at >= since)) return by
+    }
+    return undefined
+}
+
+/** What the catalogue team said when they did not take a proposal; `unreadable` (comments not readable just now) says nothing about the team. */
+export type DeclineReason = { kind: 'given'; text: string } | { kind: 'none' } | { kind: 'unreadable' }
+
+/** How much of the catalogue team's words a row shows; the rest is one link away, at the proposal. */
+export const REASON_MAX = 300
+
+/** What the marketplace itself writes on a proposal: never the catalogue team's reason, even when the shared account closed it. */
+export function isMarketplaceLine(body: string): boolean {
+    return /^\s*(?:Proposed by|Withdrawn through) the Open Urban Apps marketplace\b/.test(body)
+}
+
+/** One line of plain text, at most {@link REASON_MAX} characters, cut with "…". */
+function plainReason(body: string): string {
+    const text = body.replace(/\s+/g, ' ').trim()
+    const characters = Array.from(text)
+    return characters.length <= REASON_MAX ? text : `${characters.slice(0, REASON_MAX - 1).join('').trimEnd()}…`
+}
+
+/**
+ * The catalogue team's reason for closing a request: the newest comment of
+ * whoever closed it (not GitLab's, not the marketplace's), written after the
+ * last reopen and at most {@link NOTE_WINDOW_MS} after the close.
+ */
+export function declineReasonOf(
+    mr: Pick<MergeRequestRef, 'created_at' | 'closed_at' | 'closed_by'>,
+    notes: readonly MergeRequestNote[],
+): DeclineReason {
+    const closer = mr.closed_by
+    if (!closer) return { kind: 'none' }
+    const closed = timeOf(mr.closed_at)
+    const since = openedAt(mr, notes)
+    // By id where both have one, else by username: the same person either way.
+    const byCloser = (author: MergeRequestNote['author']) =>
+        Boolean(author) && (author?.id !== undefined && closer.id !== undefined ? author.id === closer.id : Boolean(closer.username) && author?.username === closer.username)
+    const said = notes
+        .filter((note) => !note.system && byCloser(note.author) && !isMarketplaceLine(note.body) && note.body.trim())
+        .map((note) => ({ note, at: timeOf(note.created_at) }))
+        .filter(({ at }) => at !== undefined && (since === undefined || at >= since) && (closed === undefined || at <= closed + NOTE_WINDOW_MS))
+        .sort((a, b) => (b.at as number) - (a.at as number))
+    return said.length ? { kind: 'given', text: plainReason(said[0].note.body) } : { kind: 'none' }
 }
 
 /**

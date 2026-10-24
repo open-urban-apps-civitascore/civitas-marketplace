@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
-import { canPush, clientFor, commitBefore, openMergeRequest, parseProjectUrl, withdrawMergeRequest, type GitLabProject, type MergeRequestRef } from '@/lib/export/gitlab'
+import {
+    canPush,
+    clientFor,
+    commitBefore,
+    findMergeRequests,
+    HeldBranchError,
+    openMergeRequest,
+    parseProjectUrl,
+    withdrawMergeRequest,
+    type GitLabProject,
+    type MergeRequestRef,
+} from '@/lib/export/gitlab'
+import { shareSourceOf, withdrawalMark, withdrawalMarkIn } from '@/lib/export/merge-request-text'
 
 interface Call {
     method: string
@@ -190,22 +202,41 @@ describe('openMergeRequest', () => {
 })
 
 describe('withdrawMergeRequest', () => {
-    const fromFork: MergeRequestRef = { iid: 5, web_url: 'https://gitlab.example/mr/5', state: 'opened', source_branch: 'export/x-1.0.0', source_project_id: 99 }
+    const fromFork: MergeRequestRef = {
+        iid: 5,
+        web_url: 'https://gitlab.example/mr/5',
+        state: 'opened',
+        source_branch: 'export/x-1.0.0',
+        source_project_id: 99,
+        description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n<!-- oua-share {"kind":"dataset","id":"ds"} -->\n',
+    }
+    const MARK = withdrawalMark('Ewa', new Date('2026-10-22T10:00:00.000Z'))
 
-    it('closes, then leaves a note, then deletes the branch where it lives - in the fork', async () => {
+    it('closes and marks it in one request, then leaves a note, then deletes the branch where it lives - in the fork', async () => {
         const gl = fakeGitLab([
             ['PUT', '/projects/10/merge_requests/5', { state: 'closed' }],
             ['POST', '/projects/10/merge_requests/5/notes', { id: 1 }],
             ['DELETE', '/projects/99/repository/branches/export%2Fx-1.0.0', new Response(null, { status: 204 })],
         ])
-        await withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), 10, fromFork, 'Withdrawn.')
+        await withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), 10, fromFork, { note: 'Withdrawn.', mark: MARK })
         expect(gl.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
             'PUT /projects/10/merge_requests/5',
             'POST /projects/10/merge_requests/5/notes',
             'DELETE /projects/99/repository/branches/export%2Fx-1.0.0',
         ])
-        expect(gl.calls[0].body).toEqual({ state_event: 'close' })
+        // The mark at the very end, after the hidden source line, which stays readable.
+        const description = (gl.calls[0].body as { description: string }).description
+        expect(gl.calls[0].body).toEqual({ state_event: 'close', description: `${fromFork.description?.trimEnd()}\n\n${MARK}` })
+        expect(description.split('\n').at(-1)).toBe(MARK)
+        expect(shareSourceOf(description)).toEqual({ kind: 'dataset', id: 'ds' })
+        expect(withdrawalMarkIn(description, '2026-10-22T10:00:01.000Z')).toBe('Ewa')
         expect(gl.calls[1].body).toEqual({ body: 'Withdrawn.' })
+    })
+
+    it('marks a request without a description with the mark alone', async () => {
+        const gl = fakeGitLab([['PUT', '/projects/10/merge_requests/5', { state: 'closed' }]])
+        await withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), 10, { ...fromFork, description: null }, { note: 'n', mark: MARK })
+        expect(gl.calls[0].body).toEqual({ state_event: 'close', description: MARK })
     })
 
     it('still closes when the note or the branch fail, and writes nothing more when the close does', async () => {
@@ -215,15 +246,114 @@ describe('withdrawMergeRequest', () => {
             ['POST', '/projects/10/merge_requests/5/notes', forbidden()],
             ['DELETE', '/projects/99/repository/branches/export%2Fx-1.0.0', forbidden()],
         ])
-        await expect(withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', tolerant.fetchImpl), 10, fromFork, 'n')).resolves.toBeUndefined()
+        await expect(
+            withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', tolerant.fetchImpl), 10, fromFork, { note: 'n', mark: MARK }),
+        ).resolves.toBeUndefined()
 
         const refused = fakeGitLab([
             ['PUT', '/projects/10/merge_requests/5', forbidden()],
             ['POST', '/projects/10/merge_requests/5/notes', { id: 1 }],
         ])
-        await expect(withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', refused.fetchImpl), 10, fromFork, 'n')).rejects.toMatchObject({ status: 403 })
+        await expect(
+            withdrawMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', refused.fetchImpl), 10, fromFork, { note: 'n', mark: MARK }),
+        ).rejects.toMatchObject({ status: 403 })
         // No note claims a withdrawal that did not happen, and the branch stays.
         expect(refused.calls.map((c) => c.method)).toEqual(['PUT'])
+    })
+})
+
+describe('findMergeRequests', () => {
+    it('asks for and returns the newest created first, whatever was changed last (U6)', async () => {
+        const gl = fakeGitLab([
+            [
+                'GET',
+                '/projects/10/merge_requests',
+                [
+                    { iid: 3, state: 'closed', source_branch: 'remove/x-1.0.0', web_url: 'u/3', created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-22T10:00:00Z' },
+                    { iid: 7, state: 'closed', source_branch: 'remove/x-1.0.0', web_url: 'u/7', created_at: '2026-10-20T10:00:00Z', updated_at: '2026-10-20T11:00:00Z' },
+                ],
+            ],
+        ])
+        const requests = await findMergeRequests(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), 10, 'remove/x-1.0.0')
+        expect(requests.map((mr) => mr.iid)).toEqual([7, 3])
+        expect(gl.calls[0].path).toContain('order_by=created_at&sort=desc')
+    })
+})
+
+describe('openMergeRequest and a proposal the catalogue team turned down (R5)', () => {
+    const files = { 'packages/x/core-ir/manifest.json': '{}\n' }
+    const input = {
+        upstream: upstream(40),
+        baseBranch: 'main',
+        branch: 'catalog/x-1.0.0',
+        title: 'Add',
+        description: 'body',
+        files,
+        existingPaths: new Set<string>(),
+    }
+    const ACCOUNT = { id: 42, username: 'walkable.cities.2021' }
+    const closed = (extra: Partial<MergeRequestRef> = {}): MergeRequestRef => ({
+        iid: 32,
+        state: 'closed',
+        source_branch: 'catalog/x-1.0.0',
+        web_url: 'https://gitlab.example/mr/32',
+        author: ACCOUNT,
+        created_at: '2026-10-22T09:59:35Z',
+        closed_at: '2026-10-22T10:00:00Z',
+        updated_at: '2026-10-22T10:00:00Z',
+        user_notes_count: 0,
+        ...extra,
+    })
+    const routes = (requests: MergeRequestRef[]): [string, string, unknown][] => [
+        ['GET', '/user', ACCOUNT],
+        ['GET', '/projects/10/merge_requests/32/notes', []],
+        ['GET', '/projects/10/merge_requests', requests],
+        ['GET', '/projects/10/repository/branches/catalog%2Fx-1.0.0', { commit: { id: 'old' } }],
+        ['DELETE', '/projects/10/repository/branches/catalog%2Fx-1.0.0', new Response(null, { status: 204 })],
+        ['GET', '/projects/10/repository/branches/main', { commit: { id: 'abc' } }],
+        ['POST', '/projects/10/repository/commits', { id: 'def' }],
+        ['POST', '/projects/10/merge_requests', { iid: 33, web_url: 'https://gitlab.example/mr/33', state: 'opened', source_branch: 'catalog/x-1.0.0' }],
+    ]
+
+    it('keeps its branch and opens nothing, so the team can still reopen it - and names no one, as it cannot tell who closed it', async () => {
+        const gl = fakeGitLab(routes([closed()]))
+        const refused = openMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), input)
+        await expect(refused).rejects.toBeInstanceOf(HeldBranchError)
+        await expect(refused).rejects.toMatchObject({
+            status: 0,
+            held: { iid: 32 },
+            message:
+                'Vorschlag !32 wurde geschlossen, ohne angenommen zu werden. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.',
+        })
+        expect(gl.calls.filter((c) => c.method !== 'GET')).toEqual([])
+    })
+
+    it('keeps it also where the branch brought a merge before, or the "no" was about another package of the same name', async () => {
+        // Accepted, taken out by a merged removal and shared again: the old merge no longer beats the later "no".
+        const merged = { ...closed({ iid: 19, state: 'merged', created_at: '2026-10-01T10:00:00Z' }) }
+        const otherPackage = closed({ description: 'Adds `urn:andere:usecase:x` in `useCases`' })
+        for (const requests of [[closed(), merged], [otherPackage]]) {
+            const gl = fakeGitLab(routes(requests))
+            await expect(openMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), input)).rejects.toBeInstanceOf(HeldBranchError)
+            expect(gl.calls.some((c) => c.method === 'DELETE')).toBe(false)
+        }
+    })
+
+    it('replaces the branch of a withdrawn one, and judges only the account’s own requests', async () => {
+        const withdrawn = closed({ description: `body\n\n${withdrawalMark('Ewa', new Date('2026-10-22T10:00:00Z'))}` })
+        const byHand = closed({ iid: 34, author: { id: 7, username: 'kurator' }, created_at: '2026-10-22T11:00:00Z' })
+        for (const requests of [[withdrawn], [byHand, withdrawn]]) {
+            const gl = fakeGitLab(routes(requests))
+            const outcome = await openMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), input)
+            expect(outcome.status).toBe('created')
+            expect(gl.calls.some((c) => c.method === 'DELETE')).toBe(true)
+        }
+    })
+
+    it('asks for the account only where a closed request could hold the branch', async () => {
+        const gl = fakeGitLab(routes([closed({ state: 'merged' })]))
+        await openMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), input)
+        expect(gl.calls.some((c) => c.path === '/user')).toBe(false)
     })
 })
 
