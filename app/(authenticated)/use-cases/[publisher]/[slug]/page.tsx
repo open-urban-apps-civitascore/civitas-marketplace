@@ -19,6 +19,7 @@ import { findUseCaseByPath } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { fetchCanCreateDatapool, fetchDatapools, type DatapoolListing } from '@/lib/datapools'
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
+import { geoportalUrl } from '@/lib/geoportal/files'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
 import { fetchActiveInstallation } from '@/lib/installations'
 import { getAccessToken, requireSession } from '@/lib/session'
@@ -213,6 +214,7 @@ export default async function UseCaseDetailPage({
                             dashboards={dashboards}
                             streams={streams}
                             simulatorUiBase={simulatorUiUrl()}
+                            geoportal={contents?.masterportal ? { ...contents.masterportal, href: geoportalUrl() } : null}
                         />
                     )}
 

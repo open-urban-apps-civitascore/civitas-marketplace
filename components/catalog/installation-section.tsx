@@ -12,6 +12,7 @@ import {
     TriangleAlert,
 } from 'lucide-react'
 
+import { ApplyGeoportalButton } from '@/components/catalog/apply-geoportal-button'
 import { RefreshWhilePending } from '@/components/catalog/refresh-while-pending'
 import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
 import { SupersetMark } from '@/components/icons/superset-mark'
@@ -49,6 +50,7 @@ export function InstallationSection({
     streams,
     simulatorUiBase,
     map,
+    geoportal,
 }: {
     installation: ActiveInstallation
     dataset: DatasetOverview | null
@@ -57,6 +59,8 @@ export function InstallationSection({
     simulatorUiBase?: string
     /** The map page, when the package publishes a layer. */
     map?: { href: string; title: string } | null
+    /** The package's Masterportal entries, and where the geoportal opens when that is configured. */
+    geoportal?: { folder: string; layers: string[]; href?: string } | null
 }) {
     const blocker = uninstallBlocker(dataset)
     // A release sets AVAILABLE at once; its pipeline runs only once the
@@ -170,6 +174,37 @@ export function InstallationSection({
                               : undefined
                     }
                 />
+            </FlowGroup>
+        )
+    }
+
+    if (geoportal) {
+        groups.push(
+            <FlowGroup
+                key="geoportal"
+                icon={MapIcon}
+                tone="map"
+                title="Geoportal"
+                subtitle={`Masterportal, Ordner „${geoportal.folder}“`}
+                footer={<ApplyGeoportalButton installationId={installation.id} />}
+            >
+                {geoportal.layers.map((layer) => (
+                    <FlowItem
+                        key={layer}
+                        icon={<MapPin className="size-4" />}
+                        kind="Ebene"
+                        name={layer}
+                        href={geoportal.href}
+                        target="Geoportal"
+                        note={
+                            releasing
+                                ? 'Zeigt Daten, sobald die Freigabe abgeschlossen ist.'
+                                : awaitingRelease
+                                  ? 'Zeigt Daten erst nach der Freigabe des Datensatzes.'
+                                  : undefined
+                        }
+                    />
+                ))}
             </FlowGroup>
         )
     }

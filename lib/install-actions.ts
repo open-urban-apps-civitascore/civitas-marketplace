@@ -7,6 +7,8 @@ import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
 import { DATAPOOL_NAME_MIN } from '@/lib/datapool-name'
 import { createDatapool, deleteDatapool, type DatapoolOption } from '@/lib/datapools'
+import { applyMasterportalToDir, geoportalConfigDir } from '@/lib/geoportal/files'
+import { readMasterportalMember } from '@/lib/geoportal/merge'
 import {
     InstallPayloadError,
     applyDeclaredDsnOverride,
@@ -499,6 +501,76 @@ export async function reimportDashboards(
     return {
         status: outcomes.every(({ ok }) => ok) ? 'imported' : 'error',
         detail: outcomes.map(({ text }) => text).join(' · '),
+    }
+}
+
+export interface GeoportalResult {
+    status: 'applied' | 'error'
+    detail: string
+}
+
+/**
+ * Writes the use case's Masterportal entries into the geoportal's config files, bound to this
+ * installation's dataset (see lib/geoportal). Safe to repeat: it replaces what it wrote before
+ * and keeps every other entry. The geoportal backend reads its config per request, so the
+ * layers show on the next page load; the portal copies its styles at start only, so a new style
+ * needs a restart of the portal.
+ *
+ * Like the dashboard re-import it reads the package's CURRENT catalogue entry, not the installed
+ * version. The entries name the dataset's APIs by slug only, so a newer package version that
+ * keeps its slugs fits an older installation.
+ */
+export async function applyGeoportalConfig(
+    _prev: GeoportalResult | null,
+    formData: FormData,
+): Promise<GeoportalResult> {
+    await requireSession()
+
+    const installationId = formData.get('installationId')
+    if (typeof installationId !== 'string' || installationId.length === 0) {
+        return { status: 'error', detail: 'installationId fehlt' }
+    }
+    const dir = geoportalConfigDir()
+    if (!dir) {
+        return { status: 'error', detail: 'GEOPORTAL_CONFIG_DIR ist nicht konfiguriert' }
+    }
+    // Package and dataset come from the platform's record, read with the
+    // user's token, never from the form.
+    const installation = await fetchInstallationFacts(installationId, await getAccessToken())
+    if (!installation?.active || !installation.packageId || !installation.dataSetId) {
+        return { status: 'error', detail: 'Keine aktive Installation mit Datensatz gefunden.' }
+    }
+
+    let entry: CatalogEntry | undefined
+    try {
+        entry = await resolveCatalogEntry(installation.packageId)
+    } catch (error) {
+        return {
+            status: 'error',
+            detail: `Paket-Quelle nicht verfügbar: ${error instanceof Error ? error.message : String(error)}`,
+        }
+    }
+    const member = entry && !isDataStructureEntry(entry) ? entry.bundle.masterportal?.[0] : undefined
+    if (!member) {
+        return { status: 'error', detail: 'Das Paket bringt keine Einträge für das Masterportal mit.' }
+    }
+
+    try {
+        const portal = readMasterportalMember(member.document, member.file)
+        const { stylesChanged } = await applyMasterportalToDir(dir, portal, installation.dataSetId)
+        const layers = portal.layers.length === 1 ? '1 Ebene' : `${portal.layers.length} Ebenen`
+        const restart = stylesChanged
+            ? ' Neue Stile zeigt das Geoportal erst nach einem Neustart des Portals.'
+            : ''
+        return {
+            status: 'applied',
+            detail: `${layers} im Ordner „${portal.folder}“ eingetragen, sichtbar nach dem Neuladen des Geoportals.${restart}`,
+        }
+    } catch (error) {
+        return {
+            status: 'error',
+            detail: `Geoportal NICHT aktualisiert: ${error instanceof Error ? error.message : String(error)}`,
+        }
     }
 }
 

@@ -11,11 +11,20 @@ interface InstallationRow {
     /** The id of the package as the install sent it: the catalogue id of the entry. */
     packageId?: string
     uninstalledAt?: string | null
-    /** The dataset the install produced, if any. */
-    dataSetId?: string
-    dataSetName?: string
-    /** One line per artifact the install created. */
-    artifacts?: { artifactType?: string }[]
+    /** One line per artifact the install created; `shellId` is the portal's id of the copy. */
+    artifacts?: { artifactType?: string; shellId?: string; name?: string }[]
+}
+
+/**
+ * The dataset the install produced, if any. The platform records it as a line like every other
+ * artifact, so its id is the line's `shellId`.
+ */
+function dataSetOf(row: InstallationRow): { dataSetId?: string; dataSetName?: string } {
+    const line = row.artifacts?.find((artifact) => artifact.artifactType === 'DATA_SET')
+    return {
+        ...(line?.shellId ? { dataSetId: line.shellId } : {}),
+        ...(line?.name ? { dataSetName: line.name } : {}),
+    }
 }
 
 /** What a page needs to know about the active installation of an entry. */
@@ -84,8 +93,7 @@ export async function fetchInstallationFacts(
         return {
             id: row.id,
             ...(row.packageId ? { packageId: row.packageId } : {}),
-            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
-            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            ...dataSetOf(row),
             active: !row.uninstalledAt,
         }
     } catch {
@@ -112,8 +120,7 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
         if (!row) return null
         return {
             id: row.id,
-            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
-            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            ...dataSetOf(row),
             hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
         }
     } catch {

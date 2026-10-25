@@ -111,6 +111,7 @@ export function parsePackageManifest(value: unknown, where: string): PackageMani
     parseMembers(members.apis, `${where}: members.apis`)
     parseMembers(members.styles, `${where}: members.styles`)
     parseMembers(members.layers, `${where}: members.layers`)
+    parseMembers(members.masterportal, `${where}: members.masterportal`)
     return value as unknown as PackageManifest
 }
 
@@ -518,6 +519,10 @@ export function assembleCatalogEntry(
         apis: (manifest.members.apis ?? []).map((member) => ({ document: read(member) })),
         styles: (manifest.members.styles ?? []).map((member) => ({ document: read(member) })),
         layers: (manifest.members.layers ?? []).map((member) => ({ document: read(member) })),
+        masterportal: (manifest.members.masterportal ?? []).map((member) => ({
+            file: member.file,
+            document: read(member),
+        })),
     }
     validateGeoMembers(bundle, manifest.id)
 

@@ -37,6 +37,8 @@ export interface PackageContents {
     apis: PackageApi[]
     /** The demo streams the package ships, as a person reads them; empty without demo data. */
     demoStreams: string[]
+    /** The package's Masterportal folder and the names of its layers, when it brings entries. */
+    masterportal?: { folder: string; layers: string[] }
 }
 
 const DASHBOARD = { one: 'Dashboard', many: 'Dashboards', order: 99 }
@@ -78,6 +80,24 @@ export function summarisePackage(entry: UseCaseEntry): PackageContents {
                 ? [simulation.label ?? simulation.sourceRef]
                 : simulation.streams.map((stream) => stream.label ?? stream.name),
         ),
+        ...masterportalSummary(entry),
+    }
+}
+
+/** Folder and layer names of the Masterportal member, read leniently: the apply checks the shape. */
+function masterportalSummary(entry: UseCaseEntry): Pick<PackageContents, 'masterportal'> {
+    const document = entry.bundle.masterportal?.[0]?.document
+    const folder = text(document?.folder)
+    if (!document || !folder) return {}
+    const layers = Array.isArray(document.layers) ? document.layers : []
+    return {
+        masterportal: {
+            folder,
+            layers: layers.map((layer: unknown) => {
+                const service = (layer as { service?: { name?: unknown } } | null)?.service
+                return text(service?.name) ?? 'Ebene'
+            }),
+        },
     }
 }
 

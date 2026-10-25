@@ -83,6 +83,11 @@ export interface PackageMembers {
     styles?: PackageMember[]
     /** Map layers that publish a data sink through the OWS API (see {@link BundledLayer}). */
     layers?: PackageMember[]
+    /**
+     * Entries for the Masterportal of the geoportal add-on (see {@link BundledMasterportal}). The
+     * marketplace applies them itself; they never travel to the platform.
+     */
+    masterportal?: PackageMember[]
 }
 
 /**
@@ -332,6 +337,18 @@ export interface BundledLayer {
     document: Record<string, unknown>
 }
 
+/**
+ * The use case's entries for the Masterportal: a layer-tree `folder`, `layers` that name a named
+ * API of the dataset by its slug (`apiRef`) and carry the Masterportal service fields in
+ * `service`, and the vector `styles` those layers use. Identity, address and groups of a service
+ * belong to the instance, so the package carries none; lib/geoportal writes them when it applies
+ * the member. Its shape is checked there.
+ */
+export interface BundledMasterportal {
+    file: string
+    document: Record<string, unknown>
+}
+
 export interface UseCaseEntry {
     manifest: CatalogManifest & { type: 'usecase' }
     bundle: {
@@ -345,6 +362,7 @@ export interface UseCaseEntry {
         apis?: BundledApi[]
         styles?: BundledStyle[]
         layers?: BundledLayer[]
+        masterportal?: BundledMasterportal[]
     }
 }
 
