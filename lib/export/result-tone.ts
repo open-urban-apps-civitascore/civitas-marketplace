@@ -16,6 +16,8 @@ export function resultTone(status: ExportActionResult['status']): NoticeTone {
         case 'not-merged':
         case 'unconfigured':
         case 'forbidden':
+        // A "no" of the catalogue team: a fact, neither good news nor the person's mistake.
+        case 'declined':
             return 'neutral'
         case 'invalid':
         case 'error':

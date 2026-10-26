@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ExportActionResult } from '@/lib/export-actions'
-import { mergeRequestRef, mergeShareResult, rememberShareResult, shareKey, takenOutOf } from '@/lib/export/share-state'
+import { listingIsStale, mergeRequestRef, mergeShareResult, rememberShareResult, shareKey, takenOutOf } from '@/lib/export/share-state'
 
 const MR = 'https://gitlab.com/group/repo/-/merge_requests/18'
 const CATALOG_MR = 'https://gitlab.com/group/catalog/-/merge_requests/19'
@@ -82,5 +82,16 @@ describe('share state', () => {
         expect(mergeRequestRef(MR)).toBe('!18')
         expect(mergeRequestRef('https://gitlab.com/group/repo')).toBeUndefined()
         expect(mergeRequestRef(undefined)).toBeUndefined()
+    })
+})
+
+describe('listingIsStale', () => {
+    it('reads „In Arbeit“ again after a proposal, and after a refusal that brought a "no" the list did not know (R2, U7)', () => {
+        expect(listingIsStale(result({ intent: 'catalog', status: 'ok', mrUrl: CATALOG_MR }))).toBe(true)
+        expect(listingIsStale(result({ intent: 'catalog', status: 'already-open', mrUrl: CATALOG_MR }))).toBe(true)
+        const declined = { iid: 32, mrUrl: CATALOG_MR, reason: { kind: 'none' as const } }
+        expect(listingIsStale(result({ intent: 'catalog', status: 'invalid', catalog: { state: 'declined', mrUrl: CATALOG_MR, declined } }))).toBe(true)
+        expect(listingIsStale(result({ intent: 'catalog', status: 'invalid' }))).toBe(false)
+        expect(listingIsStale(result({ intent: 'catalog', status: 'error' }))).toBe(false)
     })
 })

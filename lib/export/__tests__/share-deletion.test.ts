@@ -668,6 +668,165 @@ describe('the list after a deletion', () => {
     })
 })
 
+describe('what the catalogue team turned down (2026-10-22)', () => {
+    /** A removal of 1.1.0 the catalogue team closed with a reason. */
+    const turnedDownRemoval = mr(12, 'closed', 'remove/baeume-1.1.0', {
+        created_at: '2026-10-21T10:00:00Z',
+        closed_at: '2026-10-22T10:00:00Z',
+        updated_at: '2026-10-22T10:00:00Z',
+        closed_by: { id: 99, username: 'kurator' },
+        user_notes_count: 1,
+    })
+    const reason = { 12: [{ body: 'Das Paket wird noch gebraucht.', author: { id: 99, username: 'kurator' }, created_at: '2026-10-22T09:59:00Z' }] }
+
+    it('does not propose a removal again that the catalogue team turned down, and says why (R3, S8)', async () => {
+        const gitlab = fakeGitLab(world({ removalMrs: [turnedDownRemoval], notes: reason }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { plan, alternative } = await planShareDeletion(WEB, 'baeume', '1.1.0')
+        expect(plan).toMatchObject({ kind: 'none', closes: [], mrUrl: `${WEB}/-/merge_requests/12` })
+        expect(plan?.reason).toBe(
+            'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !12). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+        )
+        expect(alternative).toBeUndefined()
+        const result = await deleteShare(WEB, 'baeume', '1.1.0', plan!.fingerprint)
+        expect(result.status).toBe('unchanged')
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('still withdraws what is open next to a removal turned down, and leaves the accepted package - with no removal to choose', async () => {
+        const state = () => world({ removalMrs: [turnedDownRemoval], notes: reason, catalogMrs: [catalogMr(9)] })
+        vi.stubGlobal('fetch', fakeGitLab(state()).fetchImpl)
+        const { plan, alternative } = await planShareDeletion(WEB, 'baeume', '1.1.0')
+        expect(plan).toMatchObject({ kind: 'withdraw', accepted: true, closes: [{ what: 'catalog', ref: '!9' }] })
+        expect(plan?.scope).toBeUndefined()
+        expect(alternative).toBeUndefined()
+        const { result, calls } = await planAndDelete(state())
+        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(sent(calls).some((call) => call === 'POST /projects/7/merge_requests')).toBe(false)
+    })
+
+    it('tells a removal closed through the marketplace’s account as such, and refuses it even where its comments cannot be read (R3)', async () => {
+        const viaAccount = { ...turnedDownRemoval, closed_by: { id: 42, username: 'walkable.cities.2021' } }
+        const plan = await planOf(world({ removalMrs: [viaAccount], failing: ['/notes'] }))
+        expect(plan).toMatchObject({ kind: 'none', mrUrl: `${WEB}/-/merge_requests/12` })
+        expect(plan.reason).toBe(
+            'Das Entfernen dieser Version wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !12). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+        )
+    })
+
+    it('counts the removals since the version was last accepted: removed once, shared again and accepted, a "no" to removing it again holds', async () => {
+        const first = { ...MERGED_EXPORT, created_at: '2026-10-01T10:00:00Z', merged_at: '2026-10-02T10:00:00Z' }
+        const removedOnce = mr(10, 'merged', 'remove/baeume-1.1.0', { created_at: '2026-10-10T10:00:00Z', merged_at: '2026-10-11T10:00:00Z' })
+        const sharedAgain = { ...MERGED_EXPORT, iid: 11, created_at: '2026-10-12T10:00:00Z', merged_at: '2026-10-13T10:00:00Z' }
+        // The old removal's merge was undone by the merge after it: it no longer beats the later "no".
+        const plan = await planOf(world({ exportMrs: [sharedAgain, first], removalMrs: [turnedDownRemoval, removedOnce], notes: reason }))
+        expect(plan).toMatchObject({ kind: 'none', mrUrl: `${WEB}/-/merge_requests/12` })
+    })
+
+    it('proposes the removal as before when the one before was withdrawn, not turned down', async () => {
+        const withdrawn = { ...turnedDownRemoval, closed_by: { id: 42, username: 'bot' }, description: `${turnedDownRemoval.description}\n\nWithdrawn through the Open Urban Apps marketplace on behalf of **Ewa** at 2026-10-22T10:00:00.000Z.` }
+        const plan = await planOf(world({ removalMrs: [withdrawn] }))
+        expect(plan).toMatchObject({ kind: 'remove', closes: [] })
+    })
+
+    it('does not propose the 1.1.0 entry again after two closes through the marketplace’s account, and hands back the reading (R2, U7: !31 and !32)', async () => {
+        const viaAccount = (iid: number, createdAt: string, closedAt: string) => ({
+            ...catalogMr(iid, WEB, DIR, 'closed'),
+            created_at: createdAt,
+            closed_at: closedAt,
+            updated_at: closedAt,
+            closed_by: { id: 42, username: 'walkable.cities.2021' },
+            user_notes_count: 0,
+        })
+        const state = world({ catalogMrs: [viaAccount(31, '2026-10-22T09:37:00Z', '2026-10-22T09:37:23Z'), viaAccount(32, '2026-10-22T09:41:00Z', '2026-10-22T09:41:28Z')] })
+        const gitlab = fakeGitLab(state)
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({
+            intent: 'catalog',
+            status: 'invalid',
+            mrUrl: `${WEB}/-/merge_requests/32`,
+            catalog: { state: 'declined', declined: { iid: 32, viaMarketplace: true, reason: { kind: 'none' } } },
+        })
+        // Told as what it was, a close through the marketplace's account - not as the catalogue team's decision (S10, P4).
+        expect(result.detail).toBe(
+            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.0 wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+        )
+        expect(writes(gitlab.calls)).toEqual([])
+        // Nobody wrote anything on either: no comment was asked for.
+        expect(gitlab.calls.some((call) => call.path.includes('/notes'))).toBe(false)
+    })
+
+    it('names the catalogue team where a reviewer closed the entry, and refuses even where their words cannot be read', async () => {
+        const byReviewer = {
+            ...catalogMr(32, WEB, DIR, 'closed'),
+            created_at: '2026-10-22T09:41:00Z',
+            closed_at: '2026-10-22T10:00:00Z',
+            updated_at: '2026-10-22T10:00:00Z',
+            closed_by: { id: 99, username: 'kurator' },
+            user_notes_count: 1,
+        }
+        for (const failing of [undefined, ['/notes']]) {
+            vi.stubGlobal('fetch', fakeGitLab(world({ catalogMrs: [byReviewer], ...(failing ? { failing } : {}) })).fetchImpl)
+            const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+            expect(result.status).toBe('invalid')
+            expect(result.detail).toBe(
+                'Kein Katalog-Eintrag: Das Katalog-Team hat den Eintrag für Version 1.1.0 am 22.10. nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+            )
+        }
+    })
+
+    it('fails rather than refuses where a close by the account cannot be told from a withdrawal of the time before the mark', async () => {
+        const byAccount = {
+            ...catalogMr(32, WEB, DIR, 'closed'),
+            created_at: '2026-10-22T09:41:00Z',
+            closed_at: '2026-10-22T10:00:00Z',
+            updated_at: '2026-10-22T10:00:00Z',
+            closed_by: { id: 42, username: 'walkable.cities.2021' },
+            user_notes_count: 1,
+        }
+        const gitlab = fakeGitLab(world({ catalogMrs: [byAccount], failing: ['/notes'] }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result.status).toBe('error')
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('refuses the entry, with the proposal to look at, where another package of the same name holds its branch with a "no" (R5)', async () => {
+        const otherPackage = {
+            ...catalogMr(40, 'https://gitlab.example/andere/ablage', 'packages/baeume', 'closed'),
+            description: 'Proposed by ...\n\nAdds `urn:andere:usecase:baeume` in `useCases`, pinned to …',
+            created_at: '2026-10-21T09:00:00Z',
+            closed_at: '2026-10-21T10:00:00Z',
+            updated_at: '2026-10-21T10:00:00Z',
+            closed_by: { id: 99, username: 'kurator' },
+            user_notes_count: 0,
+        }
+        const full = JSON.stringify({ id: 'urn:stadt:usecase:baeume', version: '1.1.0', displayName: 'Bäume', description: 'Stadtbäume', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: [] })
+        const gitlab = fakeGitLab(
+            world({ catalogMrs: [otherPackage], branches: ['catalog/baeume-1.1.0'], files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: full, 'main|index.json': index() } }),
+        )
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({ intent: 'catalog', status: 'invalid', mrUrl: `${WEB}/-/merge_requests/40`, catalog: { state: 'none' } })
+        expect(result.detail).toBe(
+            'Kein Katalog-Eintrag: Für „baeume“ in Version 1.1.0 gibt es schon einen geschlossenen Vorschlag eines anderen Pakets (Vorschlag !40). Er bleibt, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - für dein Paket teile eine neue Version.',
+        )
+        // Its branch stays, and nothing is written.
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
+    it('proposes the entry once the catalogue team reopened the proposal they had closed (S11) - by pointing at it', async () => {
+        const reopened = { ...catalogMr(32), created_at: '2026-10-22T09:41:00Z' }
+        const full = JSON.stringify({ id: 'urn:stadt:usecase:baeume', version: '1.1.0', displayName: 'Bäume', description: 'Stadtbäume', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: [] })
+        const gitlab = fakeGitLab(world({ catalogMrs: [reopened], files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: full, 'main|index.json': index() } }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({ status: 'already-open', mrUrl: `${WEB}/-/merge_requests/32` })
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+})
+
 describe('the source line of the proposals after the package’s', () => {
     /** The version's export as rc.6 writes it: its description ends in the source line. */
     const sourced = mr(3, 'merged', 'export/baeume-1.1.0', {
