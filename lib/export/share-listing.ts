@@ -29,7 +29,7 @@ import {
     type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
-import { catalogPinOf, displayNameOf, proposerOf, readmeSourceOf, shareSourceOf, withdrawerOf, type ShareSource } from '@/lib/export/merge-request-text'
+import { catalogPinOf, displayNameOf, proposerOf, readmeSourceOf, shareSourceOf, withdrawerOf, type DeclineReason, type ShareSource } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { catalogStatusIn, inspectBundleIn, packageFolder, readBaseTrees, type BundleStatus, type CatalogContext, type CatalogStatus } from '@/lib/export/status'
 
@@ -75,6 +75,8 @@ export interface ShareProposal {
     proposedBy?: string
     /** Whom the marketplace withdrew it for, from its withdrawal note. */
     withdrawnBy?: string
+    /** Closed and not withdrawn: what the catalogue team said (`declineReasonOf`), or that it could not be read. */
+    reason?: DeclineReason
     /** How many comments people wrote on it. */
     comments?: number
     /** Its own source line; absent on proposals made before rc.6. */
