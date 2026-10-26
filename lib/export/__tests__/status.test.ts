@@ -121,6 +121,37 @@ describe('a version the catalogue team took out', () => {
     })
 })
 
+describe('a "no" to the entry, in the catalogue’s order (U3 of 2026-10-22)', () => {
+    const ID = 'urn:stadt:usecase:baeume'
+    const indexOf = (useCases: unknown[]) => JSON.stringify({ version: '1.0.0', useCases })
+    const declined = { iid: 32, mrUrl: 'https://gitlab.example/mr/32', closedAt: '2026-10-22T09:41:28Z', viaMarketplace: true, reason: { kind: 'none' as const } }
+    const merged = (iid: number, version: string): MergeRequestRef => ({
+        iid,
+        state: 'merged',
+        source_branch: `catalog/baeume-${version}`,
+        web_url: `https://gitlab.example/mr/${iid}`,
+        description: `Adds \`${ID}\` in \`useCases\`, pinned to ...`,
+    })
+
+    it('is told after open, listed and taken out, and before none', () => {
+        const none = { openRequests: [], index: indexOf([]), merged: [] }
+        expect(catalogStatusIn(none, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'declined', mrUrl: declined.mrUrl, declined })
+        expect(catalogStatusIn(none, 'baeume', '1.1.4', ID)).toEqual({ state: 'none' })
+        // Reopened: open again, the "no" is history (S11).
+        const open = { ...none, openRequests: [{ iid: 32, state: 'opened', source_branch: 'catalog/baeume-1.1.4', web_url: declined.mrUrl }] }
+        expect(catalogStatusIn(open, 'baeume', '1.1.4', ID, declined).state).toBe('mr-open')
+        // Listed by the team after all ("yes, but differently", S12).
+        expect(catalogStatusIn({ ...none, index: indexOf([{ id: ID, version: '1.1.4' }]) }, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'listed' })
+        // Closed proposals that would have brought back what the team took out stay taken out (!27, !29, !30).
+        expect(catalogStatusIn({ ...none, merged: [merged(5, '1.1.4')] }, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'withdrawn', takenOut: { version: '1.1.4' } })
+    })
+
+    it('keeps what the team took out of another version beside it', () => {
+        const context = { openRequests: [], index: indexOf([]), merged: [merged(5, '1.0.2')] }
+        expect(catalogStatusIn(context, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'declined', mrUrl: declined.mrUrl, declined, takenOut: { version: '1.0.2' } })
+    })
+})
+
 describe('packageFolder', () => {
     it('names the folder all packages share and the package inside it', () => {
         expect(packageFolder({ pathPrefix: 'packages' }, 'baeume')).toEqual({ parent: 'packages', name: 'baeume' })

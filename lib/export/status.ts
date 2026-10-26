@@ -1,19 +1,25 @@
 import { indexRowOf, isListed } from '@/lib/export/catalog-entry'
 import { bundleBranch, catalogBranch, packageDir, parseCatalogBranch, removalBranch, type CatalogRepo, type ExportTarget } from '@/lib/export/config'
+import { sinceStart, startedOver, type Decline } from '@/lib/export/declines'
 import {
     branchHead,
     currentUser,
     directoryTrees,
     findMergeRequests,
     getProject,
+    GitLabError,
     listMergeRequestsBy,
     mergeRequestCommits,
+    newestFirst,
     parseProjectUrl,
+    readClosing,
     readFile,
     treeIdOf,
+    type Closing,
     type GitLabClient,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
+import type { DeclineReason } from '@/lib/export/merge-request-text'
 import { isNewerVersion } from '@/lib/export/share-stages'
 
 /**
@@ -60,20 +66,30 @@ export interface BundleStatus {
     reason?: 'no-base-branch' | 'no-package' | 'bad-manifest' | 'other-version'
     /** What the base branch carries instead, for reason `other-version`. */
     onBase?: { id: string; version: string }
+    /** For state `none`: its newest package proposal was turned down, so the version is used up; `mrUrl` names that proposal. */
+    declined?: Decline
     /**
      * The newest proposal to take this version out of the repository again
-     * ("Löschen" in "In Arbeit"), whatever became of it. Not read while the
-     * version has an open merge request: a new proposal comes first.
+     * ("Zurückziehen" in "In Arbeit"), whatever became of it; `declined` when
+     * it was turned down, and the package stays. Not read while the version
+     * has an open merge request: a new proposal comes first.
      */
-    removal?: { state: string; mrUrl: string }
+    removal?: { state: string; mrUrl: string; declined?: Decline }
 }
 
 /**
  * - `withdrawn`: the catalogue team took this version out, or the whole entry (see `takenOutIn`) - it is never proposed again
+ * - `declined`: the catalogue team did not take this version's entry - it is not proposed again for this version
+ *
+ * An open proposal comes first, then what the index says (listed or taken
+ * out), then a "no" to an entry that never got in.
  */
 export interface CatalogStatus {
-    state: 'unconfigured' | 'none' | 'mr-open' | 'listed' | 'withdrawn'
+    state: 'unconfigured' | 'none' | 'mr-open' | 'listed' | 'withdrawn' | 'declined'
+    /** The open proposal, or for `declined` the one turned down. */
     mrUrl?: string
+    /** For `declined`: who turned the entry down, when and why. */
+    declined?: Decline
     /**
      * A version of the package the catalogue team took out, with their reason
      * when the index gives one. On `withdrawn` it is this version, or the
@@ -150,6 +166,8 @@ export interface BundleContext {
     treeOnBase: () => Promise<string | undefined>
     /** The newest merge request from the version's removal branch, if there is one. */
     removal?: MergeRequestRef
+    /** That removal was turned down (`readDecline`). */
+    removalDeclined?: Decline
     /** Check the package against its merge (default); a deletion only needs to know it is there. */
     verify?: boolean
 }
@@ -176,10 +194,16 @@ export async function readBaseTrees(
     return { head, trees: await directoryTrees(client, projectId, packageFolder(target, 'x').parent, head) }
 }
 
+/** A "no" with unreadable comments: `tell` for a reading the page shows, `throw` for a refusal, which never rests on a guess. */
+export interface DeclineReading {
+    unreadable?: 'throw' | 'tell'
+}
+
 /**
  * `expectedId` pins the package id when the caller knows it (the export
  * form). Without it, as for a listed share, any `urn:…:usecase:<slug>` of
- * that version counts.
+ * that version counts. `reading` applies to the "no" to the package; one to
+ * its removal is always told, as the marketplace never withdraws removals.
  */
 export async function inspectBundle(
     client: GitLabClient,
@@ -187,6 +211,7 @@ export async function inspectBundle(
     slug: string,
     version: string,
     expectedId?: string,
+    reading: DeclineReading = {},
 ): Promise<BundleInspection> {
     const project = await getProject(client, parseProjectUrl(target.url).projectPath)
     const [requests, removals] = await Promise.all([
@@ -194,15 +219,30 @@ export async function inspectBundle(
         findMergeRequests(client, project.id, removalBranch(slug, version)),
     ])
     // An open request answers on its own, so the base branch is only asked without one.
-    const head = requests.some((mr) => mr.state === 'opened') ? undefined : await branchHead(client, project.id, target.baseBranch)
+    if (requests.some((mr) => mr.state === 'opened')) {
+        return inspectBundleIn(client, target, slug, version, expectedId, { projectId: project.id, requests, head: undefined, treeOnBase: async () => undefined })
+    }
+    const bot = lazyAccount(client)
+    // The removals since the package was last merged: an older one, merged, was undone by that merge.
+    const presentRemovals = presentRequests(removals, requests)
+    // A "no" to the removal stops nothing else: unreadable comments only leave its reason unknown.
+    const [head, removalDeclined] = await Promise.all([
+        branchHead(client, project.id, target.baseBranch),
+        readDecline(client, project.id, presentRemovals, bot, 'tell'),
+    ])
     const dir = packageDir(target, slug)
-    return inspectBundleIn(client, target, slug, version, expectedId, {
+    const inspection = await inspectBundleIn(client, target, slug, version, expectedId, {
         projectId: project.id,
         requests,
         head,
         treeOnBase: () => (head ? treeIdOf(client, project.id, dir, head) : Promise.resolve(undefined)),
-        removal: removals[0],
+        removal: presentRemovals[0],
+        ...(removalDeclined ? { removalDeclined } : {}),
     })
+    if (inspection.status.state !== 'none') return inspection
+    // Not on the base branch: maybe its package was turned down since the version last started over.
+    const declined = await readDecline(client, project.id, presentRequests(requests, removals), bot, reading.unreadable)
+    return declined ? { ...inspection, status: { ...inspection.status, declined, mrUrl: declined.mrUrl } } : inspection
 }
 
 /** {@link inspectBundle} on what a caller has read already, so a listing asks each shared question once. */
@@ -218,7 +258,8 @@ export async function inspectBundleIn(
     const open = requests.find((mr) => mr.state === 'opened')
     if (open) return { status: { state: 'mr-open', mrUrl: open.web_url } }
 
-    const removal = context.removal ? { removal: { state: context.removal.state, mrUrl: context.removal.web_url } } : {}
+    const declined = context.removalDeclined ? { declined: context.removalDeclined } : {}
+    const removal = context.removal ? { removal: { state: context.removal.state, mrUrl: context.removal.web_url, ...declined } } : {}
     if (!head) {
         return { status: { state: 'none', reason: 'no-base-branch', detail: `Im Ablageort ${target.url} fehlt „${target.baseBranch}“`, ...removal } }
     }
@@ -268,8 +309,9 @@ export async function readBundleStatus(
     slug: string,
     version: string,
     expectedId?: string,
+    reading: DeclineReading = {},
 ): Promise<BundleStatus> {
-    return (await inspectBundle(client, target, slug, version, expectedId)).status
+    return (await inspectBundle(client, target, slug, version, expectedId, reading)).status
 }
 
 /** What `readCatalogStatus` reports, plus the highest version that reached the catalogue already (see `catalogFloor`). */
@@ -287,9 +329,11 @@ export async function inspectCatalog(
 ): Promise<CatalogInspection> {
     if (!catalog) return { status: { state: 'unconfigured' } }
     const project = await getProject(client, parseProjectUrl(catalog.url).projectPath)
-    const context = await readVersionCatalog(client, project.id, catalog, slug, version)
+    const bot = lazyAccount(client)
+    const context = await readVersionCatalog(client, project.id, catalog, slug, version, true, bot)
     const floor = catalogFloor(context, id)
-    return { status: catalogStatusIn(context, slug, version, id), ...(floor ? { floor } : {}) }
+    const declined = await readCatalogDecline(client, project.id, context, id, bot)
+    return { status: catalogStatusIn(context, slug, version, id, declined), ...(floor ? { floor } : {}) }
 }
 
 export async function readCatalogStatus(
@@ -307,7 +351,8 @@ export async function readCatalogStatus(
  * branch, the index, and - unless `others` is false - the bot's merged
  * proposals of other versions, to know which of them the catalogue team took
  * out again. The index is read even next to an open proposal: whether that
- * proposal would bring back a version taken out depends on it.
+ * proposal would bring back a version taken out depends on it. `bot` shares
+ * the caller's account lookup.
  */
 export async function readVersionCatalog(
     client: GitLabClient,
@@ -316,14 +361,15 @@ export async function readVersionCatalog(
     slug: string,
     version: string,
     others = true,
+    bot: () => Promise<{ id: number }> = lazyAccount(client),
 ): Promise<CatalogContext> {
     const [requests, index, byBot] = await Promise.all([
         findMergeRequests(client, projectId, catalogBranch(slug, version)),
         readFile(client, projectId, 'index.json', catalog.baseBranch),
-        others ? currentUser(client).then((bot) => listMergeRequestsBy(client, projectId, bot.id)) : Promise.resolve([]),
+        others ? bot().then((account) => listMergeRequestsBy(client, projectId, account.id)) : Promise.resolve([]),
     ])
     const merged = new Map([...requests, ...byBot].filter((mr) => mr.state === 'merged').map((mr) => [mr.iid, mr]))
-    return { openRequests: requests.filter((mr) => mr.state === 'opened'), index, merged: [...merged.values()] }
+    return { openRequests: requests.filter((mr) => mr.state === 'opened'), index, merged: [...merged.values()], requests }
 }
 
 /** What the catalogue step needs from the catalogue repository, read once for a whole listing. */
@@ -338,6 +384,83 @@ export interface CatalogContext {
      * nothing counts as taken out by hand.
      */
     merged?: MergeRequestRef[]
+    /** One version's reading only: every request from its catalogue branch, newest first, for its "no" (`readCatalogDecline`). */
+    requests?: MergeRequestRef[]
+}
+
+/** The token's account, asked once and only when needed: most readings never do. */
+export function lazyAccount(client: GitLabClient): () => Promise<{ id: number; username: string }> {
+    let account: Promise<{ id: number; username: string }> | undefined
+    return () => (account ??= currentUser(client))
+}
+
+/** Who closed a request, as a "no" tells it. */
+function declineOfRequest(mr: MergeRequestRef, botId: number, reason: DeclineReason): Decline {
+    return {
+        iid: mr.iid,
+        mrUrl: mr.web_url,
+        ...(mr.closed_at ? { closedAt: mr.closed_at } : {}),
+        ...(mr.closed_by?.username ? { closedBy: mr.closed_by.username } : {}),
+        ...(mr.closed_by?.id === botId ? { viaMarketplace: true } : {}),
+        reason,
+    }
+}
+
+/**
+ * A branch's requests opened after the newest merge among `other` (the
+ * removals for package requests, and the other way round); all without one.
+ */
+export function presentRequests(requests: MergeRequestRef[], other: readonly MergeRequestRef[]): MergeRequestRef[] {
+    const since = startedOver(other.filter((mr) => mr.state === 'merged').map((mr) => mr.merged_at ?? mr.created_at))
+    return since === undefined ? requests : requests.filter((mr) => sinceStart(mr.created_at, since))
+}
+
+/**
+ * The catalogue team's "no" on one branch: the newest of the marketplace's own
+ * proposals in `requests`, closed without being withdrawn, while nothing from
+ * the branch was merged (a merge beats a later closed duplicate).
+ *
+ * Unreadable comments give the reason `unreadable`. Only the account
+ * withdraws, so a close by anyone else is a "no" either way; one by the
+ * account may be an older withdrawal from before the mark: `throw` fails
+ * rather than guess, `tell` reports the "no" anyway.
+ */
+export async function readDecline(
+    client: GitLabClient,
+    projectId: number,
+    requests: MergeRequestRef[],
+    bot: () => Promise<{ id: number }>,
+    unreadable: 'throw' | 'tell' = 'tell',
+): Promise<Decline | undefined> {
+    if (requests.some((mr) => mr.state === 'merged') || !requests.some((mr) => mr.state === 'closed')) return undefined
+    const { id } = await bot()
+    const newest = newestFirst(requests.filter((mr) => mr.author?.id === id))[0]
+    if (newest?.state !== 'closed') return undefined
+    let closing: Closing
+    try {
+        closing = await readClosing(client, projectId, newest)
+    } catch (error) {
+        const byOther = typeof newest.closed_by?.id === 'number' && newest.closed_by.id !== id
+        if (!(error instanceof GitLabError) || (unreadable === 'throw' && !byOther)) throw error
+        closing = { reason: { kind: 'unreadable' } }
+    }
+    return closing.withdrawnBy ? undefined : declineOfRequest(newest, id, closing.reason ?? { kind: 'none' })
+}
+
+/**
+ * The "no" to one version's entry. The branch names no publisher, so only
+ * proposals whose description names this id, or that have none, count.
+ */
+export function readCatalogDecline(
+    client: GitLabClient,
+    projectId: number,
+    context: CatalogContext,
+    id: string,
+    bot: () => Promise<{ id: number }>,
+    unreadable: 'throw' | 'tell' = 'tell',
+): Promise<Decline | undefined> {
+    const own = (context.requests ?? []).filter((mr) => !mr.description || mr.description.includes(`\`${id}\``))
+    return readDecline(client, projectId, own, bot, unreadable)
 }
 
 /** The versions of `id` that a merged proposal put into the catalogue. The branch names no publisher; the description names the id. */
@@ -394,8 +517,13 @@ export function catalogFloor(context: CatalogContext, id: string): string | unde
     return newest([...(row?.version ? [row.version] : []), ...listedOnce(context, id)])
 }
 
-/** Where a package stands in the catalogue, from what was read. Pure, so every outcome is testable. */
-export function catalogStatusIn(context: CatalogContext, slug: string, version: string, id: string): CatalogStatus {
+/**
+ * Where a package stands in the catalogue, from what was read: open, listed,
+ * taken out, turned down (`declined`, as the caller found it), none - in this
+ * order, so a version taken out never reads as turned down. Pure, so every
+ * outcome is testable.
+ */
+export function catalogStatusIn(context: CatalogContext, slug: string, version: string, id: string, declined?: Decline): CatalogStatus {
     const out = takenOutIn(context, id, version)
     const takenOut = out ? { takenOut: { version: out.version, ...(out.reason ? { reason: out.reason } : {}) } } : {}
     const branch = catalogBranch(slug, version)
@@ -403,5 +531,6 @@ export function catalogStatusIn(context: CatalogContext, slug: string, version: 
     if (open) return { state: 'mr-open', mrUrl: open.web_url, ...takenOut, ...(out?.thisVersion ? { bringsBack: true } : {}) }
     if (context.index && isListed(context.index, id, version)) return { state: 'listed' }
     if (out?.thisVersion) return { state: 'withdrawn', ...takenOut }
+    if (declined) return { state: 'declined', mrUrl: declined.mrUrl, declined, ...takenOut }
     return { state: 'none', ...takenOut }
 }
