@@ -72,9 +72,11 @@ export function useShareView(enabled: boolean) {
     }, [enabled, want])
     const { drafts, ready: draftsReady, discard: discardDraft } = useShareDrafts(draftOwner)
     const rows = enabled ? (wanted ? listing.rows : null) : NONE
+    // A "no" is measured against the reading, so the lists change with a new one, never between two renders.
+    const readAt = listing.readAt ? Date.parse(listing.readAt) : undefined
     const tabs = useMemo(
-        () => shareTabs(rows ?? [], { instance: listing.instance, person, drafts: drafts.length }),
-        [rows, listing.instance, person, drafts.length],
+        () => shareTabs(rows ?? [], { instance: listing.instance, person, drafts: drafts.length, ...(readAt !== undefined ? { now: readAt } : {}) }),
+        [rows, listing.instance, person, drafts.length, readAt],
     )
     return {
         rows,

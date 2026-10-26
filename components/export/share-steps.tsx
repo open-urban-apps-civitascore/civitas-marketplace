@@ -1,4 +1,4 @@
-import { Circle, CircleCheck, Clock, GitMerge, GitPullRequest, RefreshCw, type LucideIcon } from 'lucide-react'
+import { Circle, CircleCheck, Clock, GitMerge, GitPullRequest, RefreshCw, TriangleAlert, type LucideIcon } from 'lucide-react'
 
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Disclosure } from '@/components/ui/disclosure'
@@ -36,6 +36,8 @@ const MARK: Record<StageState, LucideIcon> = {
     current: Circle,
     waiting: Clock,
     blocked: Circle,
+    // Never the mark of the person's next step: the catalogue team turned this stage down.
+    declined: TriangleAlert,
     later: Circle,
 }
 

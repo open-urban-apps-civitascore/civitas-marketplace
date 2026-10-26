@@ -25,6 +25,10 @@ import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
  * repository. It keeps its reason (`blockedBy`) for the list of shared
  * packages, but no longer asks anyone in "In Arbeit" for a move nobody can
  * make (Ewa, 2026-10-17).
+ *
+ * A "no" of the catalogue team never resets a version: the stage they turned
+ * down stays `declined`, the version is used up, and the person's move is to
+ * read why and share a higher version.
  */
 
 export type StageKey = 'propose' | 'review' | 'catalog' | 'listing'
@@ -34,9 +38,10 @@ export type StageKey = 'propose' | 'review' | 'catalog' | 'listing'
  * - `current`: the person's own move, now
  * - `waiting`: someone else's move, now
  * - `blocked`: would be next, but something stops it (see `blockedBy`)
+ * - `declined`: the catalogue team turned it down - shown with the problem mark, never as the person's next step
  * - `later`: not yet
  */
-export type StageState = 'done' | 'current' | 'waiting' | 'blocked' | 'later'
+export type StageState = 'done' | 'current' | 'waiting' | 'blocked' | 'declined' | 'later'
 
 export interface Stage {
     key: StageKey
@@ -64,10 +69,10 @@ export interface ShareFacts {
     version?: string
     /** The state of the version's newest merge request, as GitLab names it; absent when none was opened. */
     bundleMrState?: string
-    /** With the version's removal, if one was proposed (`BundleStatus.removal`). */
+    /** With the version's removal, if one was proposed (`BundleStatus.removal`), and a "no" to its package (`declined`). */
     bundle?: BundleStatus
     catalog?: CatalogStatus
-    /** The version's merge request was closed through the marketplace, with its withdrawal note: taken back, not turned down. */
+    /** The version's merge request was closed through the marketplace, with its withdrawal mark or note: taken back. Closed without is a "no". */
     withdrawn?: boolean
 }
 
@@ -79,6 +84,12 @@ export function isNewerVersion(candidate: string, version: string): boolean {
     if (!a || !b) return false
     for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index] > b[index]
     return false
+}
+
+/** "1.0.3" after "1.0.2": one step up, to suggest instead of a used-up version; whether that one is free, the caller knows. */
+export function nextPatch(version: string): string {
+    const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+    return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : '1.0.0'
 }
 
 /** "Grund: …" with exactly one full stop, whether or not the catalogue team ended their reason with one. */
@@ -144,8 +155,8 @@ export interface ShareProgress {
     blockedBy?: string
     /**
      * Nothing more to do here: in the catalogue, replaced by a newer version,
-     * closed without a merge, removed - or nothing the marketplace can move on
-     * (`blockedBy` says why).
+     * withdrawn, turned down, removed - or nothing the marketplace can move on
+     * (`blockedBy` says why). A "no" still has `active` and `turn`: the person reads it and shares a higher version.
      */
     finished: boolean
     /**
@@ -207,6 +218,16 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
                 summary: 'Katalog-Eintrag in Prüfung - bringt einen herausgenommenen Eintrag zurück',
             }
         }
+        // The entry was turned down: the package stays accepted, the entry is used up for this version.
+        if (catalog?.state === 'declined') {
+            return {
+                states: states('done', 'done', 'done', 'declined'),
+                active: 'listing',
+                turn: 'you',
+                finished: true,
+                summary: 'Paket angenommen, Katalog-Eintrag nicht angenommen',
+            }
+        }
         const verification = bundle.verification
         if (verification && verification.state !== 'verified') {
             return {
@@ -264,12 +285,18 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             summary: 'Paket angenommen, aber nicht mehr im Ablageort',
         }
     }
-    if (bundleMrState === 'closed') {
+    // The package was turned down: as read for this version alone (`declined`), or as the listing reads it.
+    if (bundle?.declined || (bundleMrState === 'closed' && !withdrawn)) {
         return {
-            states: states('later', 'later', 'later', 'later'),
+            states: states('done', 'declined', 'later', 'later'),
+            active: 'review',
+            turn: 'you',
             finished: true,
-            summary: withdrawn ? 'Zurückgezogen' : 'Nicht angenommen',
+            summary: 'Nicht angenommen',
         }
+    }
+    if (bundleMrState === 'closed') {
+        return { states: states('later', 'later', 'later', 'later'), finished: true, summary: 'Zurückgezogen' }
     }
 
     // A version that was in the catalogue is used up: not even its package is proposed again.

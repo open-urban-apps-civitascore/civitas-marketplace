@@ -63,8 +63,24 @@ const verified = { state: 'verified' as const }
 const onBase = (extra: Record<string, unknown> = {}) => ({ state: 'on-base' as const, packageId: 'urn:x:usecase:a', verification: verified, ...extra })
 const open = { bundleMr: { url: `${WEB}/31`, state: 'opened' } }
 
+/** When the tests read the listing: a "no" is measured against it. */
+const NOW = Date.parse('2026-10-22T12:00:00.000Z')
+/** A proposal of this instance the catalogue team closed the day before. */
+const turnedDown = (kind: ShareProposal['kind'], iid: number) =>
+    proposal(kind, iid, 'closed', { closedAt: '2026-10-21T10:00:00.000Z', closedBy: 'spaudanjo', reason: { kind: 'none' }, source: { kind: 'dataset', id: 'ds-a', instance: HERE } })
+const merged31 = proposal('bundle', 31, 'merged', { createdAt: '2026-10-12T09:00:00.000Z' })
+const declineOf = (iid: number) => ({ iid, mrUrl: `${WEB}/${iid}`, closedAt: '2026-10-21T10:00:00.000Z', reason: { kind: 'none' as const } })
+
 /** Every stage „In Arbeit“ lists, as the listing would read it. */
 const STAGE_ROWS: Record<string, SharedPackageRow> = {
+    declined: row('a', { bundleMr: { url: `${WEB}/31`, state: 'closed' }, proposals: [turnedDown('bundle', 31)] }),
+    'entry-declined': row('a', { bundle: onBase(), catalog: { state: 'declined', mrUrl: `${WEB}/8`, declined: declineOf(8) }, proposals: [turnedDown('catalog', 8), merged31] }),
+    'removal-declined': row('a', {
+        bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/40`, declined: declineOf(40) } }),
+        catalog: { state: 'none' },
+        proposals: [turnedDown('removal', 40), merged31],
+    }),
+    'entry-revoked': row('a', { bundle: onBase(), catalog: { state: 'withdrawn', takenOut: { version: '1.0.0' } } }),
     unreadable: row('a', { problem: 'GitLab-Fehler (500)' }),
     'in-review': row('a', open),
     'change-in-review': row('a', { ...open, proposals: [proposal('bundle', 32, 'opened'), proposal('bundle', 31, 'merged')], bundleMr: { url: `${WEB}/32`, state: 'opened' } }),
@@ -83,9 +99,9 @@ const STAGE_ROWS: Record<string, SharedPackageRow> = {
 
 const DATASETS = new Map([['ds-a', 'Baumkataster Mitte']])
 
-/** The one item a row becomes for `person`. */
-function itemOf(shared: SharedPackageRow, person = 'Ewa'): InProgressItem {
-    const [tabbed] = shareTabs([shared], { instance: HERE, person }).inProgress
+/** The one item a row becomes for `person`, read at `now`. */
+function itemOf(shared: SharedPackageRow, person = 'Ewa', now = NOW): InProgressItem {
+    const [tabbed] = shareTabs([shared], { instance: HERE, person, now }).inProgress
     expect(tabbed, shared.key).toBeDefined()
     return inProgressItems([], DATASETS, [tabbed])[0]
 }
@@ -178,6 +194,17 @@ const TABLE: [string, { track?: TrackMark[]; status: string; tone?: string; main
             quiet: [],
         },
     ],
+    // The catalogue team's "no" (2026-10-22): read and ordered here; the rows' own sentences come with slice B, until then the stages' summary.
+    ['declined', { track: ['done', 'problem', 'later', 'later'], status: 'Nicht angenommen · du bist dran', main: 'link:gitlab', quiet: [] }],
+    [
+        'entry-declined',
+        { track: ['done', 'done', 'done', 'problem'], status: 'Paket angenommen, Katalog-Eintrag nicht angenommen · du bist dran', main: 'link:gitlab', quiet: [] },
+    ],
+    [
+        'removal-declined',
+        { track: ['done', 'done', 'yours', 'later'], status: 'Paket angenommen - jetzt Katalog-Eintrag vorschlagen · du bist dran', main: 'link:gitlab', quiet: [] },
+    ],
+    ['entry-revoked', { track: ['done', 'done', 'problem', 'later'], status: 'Aus dem Katalog genommen', main: 'link:gitlab', quiet: [] }],
 ]
 
 describe('the stage → action table of „In Arbeit“', () => {
@@ -225,6 +252,13 @@ describe('the stage → action table of „In Arbeit“', () => {
         expect(ACTION_LABELS['new-version']).toBe('Neue Version teilen')
     })
 
+    it('leads a "no" to the proposal the catalogue team turned down, a whole entry taken out to the package’s', () => {
+        expect(rowView(itemOf(STAGE_ROWS.declined), DATASETS).main?.href).toBe(`${WEB}/31`)
+        expect(rowView(itemOf(STAGE_ROWS['entry-declined']), DATASETS).main?.href).toBe(`${WEB}/8`)
+        expect(rowView(itemOf(STAGE_ROWS['removal-declined']), DATASETS).main?.href).toBe(`${WEB}/40`)
+        expect(rowView(itemOf(STAGE_ROWS['entry-revoked']), DATASETS).main?.href).toBe(`${WEB}/31`)
+    })
+
     it('links the change after the review from the sentence, and the proposal that would bring an entry back', () => {
         expect(rowView(itemOf(STAGE_ROWS['needs-look']), DATASETS).status.link).toEqual({
             label: 'Änderung ansehen',
@@ -260,6 +294,19 @@ describe('whose move it is', () => {
         expect(rowView(theirs, DATASETS).main).toEqual({ kind: 'propose-entry', look: 'button' })
         // Names are compared as the person sees them, case aside.
         expect(turnOf(itemOf(STAGE_ROWS.accepted, ' ewa '))).toBe('yours')
+    })
+
+    it('is the person’s own for a "no", and after its time nobody’s - for a removal turned down, which stays listed (S8)', () => {
+        for (const stage of ['declined', 'entry-declined', 'removal-declined']) {
+            expect(turnOf(itemOf(STAGE_ROWS[stage])), stage).toBe('yours')
+            expect(turnOf(itemOf(STAGE_ROWS[stage], 'Kim')), stage).toBe('colleague')
+        }
+        const later = itemOf(STAGE_ROWS['removal-declined'], 'Ewa', NOW + 31 * 24 * 60 * 60 * 1000)
+        expect(later).toMatchObject({ mine: false, declined: { current: false, decline: { iid: 40 } } })
+        expect(turnOf(later)).toBe('nobody')
+        expect(whoseMove(later)).toBeUndefined()
+        // A whole entry taken out at an earlier version: nobody here can move it on (S9).
+        expect(turnOf(itemOf(STAGE_ROWS['entry-revoked']))).toBe('nobody')
     })
 
     it('is nobody else’s on a share that names nobody', () => {

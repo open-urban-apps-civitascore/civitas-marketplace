@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/session', () => ({ requireSession: vi.fn(async () => ({ user: { name: 'Test' } })), getAccessToken: vi.fn(async () => 't') }))
 
 import { getRepoListMeta, getRepoListSummaries, resetRepoListCacheForTests } from '@/lib/catalog/repo-list'
+import type { MergeRequestNote } from '@/lib/export/gitlab'
 import { inProgressItems, rowProgress } from '@/lib/export/in-progress-items'
-import { shareSourceLine } from '@/lib/export/merge-request-text'
+import { shareSourceLine, withdrawalMark } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { readShareListing, servesSameIndex } from '@/lib/export/share-listing'
 import { shareTabs } from '@/lib/export/share-tabs'
@@ -42,7 +43,9 @@ interface World {
     openMrs: unknown[]
     files: Record<string, string>
     /** Comments per merge request, newest first. */
-    notes: Record<number, { body: string }[]>
+    notes: Record<number, MergeRequestNote[]>
+    /** Folder listings by `<ref>|<path>`, where `TREES` is not enough. */
+    trees: Record<string, unknown[]>
     /** The catalogue in a project of its own (8): the bot's requests there, its open requests and its index. */
     catalogue?: { botMrs: unknown[]; openMrs: unknown[]; index: string }
     /** The bot's requests page by page, where `botMrs` is one page. */
@@ -53,7 +56,7 @@ interface World {
 
 /** A GitLab that knows one project, answers from the tables above and writes down every request. */
 function fakeGitLab(failing: string[] = [], world: Partial<World> = {}) {
-    const { botMrs = BOT_MRS, openMrs = OPEN_MRS, files = FILES, notes = {}, catalogue, pages, served } = world
+    const { botMrs = BOT_MRS, openMrs = OPEN_MRS, files = FILES, notes = {}, trees = TREES, catalogue, pages, served } = world
     const calls: string[] = []
     const fetchImpl = (async (input: string | URL | Request) => {
         const url = new URL(String(input))
@@ -80,7 +83,7 @@ function fakeGitLab(failing: string[] = [], world: Partial<World> = {}) {
         }
         if (path === '/projects/7/repository/branches/main') return json({ commit: { id: HEAD } })
         if (path === '/projects/7/repository/tree') {
-            const listing = TREES[`${query.get('ref')}|${query.get('path') ?? ''}`]
+            const listing = trees[`${query.get('ref')}|${query.get('path') ?? ''}`]
             return listing ? json(listing) : json({ message: '404 Tree Not Found' }, 404)
         }
         if (path.startsWith('/projects/7/repository/files/')) {
@@ -241,35 +244,52 @@ describe('readShareListing', () => {
         expect(count(gitlab.calls, '/projects/8/merge_requests?author_id=42')).toBe(1)
     })
 
-    it('names a closed request withdrawn only with the marketplace’s note, and reads each closed request’s notes once', async () => {
-        const closed = (iid: number, slug: string, closedBy: number) => ({
+    it('names a closed request withdrawn only with the marketplace’s mark or note, and reads comments only where someone wrote any, once', async () => {
+        const closed = (iid: number, slug: string, closedBy: number, extra: Record<string, unknown> = {}) => ({
             iid,
             state: 'closed',
             source_branch: `export/${slug}-1.0.0`,
             web_url: `${WEB}/-/merge_requests/${iid}`,
             title: `Export use case: ${slug} 1.0.0`,
-            closed_by: { id: closedBy },
+            created_at: '2026-10-16T10:00:00Z',
+            closed_by: { id: closedBy, username: closedBy === 42 ? 'bot' : 'kurator' },
+            closed_at: '2026-10-17T10:00:00Z',
             updated_at: '2026-10-17T10:00:00Z',
+            ...extra,
         })
-        const botMrs = [closed(14, 'pegel', 42), closed(13, 'wind', 42), closed(12, 'regen', 99)]
+        const botMrs = [
+            // Withdrawn since rc.7: the mark its close wrote says it, no comment is read.
+            closed(15, 'wind2', 42, { user_notes_count: 1, description: `Proposed by …\n\n${withdrawalMark('Ewa', new Date('2026-10-17T09:59:59Z'))}` }),
+            closed(14, 'pegel', 42, { user_notes_count: 1 }),
+            // Closed by hand through the bot's account (!3, !5 on the demo): nobody wrote anything.
+            closed(13, 'wind', 42, { user_notes_count: 0 }),
+            closed(12, 'regen', 99, { user_notes_count: 1 }),
+        ]
         const notes = {
-            14: [{ body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. Sharing the use case again opens a new merge request.' }, { body: 'closed' }],
-            // Closed by hand through the bot's account (!3, !5 on the demo): GitLab's own note only.
-            13: [{ body: 'closed' }],
+            14: [
+                { body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. Sharing the use case again opens a new merge request.', author: { id: 42 }, created_at: '2026-10-17T10:00:01Z' },
+                { body: 'closed', system: true, created_at: '2026-10-17T10:00:00Z' },
+            ],
+            12: [{ body: 'Die Datenquelle ist nicht öffentlich.', author: { id: 99, username: 'kurator' }, created_at: '2026-10-17T09:59:00Z' }],
         }
         const gitlab = fakeGitLab([], { botMrs, notes })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
         const { rows } = await readShareListing()
         const bySlug = Object.fromEntries(rows.map((row) => [row.slug, row]))
+        expect(bySlug.wind2.withdrawn).toBe(true)
+        expect(bySlug.wind2.proposals?.[0].withdrawnBy).toBe('Ewa')
         expect(bySlug.pegel.withdrawn).toBe(true)
         expect(rowProgress(bySlug.pegel).summary).toBe('Zurückgezogen')
         expect(bySlug.wind.withdrawn).toBeUndefined()
         expect(rowProgress(bySlug.wind).summary).toBe('Nicht angenommen')
+        expect(bySlug.wind.proposals?.[0]).toMatchObject({ closedByBot: true, reason: { kind: 'none' } })
         expect(bySlug.regen.withdrawn).toBeUndefined()
-        // Only what the bot closed is read; a reviewer's close needs no notes.
+        // A reviewer's close is read too, for their words.
+        expect(bySlug.regen.proposals?.[0]).toMatchObject({ closedBy: 'kurator', reason: { kind: 'given', text: 'Die Datenquelle ist nicht öffentlich.' } })
+        expect(count(gitlab.calls, '/merge_requests/15/notes')).toBe(0)
         expect(count(gitlab.calls, '/merge_requests/14/notes')).toBe(1)
-        expect(count(gitlab.calls, '/merge_requests/13/notes')).toBe(1)
-        expect(count(gitlab.calls, '/merge_requests/12/notes')).toBe(0)
+        expect(count(gitlab.calls, '/merge_requests/13/notes')).toBe(0)
+        expect(count(gitlab.calls, '/merge_requests/12/notes')).toBe(1)
 
         // A closed request that did not change since is not asked again.
         gitlab.calls.length = 0
@@ -277,7 +297,7 @@ describe('readShareListing', () => {
         expect(count(gitlab.calls, '/notes')).toBe(0)
     })
 
-    it('lists a closed request whose notes cannot be read as not withdrawn, and asks again on the next visit', async () => {
+    it('lists a closed request whose notes cannot be read as not withdrawn, with a reason that could not be read, and asks again on the next visit', async () => {
         const botMrs = [
             {
                 iid: 14,
@@ -286,15 +306,18 @@ describe('readShareListing', () => {
                 web_url: `${WEB}/-/merge_requests/14`,
                 title: 'Export use case: Pegelkarte 1.0.0',
                 closed_by: { id: 42 },
+                closed_at: '2026-10-17T10:00:00Z',
                 updated_at: '2026-10-17T10:00:00Z',
             },
         ]
-        const notes = { 14: [{ body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**.' }] }
+        const notes = { 14: [{ body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**.', author: { id: 42 }, created_at: '2026-10-17T10:00:01Z' }] }
         vi.stubGlobal('fetch', fakeGitLab(['/notes'], { botMrs, notes }).fetchImpl)
         const { rows, error } = await readShareListing()
         expect(error).toBeUndefined()
         expect(rows[0]).toMatchObject({ slug: 'pegel', bundleMr: { state: 'closed' } })
         expect(rows[0].withdrawn).toBeUndefined()
+        // Not "ohne Begründung": that would be a claim about the team (U4).
+        expect(rows[0].proposals?.[0].reason).toEqual({ kind: 'unreadable' })
 
         // The failure was not kept: once GitLab answers, the note counts.
         const gitlab = fakeGitLab([], { botMrs, notes })
@@ -385,7 +408,7 @@ describe('the proposals of a version', () => {
             ...extra,
         })
         const botMrs = [
-            entry(6, WEB, { created_at: '2026-10-15T09:00:00Z', closed_at: '2026-10-16T09:00:00Z', closed_by: { id: 99, username: 'kurator' }, user_notes_count: 2 }),
+            entry(6, WEB, { created_at: '2026-10-15T09:00:00Z', closed_at: '2026-10-16T09:00:00Z', updated_at: '2026-10-16T09:00:00Z', closed_by: { id: 99, username: 'kurator' }, user_notes_count: 2 }),
             // Another target's package of the same name: its row, not this one.
             entry(5, 'https://gitlab.example/other/repo', { created_at: '2026-10-15T08:00:00Z' }),
             {
@@ -396,7 +419,15 @@ describe('the proposals of a version', () => {
                 description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.',
             },
         ]
-        const gitlab = fakeGitLab([], { botMrs, openMrs: [] })
+        const notes = {
+            6: [
+                // Written after the close, by someone else, or by the reviewer long before the proposal: none of these is the reason.
+                { body: 'Schade!', author: { id: 7, username: 'kim' }, created_at: '2026-10-16T09:01:00Z' },
+                { body: 'Bitte die Lizenz ergänzen, dann gern noch einmal.', author: { id: 99, username: 'kurator' }, created_at: '2026-10-16T08:59:00Z' },
+                { body: 'Sieht gut aus.', author: { id: 99, username: 'kurator' }, created_at: '2026-10-15T08:00:00Z' },
+            ],
+        }
+        const gitlab = fakeGitLab([], { botMrs, openMrs: [], notes })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
         const { rows } = await readShareListing()
         expect(rows).toHaveLength(1)
@@ -411,6 +442,7 @@ describe('the proposals of a version', () => {
                 closedAt: '2026-10-16T09:00:00Z',
                 closedBy: 'kurator',
                 proposedBy: 'Kim',
+                reason: { kind: 'given', text: 'Bitte die Lizenz ergänzen, dann gern noch einmal.' },
                 comments: 2,
             },
             {
@@ -424,8 +456,20 @@ describe('the proposals of a version', () => {
                 proposedBy: 'Ewa',
             },
         ])
-        // A reviewer's close carries no note of the marketplace: nothing is read for it.
-        expect(count(gitlab.calls, '/notes')).toBe(0)
+        // A reviewer's close is read once, for their words; the entry of the other target is not this row's.
+        expect(count(gitlab.calls, '/notes')).toBe(1)
+        // The catalogue's reading of the version takes the "no" from the proposals: no question more.
+        expect(rows[0].catalog).toEqual({
+            state: 'declined',
+            mrUrl: `${WEB}/-/merge_requests/6`,
+            declined: {
+                iid: 6,
+                mrUrl: `${WEB}/-/merge_requests/6`,
+                closedAt: '2026-10-16T09:00:00Z',
+                closedBy: 'kurator',
+                reason: { kind: 'given', text: 'Bitte die Lizenz ergänzen, dann gern noch einmal.' },
+            },
+        })
     })
 
     it('reads whom a withdrawal was for, on any proposal the account closed, once', async () => {
@@ -440,8 +484,12 @@ describe('the proposals of a version', () => {
         })
         // Bodenfeuchte-like: proposed again after the merge, and that second proposal withdrawn; its removal withdrawn too.
         const botMrs = [closedByBot(21, 'remove/baeume-1.1.0'), closedByBot(20, 'export/baeume-1.1.0'), BOT_MRS[1]]
-        const note = { body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. The merged package stays in the repository as it is.' }
-        const gitlab = fakeGitLab([], { botMrs, openMrs: [], notes: { 21: [note], 20: [{ body: 'closed' }] } })
+        const note = {
+            body: 'Withdrawn through the Open Urban Apps marketplace on behalf of **Ewa**. The merged package stays in the repository as it is.',
+            author: { id: 42 },
+            created_at: '2026-10-17T10:00:02Z',
+        }
+        const gitlab = fakeGitLab([], { botMrs, openMrs: [], notes: { 21: [note], 20: [{ body: 'closed', system: true, created_at: '2026-10-17T10:00:00Z' }] } })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
         const { rows } = await readShareListing()
         expect(rows).toHaveLength(1)
@@ -457,6 +505,106 @@ describe('the proposals of a version', () => {
         gitlab.calls.length = 0
         await readShareListing()
         expect(count(gitlab.calls, '/notes')).toBe(0)
+    })
+})
+
+describe('a "no" from the catalogue team, as the listing reads it (2026-10-22)', () => {
+    const SLUG = 'jungbaumbewaesserung-musterbach'
+    const ID = `urn:musterbach:usecase:${SLUG}`
+    const MERGED = '3'.repeat(40)
+    const line = shareSourceLine({ kind: 'dataset', id: 'ds-musterbach', instance: HERE })
+    /** An entry proposal for 1.1.4, closed through the marketplace's account seconds after it was opened, with no comment (!31, !32 on the demo). */
+    const closedEntry = (iid: number, createdAt: string, closedAt: string) => ({
+        iid,
+        state: 'closed',
+        source_branch: `catalog/${SLUG}-1.1.4`,
+        web_url: `${WEB}/-/merge_requests/${iid}`,
+        description: `Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\nAdds \`${ID}\` in \`useCases\`, pinned to\n\`${HEAD}\` of ${WEB} (path \`packages/${SLUG}\`).\n\n${line}`,
+        created_at: createdAt,
+        closed_at: closedAt,
+        updated_at: closedAt,
+        closed_by: { id: 42, username: 'walkable.cities.2021' },
+        user_notes_count: 0,
+    })
+    const world = {
+        botMrs: [
+            closedEntry(32, '2026-10-22T09:41:00Z', '2026-10-22T09:41:28Z'),
+            closedEntry(31, '2026-10-22T09:37:00Z', '2026-10-22T09:37:23Z'),
+            {
+                iid: 30,
+                state: 'merged',
+                source_branch: `export/${SLUG}-1.1.4`,
+                sha: MERGED,
+                web_url: `${WEB}/-/merge_requests/30`,
+                title: 'Export use case: Jungbaumbewässerung Musterbach 1.1.4',
+                description: `Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n${line}`,
+                created_at: '2026-10-21T09:00:00Z',
+                merged_at: '2026-10-21T15:00:00Z',
+            },
+        ],
+        openMrs: [],
+        files: { [`${HEAD}|packages/${SLUG}/core-ir/manifest.json`]: JSON.stringify({ id: ID, version: '1.1.4' }), 'main|index.json': JSON.stringify({ version: '1.0.0', useCases: [] }) },
+        trees: {
+            [`${HEAD}|packages`]: [{ id: 'M1', name: SLUG, type: 'tree' }],
+            [`${MERGED}|packages`]: [{ id: 'M1', name: SLUG, type: 'tree' }],
+        },
+    }
+
+    it('reads the 1.1.4 entry as turned down through the marketplace’s account, without a reason and without asking for comments (!31, !32)', async () => {
+        const gitlab = fakeGitLab([], world)
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { rows } = await readShareListing()
+        expect(rows.map((row) => `${row.slug} ${row.version}`)).toEqual([`${SLUG} 1.1.4`])
+        expect(rows[0].catalog).toEqual({
+            state: 'declined',
+            mrUrl: `${WEB}/-/merge_requests/32`,
+            declined: {
+                iid: 32,
+                mrUrl: `${WEB}/-/merge_requests/32`,
+                closedAt: '2026-10-22T09:41:28Z',
+                closedBy: 'walkable.cities.2021',
+                viaMarketplace: true,
+                reason: { kind: 'none' },
+            },
+        })
+        // Nobody wrote anything on them: there is nothing to read.
+        expect(count(gitlab.calls, '/notes')).toBe(0)
+
+        const tabs = shareTabs(rows, { instance: HERE, person: 'Ewa', now: Date.parse('2026-10-22T12:00:00Z') })
+        // Never again "Katalog-Eintrag vorschlagen" for 1.1.4: the stage turned down, and the person's move to read it.
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine])).toEqual([['entry-declined', true]])
+        expect(rowProgress(rows[0]).states).toEqual({ propose: 'done', review: 'done', catalog: 'done', listing: 'declined' })
+        expect(tabs.ended.map((entry) => [entry.what, entry.ending, entry.proposal?.iid, entry.proposal?.closedByBot])).toEqual([
+            ['catalog', 'not-accepted', 32, true],
+            ['catalog', 'not-accepted', 31, true],
+        ])
+    })
+
+    it('reads a version shared again after its removal from what came since: the old merge does not hide the "no" to it', async () => {
+        const pegel = (iid: number, state: string, branch: string, extra: Record<string, unknown>) => ({
+            iid,
+            state,
+            source_branch: branch,
+            web_url: `${WEB}/-/merge_requests/${iid}`,
+            title: 'Export use case: Pegelkarte 1.0.0',
+            description: `Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.\n\n${shareSourceLine({ kind: 'dataset', id: 'ds-pegel', instance: HERE })}`,
+            ...extra,
+        })
+        const botMrs = [
+            pegel(9, 'closed', 'export/pegel-1.0.0', { created_at: '2026-10-15T10:00:00Z', closed_at: '2026-10-21T10:00:00Z', closed_by: { id: 99, username: 'kurator' }, user_notes_count: 0 }),
+            pegel(6, 'merged', 'remove/pegel-1.0.0', { created_at: '2026-10-10T10:00:00Z', merged_at: '2026-10-11T10:00:00Z' }),
+            pegel(3, 'merged', 'export/pegel-1.0.0', { created_at: '2026-10-01T10:00:00Z', merged_at: '2026-10-02T10:00:00Z' }),
+        ]
+        vi.stubGlobal('fetch', fakeGitLab([], { botMrs, openMrs: [] }).fetchImpl)
+        const { rows } = await readShareListing()
+        expect(rows.map((row) => [row.version, row.bundleMr])).toEqual([['1.0.0', { url: `${WEB}/-/merge_requests/9`, state: 'closed' }]])
+        const tabs = shareTabs(rows, { instance: HERE, person: 'Ewa', now: Date.parse('2026-10-22T12:00:00Z') })
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined?.decline.iid])).toEqual([['declined', true, 9]])
+        // The removal stays an ending of its own, next to the "no".
+        expect(tabs.ended.map((entry) => [entry.what, entry.ending, entry.proposal?.iid])).toEqual([
+            ['bundle', 'not-accepted', 9],
+            ['removal', 'removed', 6],
+        ])
     })
 })
 

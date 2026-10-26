@@ -646,6 +646,26 @@ describe('the list after a deletion', () => {
         const note = String(writes(calls)[1].body?.body)
         expect(withdrawerOf(note)).toBe('Test')
     })
+
+    it('reads the withdrawal back from the mark its close wrote, without asking for comments, even where the note was lost', async () => {
+        const opened = mr(4, 'opened', 'export/pegel-1.0.0', { title: 'Export use case: Pegelkarte 1.0.0' })
+        const { calls } = await planAndDelete(world({ exportMrs: [opened], failing: ['POST /projects/7/merge_requests/4/notes'] }), 'pegel', '1.0.0')
+        const { description } = writes(calls)[0].body as { description: string }
+        // GitLab as it is after that close: the description with the mark, closed by the account just now, and the note missing.
+        const closed = mr(4, 'closed', 'export/pegel-1.0.0', {
+            title: 'Export use case: Pegelkarte 1.0.0',
+            description,
+            closed_by: { id: 42 },
+            closed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            user_notes_count: 0,
+        })
+        const gitlab = fakeGitLab(world({ exportMrs: [closed] }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { rows } = await readShareListing()
+        expect(rows[0]).toMatchObject({ slug: 'pegel', withdrawn: true, proposals: [{ withdrawnBy: 'Test' }] })
+        expect(gitlab.calls.some((call) => call.path.includes('/notes'))).toBe(false)
+    })
 })
 
 describe('the source line of the proposals after the package’s', () => {

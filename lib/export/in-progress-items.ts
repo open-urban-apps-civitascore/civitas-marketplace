@@ -32,6 +32,10 @@ export type InProgressItem =
           mine: boolean
           /** Versions this one replaced, lowest first. */
           earlier: string[]
+          /** The "no" the row stands at, and whether it is still the sharing side's move. */
+          declined?: TabRow['declined']
+          /** A change to this accepted version that the catalogue team did not take. */
+          declinedChange?: TabRow['declinedChange']
       }
 
 export { rowProgress } from '@/lib/export/share-tabs'
@@ -47,7 +51,7 @@ export interface DatasetsHere {
  * - `yours`: the person's own - a started share, or a stage of theirs on what they proposed
  * - `colleague`: a stage of the sharing side on what someone else here proposed
  * - `team`: the catalogue team decides (a review, a removal)
- * - `nobody`: nobody on the page can move it on - the state could not be read, or only the operator can help
+ * - `nobody`: nobody on the page can move it on - the state could not be read, only the operator can help, or a "no" is past its time
  */
 export type Turn = 'yours' | 'colleague' | 'team' | 'nobody'
 
@@ -58,6 +62,8 @@ export function turnOf(item: InProgressItem): Turn {
     const { row, progress } = item
     if (item.mine) return 'yours'
     if (row.problem) return 'nobody'
+    // A "no" to a removal past its 30 days: still told on the row, asked of nobody.
+    if (item.declined && !item.declined.current) return 'nobody'
     if (progress.removal === 'pending' || progress.turn === 'reviewers') return 'team'
     return progress.turn === 'you' ? 'colleague' : 'nobody'
 }
@@ -109,6 +115,8 @@ export function inProgressItems(drafts: ShareDraft[], available: DatasetsHere, r
                 outcome: tabbed.outcome,
                 mine: tabbed.mine,
                 earlier: tabbed.earlier,
+                ...(tabbed.declined ? { declined: tabbed.declined } : {}),
+                ...(tabbed.declinedChange ? { declinedChange: tabbed.declinedChange } : {}),
             }),
         ),
     ]
@@ -144,7 +152,7 @@ export function withSlot(order: readonly string[], key: string, index: number): 
  * - `done`: filled, with a check
  * - `yours`: the sharing side's move now - a thick ring in the text colour, the label in bold
  * - `waiting`: someone else's move now - a ring with a clock
- * - `problem`: something stops it - the warn triangle, the only colour on the line
+ * - `problem`: something stops it, or the catalogue team turned it down - the warn triangle, the only colour on the line
  * - `later`: not yet - a thin outline
  */
 export type TrackMark = 'done' | 'yours' | 'waiting' | 'problem' | 'later'
@@ -208,7 +216,7 @@ export interface RowView {
     earlier?: string
 }
 
-const MARK_OF: Record<StageState, TrackMark> = { done: 'done', current: 'yours', waiting: 'waiting', blocked: 'problem', later: 'later' }
+const MARK_OF: Record<StageState, TrackMark> = { done: 'done', current: 'yours', waiting: 'waiting', blocked: 'problem', declined: 'problem', later: 'later' }
 
 function trackOf(states: Record<StageKey, StageState>, override: Partial<Record<StageKey, TrackMark>> = {}): TrackStep[] {
     return STAGES.map((stage) => ({ label: stage.short, mark: override[stage.key] ?? MARK_OF[states[stage.key]] }))
@@ -386,7 +394,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: [],
             }
         default:
-            // Not a stage „In Arbeit“ lists (the tab rules keep it out); said as the stages say it, with where to look.
-            return { ...base, track, status: plain(dot(progress.summary, who)), main: gitlab(row.bundleMr.url), quiet: [] }
+            // Said as the stages say it, with where to look - for a "no", the proposal the catalogue team turned down.
+            return { ...base, track, status: plain(dot(progress.summary, who)), main: gitlab(item.declined?.decline.mrUrl ?? row.bundleMr.url), quiet: [] }
     }
 }

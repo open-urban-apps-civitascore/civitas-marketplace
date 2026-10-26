@@ -28,5 +28,7 @@ export function catalogStateLabel(state: CatalogStatus['state']): string {
             ? 'Katalog nicht eingerichtet'
             : state === 'withdrawn'
               ? 'aus dem Katalog genommen'
-              : 'noch nicht im Katalog'
+              : state === 'declined'
+                ? 'Eintrag nicht angenommen'
+                : 'noch nicht im Katalog'
 }
