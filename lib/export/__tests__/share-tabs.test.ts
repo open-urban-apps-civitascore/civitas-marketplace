@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import type { Decline } from '@/lib/export/declines'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
-import { instanceMatch, rowOutcome, shareTabs, TAB_OF, type ShareOutcome, type ShareTab } from '@/lib/export/share-tabs'
+import { declineIsCurrent, instanceMatch, rowOutcome, shareTabs, TAB_OF, type ShareOutcome, type ShareTab } from '@/lib/export/share-tabs'
 
 const HERE = 'https://portal.hier.example'
 const THERE = 'https://portal.dev.example'
@@ -32,6 +33,8 @@ const row = (slug: string, version: string, facts: Partial<SharedPackageRow> = {
 
 const verified = { state: 'verified' as const }
 const onBase = (extra: Record<string, unknown> = {}) => ({ state: 'on-base' as const, packageId: 'urn:x:usecase:a', verification: verified, ...extra })
+/** A "no" as the listing's reading carries it. */
+const decline = (iid: number, extra: Partial<Decline> = {}): Decline => ({ iid, mrUrl: `${WEB}/${iid}`, reason: { kind: 'none' }, ...extra })
 const replacedBy = (version: string) => ({ state: 'none' as const, reason: 'other-version' as const, onBase: { id: 'urn:x:usecase:a', version } })
 const open = { bundleMr: { url: `${WEB}/1`, state: 'opened' } }
 
@@ -57,7 +60,11 @@ const OUTCOMES: [ShareOutcome, SharedPackageRow, ShareTab | undefined][] = [
     ['gone', row('a', '1.0.0', { bundle: { state: 'none', reason: 'no-package' } }), 'ended'],
     ['gone', row('a', '1.1.0', { bundle: replacedBy('1.0.0') }), 'ended'],
     ['withdrawn', row('a', '1.0.0', { bundleMr: { url: `${WEB}/1`, state: 'closed' }, withdrawn: true }), 'ended'],
-    ['not-accepted', row('a', '1.0.0', { bundleMr: { url: `${WEB}/1`, state: 'closed' } }), 'ended'],
+    // A "no" is listed in „In Arbeit“ while it is current (see the block below), else only as an ending.
+    ['declined', row('a', '1.0.0', { bundleMr: { url: `${WEB}/1`, state: 'closed' } }), 'in-progress'],
+    ['entry-declined', row('a', '1.0.0', { bundle: onBase(), catalog: { state: 'declined', mrUrl: `${WEB}/32`, declined: decline(32) } }), 'in-progress'],
+    ['removal-declined', row('a', '1.0.0', { bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/9`, declined: decline(9) } }), catalog: { state: 'none' } }), 'in-progress'],
+    ['entry-revoked', row('a', '1.1.0', { bundle: onBase(), catalog: { state: 'withdrawn', takenOut: { version: '1.0.0' } } }), 'in-progress'],
 ]
 
 describe('rowOutcome and TAB_OF', () => {
@@ -180,14 +187,17 @@ describe('shareTabs', () => {
         expect(keys(tabs.inProgress)).toEqual(['baeume 1.2.0'])
     })
 
-    it('enters a whole entry withdrawn by the catalogue team once, at the version the index names', () => {
+    it('enters a whole entry withdrawn by the catalogue team once, at the version the index names, and keeps the newer accepted one in „In Arbeit“ (S9)', () => {
         const withdrawn = { state: 'withdrawn' as const, takenOut: { version: '1.0.0', reason: 'Doppelt' } }
         const tabs = shareTabs(
             [row('baeume', '1.1.0', { bundle: onBase(), catalog: withdrawn }), row('baeume', '1.0.0', { bundle: replacedBy('1.1.0'), catalog: withdrawn })],
-            { instance: HERE },
+            { instance: HERE, person: 'Ewa' },
         )
         expect(tabs.ended.map((entry) => [entry.ending, entry.version, entry.reason])).toEqual([['taken-out', '1.0.0', 'Doppelt']])
-        expect(tabs.inProgress).toEqual([])
+        // Until rc.6 it was in no list at all. Nobody here can move it on, so it is nobody's move, and its dataset is free for a new version.
+        expect(tabs.inProgress.map((tabbed) => [tabbed.row.version, tabbed.outcome, tabbed.mine])).toEqual([['1.1.0', 'entry-revoked', false]])
+        expect(tabs.inProgress[0].progress.states).toEqual({ propose: 'done', review: 'done', catalog: 'blocked', listing: 'later' })
+        expect(tabs.busy.size).toBe(0)
         expect(tabs.published).toEqual([])
     })
 
@@ -346,6 +356,221 @@ describe('shareTabs', () => {
             ['a', 'withdrawn', 'bundle', 4],
             ['b', 'removed', 'removal', 9],
         ])
+    })
+})
+
+describe('a "no" from the catalogue team (2026-10-22)', () => {
+    const NOW = Date.parse('2026-10-22T12:00:00Z')
+    const DAY = 24 * 60 * 60 * 1000
+    const sourced = { source: { kind: 'dataset' as const, id: 'ds-x', instance: HERE } }
+    /** A proposal closed by the catalogue team, from this instance, the day before NOW. */
+    const turnedDown = (kind: ShareProposal['kind'], iid: number, extra: Partial<ShareProposal> = {}) =>
+        proposal(kind, iid, 'closed', { closedAt: '2026-10-21T10:00:00Z', closedBy: 'spaudanjo', reason: { kind: 'given', text: 'Die Datenquelle ist nicht öffentlich.' }, ...sourced, ...extra })
+    const packageNo = (extra: Partial<ShareProposal> = {}, version = '1.0.0') =>
+        row('pegel', version, { bundleMr: { url: `${WEB}/14`, state: 'closed' }, proposals: [turnedDown('bundle', 14, extra)] })
+
+    it('keeps a turned-down package in „In Arbeit“ as the person’s move, with the team’s words, and as an ending in „Beendet“ (S1)', () => {
+        const tabs = shareTabs([packageNo()], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine])).toEqual([['declined', true]])
+        expect(tabs.inProgress[0].declined).toEqual({
+            decline: { iid: 14, mrUrl: `${WEB}/14`, closedAt: '2026-10-21T10:00:00Z', closedBy: 'spaudanjo', reason: { kind: 'given', text: 'Die Datenquelle ist nicht öffentlich.' } },
+            current: true,
+        })
+        // The stage turned down carries the problem mark; the person's move is to read it and share a higher version.
+        expect(tabs.inProgress[0].progress).toMatchObject({ states: { propose: 'done', review: 'declined', catalog: 'later', listing: 'later' }, turn: 'you', finished: true })
+        expect(tabs.counts).toEqual({ inProgress: 1, mine: 1, published: 0 })
+        expect(tabs.ended.map((entry) => [entry.what, entry.ending, entry.proposal?.iid])).toEqual([['bundle', 'not-accepted', 14]])
+        // Its way on is a new version, which „Auswählen“ starts: the dataset is not busy.
+        expect(tabs.busy.size).toBe(0)
+    })
+
+    it('is the person’s move for 30 days after the close, then only an ending', () => {
+        const at = (days: number) => shareTabs([packageNo()], { instance: HERE, person: 'Ewa', now: Date.parse('2026-10-21T10:00:00Z') + days * DAY })
+        expect(at(30).inProgress).toHaveLength(1)
+        expect(at(30.01).inProgress).toEqual([])
+        expect(at(30.01).counts).toEqual({ inProgress: 0, mine: 0, published: 0 })
+        expect(at(30.01).ended.map((entry) => entry.ending)).toEqual(['not-accepted'])
+    })
+
+    it('leaves a close older than rc.6 without a source line to „Beendet“, closed a day ago or not (U1, !3 and !5)', () => {
+        const old = (slug: string, iid: number) =>
+            row(slug, '1.0.0', {
+                bundleMr: { url: `${WEB}/${iid}`, state: 'closed' },
+                source: undefined,
+                proposals: [proposal('bundle', iid, 'closed', { closedAt: '2026-10-21T10:00:00Z', closedByBot: true, reason: { kind: 'none' } })],
+            })
+        const tabs = shareTabs([old('kiez-baumkataster', 3), old('export-test-1', 5)], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress).toEqual([])
+        expect(tabs.ended.map((entry) => [entry.row.slug, entry.ending, entry.origin])).toEqual([
+            ['kiez-baumkataster', 'not-accepted', 'unknown'],
+            ['export-test-1', 'not-accepted', 'unknown'],
+        ])
+    })
+
+    it('is nobody’s move here when the turned-down proposal names another instance, or none can be told', () => {
+        expect(shareTabs([packageNo({ source: { kind: 'dataset', id: 'ds-x', instance: THERE } })], { instance: HERE, now: NOW }).inProgress).toEqual([])
+        expect(shareTabs([packageNo()], { now: NOW }).inProgress).toEqual([])
+        expect(declineIsCurrent({ kind: 'bundle', closedAt: undefined, source: sourced.source }, '1.0.0', [], HERE, NOW)).toBe(false)
+    })
+
+    it('leaves „In Arbeit“ once a newer version of the package has a proposal (S14)', () => {
+        const newer = row('pegel', '1.0.1', { ...open, proposals: [proposal('bundle', 15, 'opened')] })
+        const tabs = shareTabs([newer, packageNo()], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress.map((tabbed) => `${tabbed.row.version} ${tabbed.outcome}`)).toEqual(['1.0.1 in-review'])
+        expect(tabs.ended.map((entry) => entry.version)).toEqual(['1.0.0'])
+    })
+
+    it('waits again once the team reopens it: no "no" and no ending (S11)', () => {
+        const reopened = row('pegel', '1.0.0', { bundleMr: { url: `${WEB}/14`, state: 'opened' }, proposals: [proposal('bundle', 14, 'opened', sourced)] })
+        const tabs = shareTabs([reopened], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined])).toEqual([['in-review', false, undefined]])
+        expect(tabs.ended).toEqual([])
+    })
+
+    it('reads the entry closed twice through the marketplace’s account as turned down, from the newer close (S5, S10: !31 and !32)', () => {
+        const viaAccount = (iid: number, closedAt: string) =>
+            proposal('catalog', iid, 'closed', { createdAt: closedAt.replace(/:..Z$/, ':00Z'), closedAt, closedByBot: true, closedBy: 'walkable.cities.2021', comments: 0, reason: { kind: 'none' }, ...sourced })
+        const proposals = [viaAccount(32, '2026-10-22T09:41:28Z'), viaAccount(31, '2026-10-22T09:37:23Z'), proposal('bundle', 30, 'merged', sourced)]
+        const musterbach = row('jungbaumbewaesserung-musterbach', '1.1.4', {
+            bundle: onBase(),
+            catalog: { state: 'declined', mrUrl: `${WEB}/32`, declined: decline(32, { closedAt: '2026-10-22T09:41:28Z', viaMarketplace: true }) },
+            proposals,
+        })
+        const tabs = shareTabs([musterbach], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine])).toEqual([['entry-declined', true]])
+        expect(tabs.inProgress[0].declined?.decline).toMatchObject({ iid: 32, viaMarketplace: true, closedBy: 'walkable.cities.2021', reason: { kind: 'none' } })
+        expect(tabs.inProgress[0].progress.states).toEqual({ propose: 'done', review: 'done', catalog: 'done', listing: 'declined' })
+        // Each close is an ending of its own, through the marketplace's account.
+        expect(tabs.ended.map((entry) => [entry.what, entry.ending, entry.proposal?.iid, entry.proposal?.closedByBot])).toEqual([
+            ['catalog', 'not-accepted', 32, true],
+            ['catalog', 'not-accepted', 31, true],
+        ])
+        expect(tabs.busy.size).toBe(0)
+    })
+
+    it('keeps a package whose removal was turned down in „In Arbeit“: the person’s move for 30 days, then nobody’s (S8)', () => {
+        const removalNo = (now: number) =>
+            shareTabs(
+                [
+                    row('regen', '1.0.0', {
+                        bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/9`, declined: decline(9, { closedAt: '2026-10-21T10:00:00Z' }) } }),
+                        catalog: { state: 'none' },
+                        proposals: [turnedDown('removal', 9), proposal('bundle', 1, 'merged', sourced)],
+                    }),
+                ],
+                { instance: HERE, person: 'Ewa', now },
+            )
+        const during = removalNo(NOW)
+        expect(during.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined?.current])).toEqual([['removal-declined', true, true]])
+        expect(during.ended.map((entry) => [entry.what, entry.ending])).toEqual([['removal', 'not-accepted']])
+        // The package stays accepted, so its dataset stays busy, as for any accepted version.
+        expect([...during.busy.keys()]).toEqual(['ds-regen'])
+        const after = removalNo(NOW + 31 * DAY)
+        expect(after.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined?.current])).toEqual([['removal-declined', false, false]])
+        expect(after.counts).toEqual({ inProgress: 1, mine: 0, published: 0 })
+    })
+
+    it('tells the later of two "no"s when both the entry and the removal were turned down', () => {
+        const both = (entryAt: string, removalAt: string) =>
+            rowOutcome(
+                row('regen', '1.0.0', {
+                    bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/9`, declined: decline(9, { closedAt: removalAt }) } }),
+                    catalog: { state: 'declined', mrUrl: `${WEB}/8`, declined: decline(8, { closedAt: entryAt }) },
+                }),
+            )
+        expect(both('2026-10-20T10:00:00Z', '2026-10-21T10:00:00Z')).toBe('removal-declined')
+        expect(both('2026-10-21T10:00:00Z', '2026-10-20T10:00:00Z')).toBe('entry-declined')
+    })
+
+    it('notes a turned-down change on the accepted version, without a block, while it is news (S4: bodenfeuchte !19 and !21)', () => {
+        const bodenfeuchte = (now: number) =>
+            shareTabs(
+                [
+                    row('bodenfeuchte', '1.0.0', {
+                        bundle: onBase(),
+                        catalog: { state: 'none' },
+                        proposals: [turnedDown('bundle', 21), proposal('bundle', 19, 'merged', sourced)],
+                    }),
+                ],
+                { instance: HERE, person: 'Ewa', now },
+            )
+        const tabs = bodenfeuchte(NOW)
+        // A merge beats a later closed duplicate: the version stays accepted, the entry can still be proposed.
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined])).toEqual([['accepted', true, undefined]])
+        expect(tabs.inProgress[0].declinedChange).toMatchObject({ iid: 21, closedBy: 'spaudanjo', reason: { kind: 'given' } })
+        expect(tabs.ended.map((entry) => [entry.proposal?.iid, entry.ending])).toEqual([[21, 'not-accepted']])
+        expect(bodenfeuchte(NOW + 31 * DAY).inProgress[0].declinedChange).toBeUndefined()
+    })
+
+    it('shows no entry that was not accepted for a version that is listed (S12)', () => {
+        const tabs = shareTabs(
+            [
+                row('baeume', '1.0.0', {
+                    bundle: onBase(),
+                    catalog: { state: 'listed' },
+                    proposals: [turnedDown('catalog', 8), proposal('bundle', 1, 'merged', sourced)],
+                }),
+            ],
+            { instance: HERE, now: NOW },
+        )
+        expect(tabs.published).toHaveLength(1)
+        expect(tabs.ended).toEqual([])
+    })
+
+    it('keeps a version the catalogue team took out as taken out once its proposal to come back is closed, with no new rows (U3: !27, !29, !30)', () => {
+        const tabs = shareTabs(
+            [
+                row('baeume', '1.0.2', {
+                    bundle: onBase(),
+                    catalog: { state: 'withdrawn', takenOut: { version: '1.0.2' } },
+                    proposals: [turnedDown('catalog', 27), proposal('catalog', 5, 'merged', sourced), proposal('bundle', 1, 'merged', sourced)],
+                }),
+            ],
+            { instance: HERE, person: 'Ewa', now: NOW },
+        )
+        expect(tabs.inProgress).toEqual([])
+        expect(tabs.ended.map((entry) => entry.ending)).toEqual(['taken-out'])
+    })
+
+    it('adds no "not accepted" entry row under a whole entry taken out either (S9), but keeps a withdrawn one', () => {
+        const tabs = shareTabs(
+            [
+                row('baeume', '1.1.0', {
+                    bundle: onBase(),
+                    catalog: { state: 'withdrawn', takenOut: { version: '1.0.0' } },
+                    proposals: [turnedDown('catalog', 30), turnedDown('catalog', 29, { withdrawnBy: 'Ewa' }), proposal('bundle', 1, 'merged', sourced)],
+                }),
+            ],
+            { instance: HERE, person: 'Ewa', now: NOW },
+        )
+        expect(tabs.inProgress.map((tabbed) => tabbed.outcome)).toEqual(['entry-revoked'])
+        expect(tabs.ended.map((entry) => [entry.proposal?.iid, entry.ending])).toEqual([
+            [29, 'withdrawn'],
+            [undefined, 'taken-out'],
+        ])
+    })
+
+    it('makes a close by the account whose comments could not be read nobody’s move: it may be a withdrawal of the time before the mark', () => {
+        const unsure = (kind: ShareProposal['kind']) => turnedDown(kind, 14, { closedByBot: true, closedBy: 'walkable.cities.2021', reason: { kind: 'unreadable' } })
+        const tabs = shareTabs([row('pegel', '1.0.0', { bundleMr: { url: `${WEB}/14`, state: 'closed' }, proposals: [unsure('bundle')] })], { instance: HERE, person: 'Ewa', now: NOW })
+        // As until rc.6: an ending in „Beendet“, until the next reading tells which it was.
+        expect(tabs.inProgress).toEqual([])
+        expect(tabs.counts.mine).toBe(0)
+        expect(tabs.ended.map((entry) => entry.ending)).toEqual(['not-accepted'])
+        // A reviewer's close is a "no" whatever its comments say, and the marketplace never withdraws a removal.
+        expect(declineIsCurrent({ ...unsure('bundle'), closedByBot: false }, '1.0.0', [], HERE, NOW)).toBe(true)
+        expect(declineIsCurrent(unsure('removal'), '1.0.0', [], HERE, NOW)).toBe(true)
+        expect(declineIsCurrent(unsure('catalog'), '1.0.0', [], HERE, NOW)).toBe(false)
+    })
+
+    it('reads a version shared again after its removal afresh: a "no" to it is a "no", and its review is no change of an accepted one', () => {
+        const accepted = proposal('bundle', 3, 'merged', { createdAt: '2026-10-01T10:00:00Z', mergedAt: '2026-10-02T10:00:00Z', ...sourced })
+        const removed = proposal('removal', 6, 'merged', { createdAt: '2026-10-10T10:00:00Z', mergedAt: '2026-10-11T10:00:00Z', ...sourced })
+        const again = turnedDown('bundle', 9, { createdAt: '2026-10-15T10:00:00Z' })
+        const tabs = shareTabs([row('pegel', '1.0.0', { bundleMr: { url: `${WEB}/9`, state: 'closed' }, proposals: [again, removed, accepted] })], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(tabs.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine, tabbed.declined?.decline.iid])).toEqual([['declined', true, 9]])
+        const waiting = row('pegel', '1.0.0', { ...open, proposals: [proposal('bundle', 9, 'opened', { createdAt: '2026-10-15T10:00:00Z' }), removed, accepted] })
+        expect(rowOutcome(waiting)).toBe('in-review')
     })
 })
 

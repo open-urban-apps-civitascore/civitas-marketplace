@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isNewerVersion, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
+import { isNewerVersion, nextPatch, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
 
 const verified = { state: 'verified' as const, mergedMrUrl: 'https://gitlab.example/mr/1' }
 
@@ -176,10 +176,37 @@ describe('shareProgress', () => {
         expect(proposedAgain.removal).toBeUndefined()
     })
 
+    it('never resets a version the catalogue team turned down: the stage keeps the "no", and nothing is proposed again (P1, U8)', () => {
+        const declined = { iid: 31, mrUrl: 'u/31', closedAt: '2026-10-22T10:00:00Z', reason: { kind: 'none' as const } }
+        // The package, as the wizard reads it for this version alone, and as the listing reads it.
+        for (const facts of [{ bundle: { state: 'none' as const, reason: 'no-package' as const, declined } }, { bundleMrState: 'closed' }]) {
+            const progress = shareProgress({ version: '1.0.0', ...facts })
+            expect(progress).toMatchObject({ states: { propose: 'done', review: 'declined', catalog: 'later', listing: 'later' }, active: 'review', turn: 'you', finished: true, summary: 'Nicht angenommen' })
+            // Not "Zur Prüfung einreichen" again: the propose stage is behind it.
+            expect(progress.states.propose).not.toBe('current')
+        }
+        // Withdrawn by the person: the same version may be submitted again (R8).
+        expect(shareProgress({ bundleMrState: 'closed', withdrawn: true })).toMatchObject({ states: { propose: 'later' }, summary: 'Zurückgezogen' })
+        expect(shareProgress({ version: '1.0.0', bundle: { state: 'none', reason: 'no-package' } }).states.propose).toBe('current')
+
+        // The entry (!31, !32): the package stays accepted, the entry stage keeps the "no", and no catalogue step is offered.
+        const entry = shareProgress({ version: '1.1.4', bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'declined', mrUrl: 'u/32', declined } })
+        expect(entry).toMatchObject({ states: { propose: 'done', review: 'done', catalog: 'done', listing: 'declined' }, active: 'listing', turn: 'you', finished: true })
+        expect(entry.summary).toBe('Paket angenommen, Katalog-Eintrag nicht angenommen')
+    })
+
     it('compares plain versions only', () => {
         expect(isNewerVersion('1.10.0', '1.9.3')).toBe(true)
         expect(isNewerVersion('1.0.0', '1.0.0')).toBe(false)
         expect(isNewerVersion('0.9.9', '1.0.0')).toBe(false)
         expect(isNewerVersion('2.0.0-rc.1', '1.0.0')).toBe(false)
+    })
+})
+
+describe('nextPatch', () => {
+    it('suggests one step above a used-up version, and a first version for anything else', () => {
+        expect(nextPatch('1.0.2')).toBe('1.0.3')
+        expect(nextPatch('1.1.9')).toBe('1.1.10')
+        expect(nextPatch('beta')).toBe('1.0.0')
     })
 })

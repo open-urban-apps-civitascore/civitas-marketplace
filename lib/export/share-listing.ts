@@ -14,6 +14,7 @@ import {
     type ExportConfig,
     type ExportTarget,
 } from '@/lib/export/config'
+import { declinedProposal, declineOf, type Decline } from '@/lib/export/declines'
 import {
     clientFor,
     currentUser,
@@ -22,16 +23,17 @@ import {
     gitlabMessage,
     listMergeRequestsBy,
     listOpenMergeRequests,
-    mergeRequestNotes,
     parseProjectUrl,
+    readClosing,
     readFile,
+    type Closing,
     type GitLabClient,
     type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
-import { catalogPinOf, displayNameOf, proposerOf, readmeSourceOf, shareSourceOf, withdrawerOf, type DeclineReason, type ShareSource } from '@/lib/export/merge-request-text'
+import { catalogPinOf, displayNameOf, proposerOf, readmeSourceOf, shareSourceOf, type DeclineReason, type ShareSource } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
-import { catalogStatusIn, inspectBundleIn, packageFolder, readBaseTrees, type BundleStatus, type CatalogContext, type CatalogStatus } from '@/lib/export/status'
+import { catalogStatusIn, inspectBundleIn, packageFolder, presentRequests, readBaseTrees, type BundleStatus, type CatalogContext, type CatalogStatus } from '@/lib/export/status'
 
 /**
  * What this marketplace's GitLab account has proposed, and where each shared
@@ -73,7 +75,7 @@ export interface ShareProposal {
     closedByBot?: boolean
     /** Whom it was proposed for, from its first line. */
     proposedBy?: string
-    /** Whom the marketplace withdrew it for, from its withdrawal note. */
+    /** Whom the marketplace withdrew it for, from its withdrawal mark (older ones: from its note). */
     withdrawnBy?: string
     /** Closed and not withdrawn: what the catalogue team said (`declineReasonOf`), or that it could not be read. */
     reason?: DeclineReason
@@ -94,7 +96,7 @@ export interface SharedPackageRow {
     displayName: string
     /** The version's open merge request, else its merged one, else its newest. */
     bundleMr: { url: string; state: string }
-    /** Closed through "Zurückziehen", as the marketplace's withdrawal note on it says: taken back, not turned down. */
+    /** Closed through "Zurückziehen", as the marketplace's withdrawal mark (or older note) on it says: taken back, not turned down. */
     withdrawn?: boolean
     /** Read for a merged bundle only; with the version's removal, if one was proposed. */
     bundle?: BundleStatus
@@ -256,14 +258,20 @@ async function sharedRowsOf(target: ExportTarget, token: string, visit: Visit, c
 
 async function sharedPackageRow(context: TargetContext, requests: MergeRequestRef[]): Promise<SharedPackageRow> {
     const { target } = context
-    // An open request is the version's present; else a merge, which a later closed duplicate does not undo.
-    const mr = requests.find((request) => request.state === 'opened') ?? requests.find((request) => request.state === 'merged') ?? requests[0]
-    const version = parseBundleBranch(mr.source_branch) as { slug: string; version: string }
+    const version = parseBundleBranch(requests[0].source_branch) as { slug: string; version: string }
     const removals = context.removals.get(`${version.slug}@${version.version}`) ?? []
+    // An open request is the version's present; else a merge, which a later closed duplicate does not undo.
+    // After a merged removal, only what was proposed since counts.
+    const present = presentRequests(requests, removals)
+    const pool = present.length ? present : requests
+    const mr = pool.find((request) => request.state === 'opened') ?? pool.find((request) => request.state === 'merged') ?? pool[0]
     // Side by side: where the version stands, how each of its proposals ended, and where it came from.
+    // The state waits for the proposals only where a "no" among them decides it.
+    const ended = proposalsOf(context, version, requests, removals)
     const [state, proposals, source] = await Promise.all([
-        stateOf(context, version, requests, removals[0], mr),
-        proposalsOf(context, version, requests, removals),
+        // The newest removal since the package was last merged: an older one, merged, was undone by that merge.
+        stateOf(context, version, requests, presentRequests(removals, requests)[0], mr, ended),
+        ended,
         sourceOf(context, version.slug, mr),
     ])
     const own = proposals.find((proposal) => proposal.kind === 'bundle' && proposal.iid === mr.iid)
@@ -276,7 +284,7 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         displayName: displayNameOf(mr.title, version.version) ?? version.slug,
         bundleMr: { url: mr.web_url, state: mr.state },
         folderUrl: folderHistoryUrl(target, version.slug),
-        // Closed by the account, which is also used by hand: withdrawn only with the marketplace's note.
+        // Closed by the account, which is also used by hand: withdrawn only with the marketplace's mark or note.
         ...(mr.state === 'closed' && own?.withdrawnBy ? { withdrawn: true } : {}),
         ...state,
         ...(source ? { source } : {}),
@@ -297,30 +305,42 @@ function samePackageOnBase(bundle: BundleStatus, slug: string): string | undefin
     return id?.endsWith(`:usecase:${slug}`) ? id : undefined
 }
 
-/** Where a merged version stands in the repository and the catalogue; nothing to read for any other. */
+/** The "no" among a version's proposals of `kind`. */
+function declineAmong(proposals: ShareProposal[], kind: ShareProposal['kind']): Decline | undefined {
+    const declined = declinedProposal(proposals, kind)
+    return declined ? declineOf(declined) : undefined
+}
+
+/**
+ * Where a merged version stands in the repository and the catalogue; nothing
+ * to read for any other. A "no" to its removal or entry comes from `ended`.
+ */
 async function stateOf(
     context: TargetContext,
     { slug, version }: { slug: string; version: string },
     requests: MergeRequestRef[],
     removal: MergeRequestRef | undefined,
     mr: MergeRequestRef,
+    ended: Promise<ShareProposal[]>,
 ): Promise<Pick<SharedPackageRow, 'bundle' | 'catalog' | 'problem'>> {
     if (mr.state !== 'merged') return {}
     const { target, client, projectId } = context
     try {
-        const { head, trees } = await context.base
+        const [{ head, trees }, proposals] = await Promise.all([context.base, ended])
+        const removalDeclined = declineAmong(proposals, 'removal')
         const { status: bundle } = await inspectBundleIn(client, target, slug, version, undefined, {
             projectId,
             requests,
             head,
             treeOnBase: async () => trees.get(packageFolder(target, slug).name),
             removal,
+            ...(removalDeclined ? { removalDeclined } : {}),
         })
         // A replaced version is asked about too: musterbach 1.1.3 stays listed while 1.1.4 waits for its entry.
         const packageId = bundle.packageId ?? samePackageOnBase(bundle, slug)
         if (!packageId) return { bundle }
         const side = await context.catalog
-        return { bundle, catalog: side ? catalogStatusIn(side.context, slug, version, packageId) : { state: 'unconfigured' } }
+        return { bundle, catalog: side ? catalogStatusIn(side.context, slug, version, packageId, declineAmong(proposals, 'catalog')) : { state: 'unconfigured' } }
     } catch (error) {
         // One package GitLab cannot answer for does not take the list down with it.
         if (error instanceof GitLabError) return { problem: gitlabMessage(error) }
@@ -369,6 +389,8 @@ async function proposalOf(
 ): Promise<ShareProposal> {
     const closedByBot = mr.state === 'closed' && mr.closed_by?.id === where.botId
     const merger = mr.merge_user ?? mr.merged_by
+    // Read for every close, a reviewer's as well: a "no" carries the catalogue team's words.
+    const closing = mr.state === 'closed' ? await closingOf(where.client, where.projectId, mr) : undefined
     return {
         kind,
         iid: mr.iid,
@@ -381,27 +403,23 @@ async function proposalOf(
         ...(mr.state === 'merged' && merger?.username ? { mergedBy: merger.username } : {}),
         ...(closedByBot ? { closedByBot } : {}),
         ...(proposerOf(mr.description) ? { proposedBy: proposerOf(mr.description) } : {}),
-        // Only what the account closed can carry the marketplace's note; a reviewer's close needs no reading.
-        ...(closedByBot ? withdrawal(await withdrawerOn(where.client, where.projectId, mr)) : {}),
+        ...(closing?.withdrawnBy ? { withdrawnBy: closing.withdrawnBy } : {}),
+        ...(closing?.reason ? { reason: closing.reason } : {}),
         ...(typeof mr.user_notes_count === 'number' ? { comments: mr.user_notes_count } : {}),
         ...(shareSourceOf(mr.description) ? { source: shareSourceOf(mr.description) } : {}),
     }
 }
 
-const withdrawal = (withdrawnBy: string | undefined) => (withdrawnBy ? { withdrawnBy } : {})
-
 /**
- * Whom the marketplace withdrew a request for that the account closed, from
- * its withdrawal note. Kept until the request changes again
- * (`mergeRequestNotes`), so each closed request is read once. Unreadable
- * counts as not withdrawn, which is what GitLab shows too, and the next visit
- * asks again.
+ * How a closed request ended (`readClosing`), read once until the request
+ * changes. Unreadable comments leave it not withdrawn, as GitLab shows it,
+ * with the reason "unreadable"; the next visit asks again.
  */
-async function withdrawerOn(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<string | undefined> {
+async function closingOf(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<Closing> {
     try {
-        return (await mergeRequestNotes(client, projectId, mr.iid, mr.updated_at)).map((note) => withdrawerOf(note.body)).find(Boolean)
+        return await readClosing(client, projectId, mr)
     } catch (error) {
-        if (error instanceof GitLabError) return undefined
+        if (error instanceof GitLabError) return { reason: { kind: 'unreadable' } }
         throw error
     }
 }
