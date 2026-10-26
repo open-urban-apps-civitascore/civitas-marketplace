@@ -17,13 +17,15 @@ import {
     getProject,
     GitLabError,
     gitlabMessage,
+    HeldBranchError,
     listTree,
     openMergeRequest,
     parseProjectUrl,
 } from '@/lib/export/gitlab'
+import { entryRefusal, packageRefusal, type Decline } from '@/lib/export/declines'
 import { DELETION_SCOPES, readDeletion, runDeletion, type DeletionPlan, type DeletionResult, type DeletionScope } from '@/lib/export/share-deletion'
 import { shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
-import { isNewerVersion, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
+import { isNewerVersion, nextPatch, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -34,7 +36,9 @@ import {
     catalogStatusIn,
     inspectBundle,
     inspectCatalog,
+    lazyAccount,
     readBundleStatus,
+    readCatalogDecline,
     readCatalogStatus,
     readVersionCatalog,
     type BundleStatus,
@@ -69,7 +73,8 @@ export interface PreviewSummary {
 
 export interface ExportActionResult {
     intent: ExportIntent
-    status: 'ok' | 'error' | 'invalid' | 'unconfigured' | 'forbidden' | 'already-open' | 'not-merged' | 'unchanged'
+    /** `declined`: „Stand prüfen“ found a "no", told in the neutral tone rather than as good news. */
+    status: 'ok' | 'error' | 'invalid' | 'unconfigured' | 'forbidden' | 'already-open' | 'not-merged' | 'unchanged' | 'declined'
     detail: string
     preview?: PreviewSummary
     mrUrl?: string
@@ -369,14 +374,15 @@ export async function exportAction(
                 form.options.version,
                 id,
             )
-            return { intent: 'status', status: 'ok', detail: statusLine(bundle, catalog), bundle, catalog }
+            return { intent: 'status', status: hasDecline(bundle, catalog) ? 'declined' : 'ok', detail: statusLine(bundle, catalog), bundle, catalog }
         }
 
         if (form.intent === 'bundle') {
             // A version that is already proposed or merged is not proposed again: a second merge
             // request would carry the same version with other content, or the same content twice.
             // Asked before the package is built, which is the expensive part.
-            const current = await readBundleStatus(client, target, form.options.slug, form.options.version, id)
+            // A "no" whose comments cannot be read fails here rather than refusing on a guess.
+            const current = await readBundleStatus(client, target, form.options.slug, form.options.version, id, { unreadable: 'throw' })
             if (current.state === 'on-base') {
                 return {
                     intent: 'bundle',
@@ -402,6 +408,19 @@ export async function exportAction(
                 : undefined
             const usedUp = catalogue && catalogRefusalOf(form.options.version, catalogue)
             if (usedUp) return { intent: 'bundle', status: 'invalid', detail: usedUp, bundle: current, catalog: catalogue.status }
+            // A version turned down as a package is used up. Asked after the checks above, so the version the refusal
+            // suggests is above everything accepted and listed; a higher one turned down or in review is refused on the
+            // next submit. The reading goes along, for the page to show the "no".
+            if (current.declined) {
+                return {
+                    intent: 'bundle',
+                    status: 'invalid',
+                    detail: packageRefusal(form.options.version, current.declined, nextPatch(form.options.version)),
+                    mrUrl: current.declined.mrUrl,
+                    bundle: current,
+                    ...(catalogue ? { catalog: catalogue.status } : {}),
+                }
+            }
             const accessToken = await getAccessToken()
             const pkg = await buildPackage(accessToken, form, requestedBy)
             const preview = summarise(pkg, target, form)
@@ -470,12 +489,6 @@ export async function exportAction(
 function proposalRef(mrUrl: string | undefined): string {
     const ref = mergeRequestRef(mrUrl)
     return ref ? ` (${ref})` : ''
-}
-
-/** "1.0.3" after "1.0.2": the version to suggest instead of one that is used up. */
-function nextPatch(version: string): string {
-    const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
-    return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : '1.0.0'
 }
 
 /**
@@ -576,8 +589,22 @@ async function proposeCatalog(
     const catalogClient = clientFor(config.catalog.url, token)
     const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
     const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, version, false)
+    const packageId = bundle.packageId ?? expectedId ?? ''
+    const declined = await readCatalogDecline(catalogClient, catalogProject.id, catalogue, packageId, lazyAccount(catalogClient), 'throw')
     // The catalogue team's decision is not undone from here: neither by a new proposal nor by pointing at an open one.
-    const catalog = catalogStatusIn(catalogue, slug, version, bundle.packageId ?? expectedId ?? '')
+    const catalog = catalogStatusIn(catalogue, slug, version, packageId, declined)
+    // An entry turned down is not proposed again for this version. The reading goes along, so the page drops its
+    // button at once.
+    if (catalog.state === 'declined' && catalog.declined) {
+        return {
+            intent: 'catalog',
+            status: 'invalid',
+            detail: entryRefusal(version, catalog.declined),
+            mrUrl: catalog.declined.mrUrl,
+            bundle,
+            catalog,
+        }
+    }
     if (catalog.state === 'withdrawn' || catalog.bringsBack) {
         const open = catalog.bringsBack ? mergeRequestRef(catalog.mrUrl) : undefined
         return {
@@ -623,7 +650,7 @@ async function proposeCatalog(
     if (edit.status === 'unchanged') {
         return { intent: 'catalog', status: 'unchanged', detail: 'Diese Version steht schon im Katalog.', bundle }
     }
-    const outcome = await openMergeRequest(catalogClient, {
+    const proposing = openMergeRequest(catalogClient, {
         upstream: catalogProject,
         baseBranch: config.catalog.baseBranch,
         branch: catalogBranch(slug, version),
@@ -647,6 +674,16 @@ async function proposeCatalog(
         files: { 'index.json': edit.content },
         existingPaths: new Set(['index.json']),
     })
+    let outcome: Awaited<typeof proposing>
+    try {
+        outcome = await proposing
+    } catch (error) {
+        // The catalogue's branch names no publisher, so another package of the same name and version may hold it with
+        // its own "no". This package's own was refused above; one that came in since is told as GitLab's answer.
+        const own = error instanceof HeldBranchError && (!error.held.description || error.held.description.includes(`\`${packageId}\``))
+        if (!(error instanceof HeldBranchError) || own) throw error
+        return { intent: 'catalog', status: 'invalid', detail: heldEntryRefusal(slug, version, error.held.iid), mrUrl: error.held.web_url, bundle, catalog }
+    }
     if (outcome.status === 'already-open') {
         return { intent: 'catalog', status: 'already-open', detail: `Für diese Version ist schon ein Katalog-Eintrag in Prüfung (Vorschlag !${outcome.iid}).`, mrUrl: outcome.url, bundle }
     }
@@ -657,6 +694,11 @@ async function proposeCatalog(
         mrUrl: outcome.url,
         bundle,
     }
+}
+
+/** The catalogue's branch is held by another package's proposal that was turned down: it stays, so the catalogue team can reopen it. */
+function heldEntryRefusal(slug: string, version: string, iid: number): string {
+    return `Kein Katalog-Eintrag: Für „${slug}“ in Version ${version} gibt es schon einen geschlossenen Vorschlag eines anderen Pakets (Vorschlag !${iid}). Er bleibt, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - für dein Paket teile eine neue Version.`
 }
 
 function verificationRefusal(verification: BundleVerification | undefined): string {
@@ -778,13 +820,32 @@ const CATALOG_NOT_SET_UP = 'Der Katalog ist auf dieser Instanz noch nicht einger
 /** The same for sharing as a whole: no place to store packages, or no access to GitLab. */
 const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
 
+/**
+ * The "no" to a version's removal while it is still the news, as the tabs read
+ * it (`rowOutcome`): not once the entry is listed, proposed or taken out.
+ */
+function removalNo(bundle: BundleStatus, catalog: CatalogStatus): Decline | undefined {
+    if (bundle.state !== 'on-base' || catalog.state === 'listed' || catalog.state === 'mr-open' || catalog.state === 'withdrawn') return undefined
+    return bundle.removal?.declined
+}
+
+/** Whether „Stand prüfen“ found a "no" to the package, its entry or its removal, told in the neutral tone. */
+function hasDecline(bundle: BundleStatus, catalog: CatalogStatus): boolean {
+    return Boolean(bundle.declined || catalog.state === 'declined' || removalNo(bundle, catalog))
+}
+
 function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
+    const removal = removalNo(bundle, catalog)
     const first =
         bundle.state === 'mr-open'
             ? 'Paket in Prüfung.'
             : bundle.state === 'on-base'
-              ? 'Paket angenommen.'
-              : sentenceOf(bundle.detail ?? 'Noch kein Paket im Ablageort.')
+              ? removal
+                  ? `Paket angenommen. Entfernen nicht angenommen (Vorschlag !${removal.iid}).`
+                  : 'Paket angenommen.'
+              : bundle.declined
+                ? `Paket nicht angenommen (Vorschlag !${bundle.declined.iid}).`
+                : sentenceOf(bundle.detail ?? 'Noch kein Paket im Ablageort.')
     const second =
         catalog.state === 'listed'
             ? 'Im Katalog.'
@@ -794,7 +855,9 @@ function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
                 ? 'Katalog nicht eingerichtet.'
                 : catalog.state === 'withdrawn'
                   ? 'Aus dem Katalog genommen.'
-                  : 'Noch nicht im Katalog.'
+                  : catalog.state === 'declined'
+                    ? 'Katalog-Eintrag nicht angenommen.'
+                    : 'Noch nicht im Katalog.'
     return `${first} ${second}`
 }
 

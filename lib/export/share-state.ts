@@ -45,6 +45,15 @@ export function mergeShareResult(known: ShareKnowledge, result: ExportActionResu
 }
 
 /**
+ * Whether a catalogue-step answer from „In Arbeit“ leaves the list behind
+ * GitLab, so it is read again: a proposal opened or found open, or a "no" -
+ * else the row would still offer the proposal it was refused.
+ */
+export function listingIsStale(result: ExportActionResult): boolean {
+    return result.status === 'ok' || result.status === 'already-open' || result.catalog?.state === 'declined'
+}
+
+/**
  * What the catalogue team took out of this package, from the reading of any
  * of its versions: it stays true when the person types a higher version,
  * which is when it matters. This version's own reading comes first.

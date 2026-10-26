@@ -19,10 +19,11 @@ import {
     type GitLabProject,
     type MergeRequestRef,
 } from '@/lib/export/gitlab'
+import { removalRefusal } from '@/lib/export/declines'
 import { displayNameOf, proposedByOther, proposerOf, shareSourceLine, shareSourceOf, withdrawalMark } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/status'
+import { inspectBundleIn, presentRequests, readDecline, takenOutIn, type BundleStatus } from '@/lib/export/status'
 
 /**
  * What "Zurückziehen" in "In Arbeit" does to one shared version, by how far it
@@ -47,6 +48,9 @@ import { inspectBundleIn, takenOutIn, type BundleStatus } from '@/lib/export/sta
  *   still proposed is withdrawn. The same holds for a version the catalogue
  *   team took out again (see `takenOutIn`): it was in the catalogue, and a
  *   proposal that would bring it back is all there is to withdraw.
+ * - its removal turned down by the catalogue team: never proposed again from
+ *   here - only the team lifts their "no", by reopening. What is still open
+ *   is withdrawn as before.
  *
  * The marketplace still only proposes, and takes back what it proposed: no
  * code path merges, and no code path deletes on a branch anyone reviews.
@@ -310,6 +314,14 @@ export async function readDeletion(
             if (closes.length) return withdrawOnly({ takenOut: true })
             return nothing(`Das Katalog-Team hat Version ${version} aus dem Katalog genommen, und offen ist dazu nichts mehr. Das angenommene Paket bleibt, wie es ist.`)
         }
+    }
+
+    // The catalogue team said no to taking it out: the package stays accepted, whatever is open still goes.
+    // Counted since it was last accepted, and told even where its comments cannot be read: the marketplace never withdraws a removal.
+    const declinedRemoval = await readDecline(client, project.id, presentRequests(removals, requests), async () => bot, 'tell')
+    if (declinedRemoval) {
+        if (closes.length) return withdrawOnly({ accepted: true })
+        return nothing(removalRefusal(declinedRemoval), declinedRemoval.mrUrl)
     }
 
     // Undoing the merge, not deleting a folder: a version that replaced an older one hands the folder back to it.

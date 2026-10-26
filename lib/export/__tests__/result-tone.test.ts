@@ -13,6 +13,8 @@ describe('resultTone', () => {
         expect(resultTone('not-merged')).toBe('neutral')
         expect(resultTone('unconfigured')).toBe('neutral')
         expect(resultTone('forbidden')).toBe('neutral')
+        // A "no" of the catalogue team that „Stand prüfen“ found is news to read, not good news.
+        expect(resultTone('declined')).toBe('neutral')
     })
 
     it('marks a failed or refused action as an error', () => {
