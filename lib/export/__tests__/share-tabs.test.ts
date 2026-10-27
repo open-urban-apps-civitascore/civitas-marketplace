@@ -413,11 +413,27 @@ describe('a "no" from the catalogue team (2026-10-22)', () => {
         expect(declineIsCurrent({ kind: 'bundle', closedAt: undefined, source: sourced.source }, '1.0.0', [], HERE, NOW)).toBe(false)
     })
 
-    it('leaves „In Arbeit“ once a newer version of the package has a proposal (S14)', () => {
+    it('leaves „In Arbeit“ once a newer version of the package has a proposal, and is told among that one’s earlier versions (S14)', () => {
         const newer = row('pegel', '1.0.1', { ...open, proposals: [proposal('bundle', 15, 'opened')] })
         const tabs = shareTabs([newer, packageNo()], { instance: HERE, person: 'Ewa', now: NOW })
         expect(tabs.inProgress.map((tabbed) => `${tabbed.row.version} ${tabbed.outcome}`)).toEqual(['1.0.1 in-review'])
+        expect(tabs.inProgress[0]).toMatchObject({ earlier: [], declinedEarlier: ['1.0.0'] })
         expect(tabs.ended.map((entry) => entry.version)).toEqual(['1.0.0'])
+        // An entry turned down counts too (Ewa's 1.1.4), a replaced version stays plain, and a higher "no" is no earlier version.
+        const entryNo = row('pegel', '1.0.2', { bundle: onBase(), catalog: { state: 'declined', mrUrl: `${WEB}/32`, declined: decline(32) } })
+        const newest = row('pegel', '1.0.3', { ...open, proposals: [proposal('bundle', 16, 'opened')] })
+        const all = shareTabs([newest, entryNo, row('pegel', '0.9.0', { bundle: replacedBy('1.0.2') }), packageNo(), packageNo({}, '1.1.0')], { instance: HERE, now: NOW })
+        expect(all.inProgress.find((tabbed) => tabbed.row.version === '1.0.3')).toMatchObject({ earlier: ['0.9.0'], declinedEarlier: ['1.0.0', '1.0.2'] })
+    })
+
+    it('says „nicht angenommen“ of no earlier version that may be a withdrawal whose comments could not be read just now (S14, U4)', () => {
+        const newer = row('pegel', '1.0.1', { ...open, proposals: [proposal('bundle', 15, 'opened')] })
+        // Closed through the marketplace's account without the mark, before rc.7: a withdrawal left its note as a comment.
+        const unsure = packageNo({ closedByBot: true, closedBy: 'walkable.cities.2021', reason: { kind: 'unreadable' } })
+        expect(shareTabs([newer, unsure], { instance: HERE, person: 'Ewa', now: NOW }).inProgress[0]).toMatchObject({ declinedEarlier: [] })
+        // Once its comments are read and hold no withdrawal, it is a "no" as any other.
+        const read = packageNo({ closedByBot: true, closedBy: 'walkable.cities.2021', reason: { kind: 'none' } })
+        expect(shareTabs([newer, read], { instance: HERE, person: 'Ewa', now: NOW }).inProgress[0]).toMatchObject({ declinedEarlier: ['1.0.0'] })
     })
 
     it('waits again once the team reopens it: no "no" and no ending (S11)', () => {

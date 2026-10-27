@@ -188,10 +188,12 @@ export interface TabRow {
     outcome: ShareOutcome
     progress: ShareProgress
     origin: InstanceMatch
-    /** The person's own move (see {@link isYourMove}), for a "no" only while current: what „1 bei dir“ counts. */
+    /** The person's own move (see {@link isYourMove}), for a "no" only while current: what „Du bist dran“ counts. */
     mine: boolean
     /** Versions of the same package that this one replaced, lowest first: „Frühere Versionen“. */
     earlier: string[]
+    /** Lower versions whose package or entry was turned down, lowest first: „nicht angenommen“ among „Frühere Versionen“. */
+    declinedEarlier: string[]
     /** For a listed version: the newer version of the same package that is in progress meanwhile. */
     newer?: { key: string; version: string }
     /** The "no" the row stands at (package, entry or removal), and whether it is still the sharing side's move. */
@@ -278,7 +280,7 @@ export interface ShareTabs {
     counts: {
         /** Rows in „In Arbeit“, with the started shares the caller counts in. */
         inProgress: number
-        /** Of those, the person's own moves: „1 bei dir“. */
+        /** Of those, the person's own moves: the group „Du bist dran“. */
         mine: number
         published: number
     }
@@ -300,6 +302,10 @@ export interface ShareTabsOptions {
  * (the server checks again on submit), and those whose way on is a new version.
  */
 const FREE_TO_CHOOSE: ReadonlySet<ShareOutcome> = new Set(['unreadable', 'declined', 'entry-declined', 'entry-revoked'])
+
+/** The outcomes „Frühere Versionen“ lists plainly, and those it lists as „nicht angenommen“. */
+const REPLACED: ReadonlySet<ShareOutcome> = new Set(['replaced'])
+const TURNED_DOWN: ReadonlySet<ShareOutcome> = new Set(['declined', 'entry-declined'])
 
 /** Outcomes where the catalogue's index says what became of the entry, so a closed entry proposal is no ending of its own. */
 const ENTRY_SAID: ReadonlySet<ShareOutcome> = new Set(['listed', 'taken-out', 'entry-revoked'])
@@ -347,6 +353,8 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
             progress,
             outcome,
             origin: instanceMatch(row.source, instance),
+            // May be a withdrawal whose comments could not be read: never told beside a newer version.
+            unsure: proposal ? mayBeWithdrawn(proposal) : false,
             ...(decline ? { declined: { decline, current: proposal ? current(proposal) : false } } : {}),
             ...(change && current(change) ? { declinedChange: declineOf(change) } : {}),
         }
@@ -360,10 +368,14 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
     for (const entry of read) byPackage.set(packageOf(entry.row), [...(byPackage.get(packageOf(entry.row)) ?? []), entry])
     const tabRow = (entry: (typeof read)[number]): TabRow => {
         const family = byPackage.get(packageOf(entry.row)) ?? []
-        const earlier = family
-            .filter((other) => other.outcome === 'replaced' && isNewerVersion(entry.row.version, other.row.version))
-            .map((other) => other.row.version)
-            .sort((a, b) => (isNewerVersion(a, b) ? 1 : isNewerVersion(b, a) ? -1 : 0))
+        const below = (outcomes: ReadonlySet<ShareOutcome>) =>
+            family
+                .filter((other) => outcomes.has(other.outcome) && !other.unsure && isNewerVersion(entry.row.version, other.row.version))
+                .map((other) => other.row.version)
+                .sort((a, b) => (isNewerVersion(a, b) ? 1 : isNewerVersion(b, a) ? -1 : 0))
+        const earlier = below(REPLACED)
+        // A lower "no" is told here, not one that may be an unread withdrawal („nicht angenommen“ would be a guess).
+        const declinedEarlier = below(TURNED_DOWN)
         // Only to a row „In Arbeit“ shows: another instance's newer version is counted there, not listed, so a link would lead nowhere.
         const newer = entry.outcome === 'listed'
             ? family.find((other) => tabOf(other) === 'in-progress' && shown(other.origin) && isNewerVersion(other.row.version, entry.row.version))
@@ -376,6 +388,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
             // A "no" past its time is told on the row, but asked of nobody.
             mine: isYourMove(entry.row, entry.progress, person) && entry.declined?.current !== false,
             earlier,
+            declinedEarlier,
             ...(newer ? { newer: { key: newer.row.key, version: newer.row.version } } : {}),
             ...(entry.declined ? { declined: entry.declined } : {}),
             ...(entry.declinedChange ? { declinedChange: entry.declinedChange } : {}),

@@ -13,12 +13,19 @@ import { Button, buttonClass, ExternalAnchor } from '@/components/ui/button'
 import { Notice, Pending } from '@/components/ui/notice'
 import {
     ACTION_LABELS,
+    GROUP_LEADS,
+    GROUP_TITLES,
     inProgressItems,
-    keptOrder,
+    keptPlaces,
+    placesOf,
     rowView,
-    withSlot,
+    shownGroups,
+    withPlace,
     type DatasetsHere,
+    type GroupsKnown,
+    type InProgressGroup,
     type InProgressItem,
+    type Placed,
     type RowAction,
 } from '@/lib/export/in-progress-items'
 import type { ShareDraft } from '@/lib/export/share-drafts'
@@ -57,6 +64,8 @@ export function InProgressTab({ enabled, datasets }: { enabled: boolean; dataset
             rows={view.rows === null ? null : view.tabs.inProgress}
             elsewhere={view.rows === null ? 0 : view.tabs.elsewhere['in-progress']}
             error={view.error}
+            // Without the right to see submissions, the started shares are all there is: counted, but no empty groups.
+            known={!enabled ? 'own' : view.rows !== null && !view.error ? 'all' : 'partial'}
             loaded={view.loaded}
             onReload={view.reload}
             onDiscard={view.discardDraft}
@@ -67,24 +76,42 @@ export function InProgressTab({ enabled, datasets }: { enabled: boolean; dataset
 /** A result of an action, kept for the row it is about - or for its place, once the row moved to another tab. */
 interface RowResult {
     key: string
-    /** Where the row stood, for the result to stand there when the row is gone. */
+    /** Where the row stood - its group, and its place in it - for the result to stand there when the row is gone. */
+    group: InProgressGroup
     index: number
     done: DeletionDone
+}
+
+const entries = (count: number) => `${count} ${count === 1 ? 'Eintrag' : 'Einträge'}`
+
+/** „Du bist dran · 2“ to see, „Du bist dran, 2 Einträge“ to hear, as the tab bar counts; no count while it is unknown. */
+function GroupHeading({ group, count }: { group: InProgressGroup; count?: number }) {
+    return (
+        <h3 className="text-base font-semibold text-foreground">
+            {GROUP_TITLES[group]}
+            {count !== undefined && (
+                <>
+                    <span aria-hidden className="font-normal text-muted-foreground">{` · ${count}`}</span>
+                    <span className="sr-only">{`, ${entries(count)}`}</span>
+                </>
+            )}
+        </h3>
+    )
 }
 
 /**
  * "In Arbeit": everything someone started sharing and has not finished
  * (plan of 2026-10-18, section 4). Started shares come at once, the proposals
- * when GitLab answered; the person's own moves first, then a colleague's,
- * then what waits on the catalogue team. Nothing is cut off.
+ * when GitLab answered. The rows stand in groups: „Du bist dran“, „Wartet auf
+ * andere“ and, when there is any, „Stand nicht lesbar“. Nothing is cut off.
  *
  * Every button in a row is secondary, because several rows can be the
  * person's move at once and the page's one primary is „Neues Paket teilen“.
  * The way out („Verwerfen“, „Zurückziehen“) asks first, in the dialog that
  * says what it means at the row's stage.
  *
- * While focus is inside the list its order holds: a row that moves to
- * another group after the person acted on it stays where they are looking,
+ * While focus is inside the list its order and groups hold: a row that moves
+ * to another group after the person acted on it stays where they are looking,
  * with its result in it, until they leave the list.
  */
 export function InProgress({
@@ -93,6 +120,7 @@ export function InProgress({
     rows,
     elsewhere = 0,
     error,
+    known = rows === null || error ? 'partial' : 'all',
     loaded,
     onReload,
     onDiscard,
@@ -104,6 +132,8 @@ export function InProgress({
     /** Versions in progress from other instances: counted, not listed. */
     elsewhere?: number
     error?: string
+    /** What the groups may count (`GroupsKnown`); by default, all once GitLab answered. */
+    known?: GroupsKnown
     /** How many readings of them came back so far (`useSharedListing`). */
     loaded: number
     /** Reads the shared packages again, after something here changed them. */
@@ -117,24 +147,27 @@ export function InProgress({
     const [settling, setSettling] = useState<{ key: string; loaded: number } | null>(null)
     // „Erneut versuchen“ was pressed at this reading, for the list or one row: busy until the next one comes back.
     const [retried, setRetried] = useState<{ key?: string; loaded: number } | null>(null)
-    // The order the person saw when focus came into the list; null while it is elsewhere.
-    const [frozen, setFrozen] = useState<string[] | null>(null)
-    const listRef = useRef<HTMLUListElement>(null)
+    // Where the rows stood when focus came into the list; null while it is elsewhere.
+    const [frozen, setFrozen] = useState<Placed[] | null>(null)
+    const listRef = useRef<HTMLDivElement>(null)
     // Which result takes the focus when it appears: once, so a result shown again does not pull it back from elsewhere.
     const focusNextRef = useRef<string | null>(null)
 
     const here = useMemo<DatasetsHere>(() => (datasets ? new Map(datasets.map((dataset) => [dataset.id, dataset.name])) : ANY_DATASET), [datasets])
     const items = inProgressItems(drafts, here, rows ?? [])
     const byKey = new Map(items.map((item) => [item.key, item]))
-    const sorted = items.map((item) => item.key)
-    // A result whose row is gone takes the row's place again, also in the order the person saw.
-    const ordered = frozen ? keptOrder(frozen, sorted) : sorted
-    const order = result && !byKey.has(result.key) ? withSlot(ordered, result.key, result.index) : ordered
+    const sorted = placesOf(items)
+    // A result whose row is gone takes the row's place again, also in the order and the groups the person saw.
+    const kept = frozen ? keptPlaces(frozen, sorted) : sorted
+    const placed = result && !byKey.has(result.key) ? withPlace(kept, { key: result.key, group: result.group }, result.index) : kept
+    const order = placed.map((place) => place.key)
+    // Counts, and empty groups, show only once they are known (`shownGroups`).
+    const groups = shownGroups(placed, known)
     const settlingKey = settling && settling.loaded === loaded ? settling.key : undefined
 
     // Focus can leave without a blur reaching the list - the element it was on went away with a change of
     // the rows: then the order is free again. Checked after each change of what the list shows.
-    const shown = `${order.join('\n')}|${settlingKey ?? ''}|${proposing ?? ''}|${loaded}`
+    const shown = `${placed.map((place) => `${place.group}:${place.key}`).join('\n')}|${settlingKey ?? ''}|${proposing ?? ''}|${loaded}`
     useEffect(() => {
         if (frozen && !listRef.current?.contains(document.activeElement)) setFrozen(null)
     }, [frozen, shown])
@@ -154,7 +187,9 @@ export function InProgress({
     const finish = (item: InProgressItem, done: DeletionDone) => {
         setDeleting(null)
         focusNextRef.current = `done:${item.key}`
-        setResult({ key: item.key, index: Math.max(0, order.indexOf(item.key)), done })
+        const group = placed.find((place) => place.key === item.key)?.group ?? 'yours'
+        const index = placed.filter((place) => place.group === group).findIndex((place) => place.key === item.key)
+        setResult({ key: item.key, group, index: Math.max(0, index), done })
         if (done.remote) {
             setSettling({ key: item.key, loaded })
             onReload()
@@ -172,11 +207,11 @@ export function InProgress({
     return (
         <div className="flex flex-col gap-4">
             {order.length > 0 && (
-                <ul
+                <div
                     ref={listRef}
-                    className="flex flex-col gap-4"
+                    className="flex flex-col gap-6"
                     onFocus={() => {
-                        if (!frozen) setFrozen(order)
+                        if (!frozen) setFrozen(placed)
                     }}
                     onBlur={(event) => {
                         const list = event.currentTarget
@@ -193,45 +228,62 @@ export function InProgress({
                         }, 0)
                     }}
                 >
-                    {order.map((key) => {
-                        const item = byKey.get(key)
-                        // The row moved on to another tab (withdrawn, discarded): its result stands where it was.
-                        if (!item) return result?.key === key ? <li key={key}>{doneNotice(result)}</li> : null
-                        const outcome = item.kind === 'shared' ? outcomeFor(item.row.key) : undefined
+                    {groups.map(({ group, keys, counted }) => {
+                        // A result standing where its row was is no row of the group.
+                        const count = keys.filter((key) => byKey.has(key)).length
+                        const lead = GROUP_LEADS[group]
                         return (
-                            <InProgressRow
-                                key={key}
-                                item={item}
-                                here={here}
-                                settling={key === settlingKey}
-                                proposing={item.kind === 'shared' && proposing === item.row.key}
-                                retrying={retried?.key === key && retried.loaded === loaded}
-                                disabled={proposing !== null}
-                                onPropose={() => {
-                                    if (item.kind !== 'shared') return
-                                    focusNextRef.current = `outcome:${key}`
-                                    setResult(null)
-                                    void propose(item.row)
-                                }}
-                                onRemove={() => {
-                                    setResult(null)
-                                    setDeleting(item)
-                                }}
-                                onRetry={() => {
-                                    setRetried({ key, loaded })
-                                    onReload()
-                                }}
-                            >
-                                {result?.key === key && doneNotice(result)}
-                                {outcome && (
-                                    <ResultSlot id={`outcome:${key}`} focusNextRef={focusNextRef}>
-                                        <ProposalOutcome result={outcome} />
-                                    </ResultSlot>
+                            <div key={group} className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1">
+                                    <GroupHeading group={group} count={counted ? count : undefined} />
+                                    {lead && count > 0 && <p className="text-sm text-muted-foreground">{lead}</p>}
+                                </div>
+                                {keys.length > 0 && (
+                                    <ul className="flex flex-col gap-4">
+                                        {keys.map((key) => {
+                                            const item = byKey.get(key)
+                                            // The row moved on to another tab (withdrawn, discarded): its result stands where it was.
+                                            if (!item) return result?.key === key ? <li key={key}>{doneNotice(result)}</li> : null
+                                            const outcome = item.kind === 'shared' ? outcomeFor(item.row.key) : undefined
+                                            return (
+                                                <InProgressRow
+                                                    key={key}
+                                                    item={item}
+                                                    here={here}
+                                                    settling={key === settlingKey}
+                                                    proposing={item.kind === 'shared' && proposing === item.row.key}
+                                                    retrying={retried?.key === key && retried.loaded === loaded}
+                                                    disabled={proposing !== null}
+                                                    onPropose={() => {
+                                                        if (item.kind !== 'shared') return
+                                                        focusNextRef.current = `outcome:${key}`
+                                                        setResult(null)
+                                                        void propose(item.row)
+                                                    }}
+                                                    onRemove={() => {
+                                                        setResult(null)
+                                                        setDeleting(item)
+                                                    }}
+                                                    onRetry={() => {
+                                                        setRetried({ key, loaded })
+                                                        onReload()
+                                                    }}
+                                                >
+                                                    {result?.key === key && doneNotice(result)}
+                                                    {outcome && (
+                                                        <ResultSlot id={`outcome:${key}`} focusNextRef={focusNextRef}>
+                                                            <ProposalOutcome result={outcome} />
+                                                        </ResultSlot>
+                                                    )}
+                                                </InProgressRow>
+                                            )
+                                        })}
+                                    </ul>
                                 )}
-                            </InProgressRow>
+                            </div>
                         )
                     })}
-                </ul>
+                </div>
             )}
             {rows === null && !error && <Pending>Stand bei GitLab wird abgefragt …</Pending>}
             {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
@@ -328,7 +380,7 @@ function InProgressRow({
     const view = rowView(item, here)
     if (settling) {
         return (
-            <ShareRow title={view.title} version={view.version} origin={view.origin} status={<Pending>Wird neu abgefragt …</Pending>}>
+            <ShareRow title={view.title} titleAs="h4" version={view.version} origin={view.origin} status={<Pending>Wird neu abgefragt …</Pending>}>
                 {children}
             </ShareRow>
         )
@@ -348,10 +400,12 @@ function InProgressRow({
     return (
         <ShareRow
             title={view.title}
+            titleAs="h4"
             version={view.version}
             origin={view.origin}
             track={view.track}
             status={<StatusLine status={view.status} />}
+            reasons={view.reasons}
             earlier={view.earlier}
             actions={actions.length > 0 ? actions.map(action) : undefined}
         >

@@ -22,7 +22,7 @@ import {
     openMergeRequest,
     parseProjectUrl,
 } from '@/lib/export/gitlab'
-import { entryRefusal, packageRefusal, type Decline } from '@/lib/export/declines'
+import { entryRefusal, packageRefusal, removalDeclineShown } from '@/lib/export/declines'
 import { DELETION_SCOPES, readDeletion, runDeletion, type DeletionPlan, type DeletionResult, type DeletionScope } from '@/lib/export/share-deletion'
 import { shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
 import { isNewerVersion, nextPatch, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
@@ -409,8 +409,7 @@ export async function exportAction(
             const usedUp = catalogue && catalogRefusalOf(form.options.version, catalogue)
             if (usedUp) return { intent: 'bundle', status: 'invalid', detail: usedUp, bundle: current, catalog: catalogue.status }
             // A version turned down as a package is used up. Asked after the checks above, so the version the refusal
-            // suggests is above everything accepted and listed; a higher one turned down or in review is refused on the
-            // next submit. The reading goes along, for the page to show the "no".
+            // suggests is above everything accepted and listed; one turned down or in review is refused on the next submit.
             if (current.declined) {
                 return {
                     intent: 'bundle',
@@ -820,22 +819,14 @@ const CATALOG_NOT_SET_UP = 'Der Katalog ist auf dieser Instanz noch nicht einger
 /** The same for sharing as a whole: no place to store packages, or no access to GitLab. */
 const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
 
-/**
- * The "no" to a version's removal while it is still the news, as the tabs read
- * it (`rowOutcome`): not once the entry is listed, proposed or taken out.
- */
-function removalNo(bundle: BundleStatus, catalog: CatalogStatus): Decline | undefined {
-    if (bundle.state !== 'on-base' || catalog.state === 'listed' || catalog.state === 'mr-open' || catalog.state === 'withdrawn') return undefined
-    return bundle.removal?.declined
-}
-
 /** Whether „Stand prüfen“ found a "no" to the package, its entry or its removal, told in the neutral tone. */
 function hasDecline(bundle: BundleStatus, catalog: CatalogStatus): boolean {
-    return Boolean(bundle.declined || catalog.state === 'declined' || removalNo(bundle, catalog))
+    return Boolean(bundle.declined || catalog.state === 'declined' || removalDeclineShown(bundle, catalog))
 }
 
 function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
-    const removal = removalNo(bundle, catalog)
+    // The "no" to its removal, while it is the news.
+    const removal = removalDeclineShown(bundle, catalog)
     const first =
         bundle.state === 'mr-open'
             ? 'Paket in Prüfung.'

@@ -710,7 +710,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         const plan = await planOf(world({ removalMrs: [viaAccount], failing: ['/notes'] }))
         expect(plan).toMatchObject({ kind: 'none', mrUrl: `${WEB}/-/merge_requests/12` })
         expect(plan.reason).toBe(
-            'Das Entfernen dieser Version wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !12). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Entfernen dieser Version wurde am 22.10. nicht angenommen (Vorschlag !12, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
         )
     })
 
@@ -750,7 +750,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         })
         // Told as what it was, a close through the marketplace's account - not as the catalogue team's decision (S10, P4).
         expect(result.detail).toBe(
-            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.0 wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.0 wurde am 22.10. nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
         )
         expect(writes(gitlab.calls)).toEqual([])
         // Nobody wrote anything on either: no comment was asked for.

@@ -1,5 +1,6 @@
 import type { DeclineReason } from '@/lib/export/merge-request-text'
 import type { ShareProposal } from '@/lib/export/share-listing'
+import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
 
 /**
  * When the catalogue team says no: a proposal of a package, its catalogue
@@ -119,26 +120,69 @@ export function declinedOn(decline: Pick<Decline, 'closedAt'>): string {
     return time === undefined ? '' : ` am ${DAY.format(time)}`
 }
 
-/** Why a version is not submitted again; a close through the marketplace's account counts as a "no", but not as the team's decision. `instead`: the version to take. */
+/**
+ * The catalogue team's words, after a sentence that said who turned it down -
+ * never "none" for a comment nobody could read. A close through the
+ * marketplace's account names nobody: whoever used it is not known.
+ */
+export function reasonWords(decline: Pick<Decline, 'reason' | 'closedBy' | 'viaMarketplace'>): string {
+    switch (decline.reason.kind) {
+        case 'given':
+            return decline.closedBy && !decline.viaMarketplace ? `Grund (${decline.closedBy}): „${decline.reason.text}“` : `Grund: „${decline.reason.text}“`
+        case 'unreadable':
+            return 'Der Grund ließ sich gerade nicht lesen.'
+        default:
+            return 'Ohne Begründung.'
+    }
+}
+
+/** The line a "no" is told with in „In Arbeit“; a close through the marketplace's account says so, as it is not the team's decision. */
+export function reasonLine(decline: Pick<Decline, 'reason' | 'closedBy' | 'viaMarketplace'>): string {
+    if (!decline.viaMarketplace) return reasonWords(decline)
+    return decline.reason.kind === 'none' ? 'Über das Marktplatz-Konto geschlossen, ohne Begründung.' : `Über das Marktplatz-Konto geschlossen. ${reasonWords(decline)}`
+}
+
+/** What was closed is the proposal, never what it proposed, so the account is named apart. */
+const VIA_ACCOUNT = ' (über das Marktplatz-Konto geschlossen)'
+
+/**
+ * The rest of a sentence that starts with what was turned down („Das Entfernen …“):
+ * „hat das Katalog-Team am 22.10. nicht angenommen“, or for a close through the
+ * marketplace's account a passive one that names nobody.
+ */
+export function declinedBy(decline: Pick<Decline, 'closedAt' | 'viaMarketplace'>): string {
+    return decline.viaMarketplace ? `wurde${declinedOn(decline)} nicht angenommen${VIA_ACCOUNT}` : `hat das Katalog-Team${declinedOn(decline)} nicht angenommen`
+}
+
+/**
+ * The "no" to a version's removal while it is still the news, as the tabs read
+ * it (`rowOutcome`): not once the entry is listed, proposed or taken out, nor
+ * when the entry was turned down later - of two "no"s the later one is the news.
+ */
+export function removalDeclineShown(bundle: BundleStatus | undefined, catalog: CatalogStatus | undefined): Decline | undefined {
+    if (bundle?.state !== 'on-base' || catalog?.state === 'listed' || catalog?.state === 'mr-open' || catalog?.state === 'withdrawn') return undefined
+    const removal = bundle.removal?.declined
+    const entry = catalog?.state === 'declined' ? catalog.declined : undefined
+    return removal && laterDecline(entry, removal) === removal ? removal : undefined
+}
+
+/** Why a version is not submitted again. `instead`: the version to take. */
 export function packageRefusal(version: string, decline: Decline, instead: string): string {
-    const said = decline.viaMarketplace
-        ? `Version ${version} wurde${declinedOn(decline)} über das Marktplatz-Konto geschlossen und gilt als nicht angenommen.`
-        : `Version ${version} hat das Katalog-Team${declinedOn(decline)} nicht angenommen.`
-    return `Nicht eingereicht: ${said} Nimm eine höhere Version, zum Beispiel ${instead}.`
+    return `Nicht eingereicht: Version ${version} ${declinedBy(decline)}. Nimm eine höhere Version, zum Beispiel ${instead}.`
 }
 
 /** Why an entry is not proposed again for this version, told as {@link packageRefusal} tells it. */
 export function entryRefusal(version: string, decline: Decline): string {
     const said = decline.viaMarketplace
-        ? `Der Eintrag für Version ${version} wurde${declinedOn(decline)} über das Marktplatz-Konto geschlossen und gilt als nicht angenommen`
-        : `Das Katalog-Team hat den Eintrag für Version ${version}${declinedOn(decline)} nicht angenommen`
-    return `Kein Katalog-Eintrag: ${said} (Vorschlag !${decline.iid}). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.`
+        ? `Der Eintrag für Version ${version} wurde${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid}, über das Marktplatz-Konto geschlossen)`
+        : `Das Katalog-Team hat den Eintrag für Version ${version}${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid})`
+    return `Kein Katalog-Eintrag: ${said}. Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.`
 }
 
 /** Why a removal is not proposed again, with the proposal to look at. */
 export function removalRefusal(decline: Decline): string {
     const said = decline.viaMarketplace
-        ? `Das Entfernen dieser Version wurde${declinedOn(decline)} über das Marktplatz-Konto geschlossen und gilt als nicht angenommen`
-        : `Das Katalog-Team hat das Entfernen dieser Version${declinedOn(decline)} nicht angenommen`
-    return `${said} (Vorschlag !${decline.iid}). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.`
+        ? `Das Entfernen dieser Version wurde${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid}, über das Marktplatz-Konto geschlossen)`
+        : `Das Katalog-Team hat das Entfernen dieser Version${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid})`
+    return `${said}. Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.`
 }

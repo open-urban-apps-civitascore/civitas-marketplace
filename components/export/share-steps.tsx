@@ -4,8 +4,9 @@ import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Disclosure } from '@/components/ui/disclosure'
 import { Panel } from '@/components/ui/layout'
 import { InlineNotice } from '@/components/ui/notice'
+import type { Decline } from '@/lib/export/declines'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { STAGES, WAITING_FOR_TEAM, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
+import { declinedStage, removalDeclinedNotice, STAGES, WAITING_FOR_TEAM, type DeclinedStage, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
 
 /**
  * "So geht es weiter": the last step of "Teilen" as the task it is (Ewa's
@@ -20,11 +21,16 @@ import { STAGES, WAITING_FOR_TEAM, type ShareProgress, type Stage, type StageSta
  *
  * "Merge Request" is said only in the fold-out that explains it; everywhere
  * else a proposal is a "Vorschlag" and GitLab is where it can be seen.
+ *
+ * A stage the catalogue team turned down shows the problem mark, who said no
+ * and when, their words and the way on - a higher version. No button: what was
+ * turned down is used up for this version.
  */
 
 /** Who the stage belongs to, and whether it is theirs now. A stage nobody can move on is nobody's turn. */
-function whoLine(stage: Stage, state: StageState, progress: ShareProgress): string {
+function whoLine(stage: Stage, state: StageState, progress: ShareProgress, declined: DeclinedStage | undefined): string {
     if (state === 'done') return `${stage.who} - erledigt`
+    if (state === 'declined') return declined?.who ?? `${stage.who} - nicht angenommen`
     if (state === 'blocked') return progress.turn === 'you' ? 'Du bist dran' : stage.who
     if (state === 'current') return stage.turn === 'you' ? 'Du bist dran' : WAITING_FOR_TEAM
     if (state === 'waiting') return WAITING_FOR_TEAM
@@ -57,6 +63,9 @@ export function ShareSteps({
     bundleMrUrl,
     catalogMrUrl,
     removalMrUrl,
+    version,
+    declines,
+    removalDeclined,
     onPropose,
     onCheck,
     onCatalog,
@@ -76,6 +85,12 @@ export function ShareSteps({
     catalogMrUrl?: string
     /** The merge request that proposes taking the version out again, when there is one. */
     removalMrUrl?: string
+    /** The version the stages are about: the way on after a "no" names the one above it. */
+    version: string
+    /** The catalogue team's "no" to the package and to the entry. */
+    declines?: { review?: Decline; listing?: Decline }
+    /** Their "no" to the removal, while it is the news (`removalDeclineShown`): the package stays accepted. */
+    removalDeclined?: Decline
     onPropose: () => void
     onCheck: () => void
     onCatalog: () => void
@@ -93,8 +108,9 @@ export function ShareSteps({
             )
         }
         if (state === 'current' && stage.key === 'catalog' && !catalogBlocker) {
+            // After a "no" to the removal, reading it comes first: the entry stays possible, but not as the primary.
             return (
-                <Button variant="primary" icon={GitMerge} pending={pendingIntent === 'catalog'} disabled={busy} onClick={onCatalog}>
+                <Button variant={removalDeclined ? 'secondary' : 'primary'} icon={GitMerge} pending={pendingIntent === 'catalog'} disabled={busy} onClick={onCatalog}>
                     Katalog-Eintrag vorschlagen
                 </Button>
             )
@@ -129,16 +145,26 @@ export function ShareSteps({
         return undefined
     }
 
+    // The team's "no" at a stage they turned down; the proposal's link stays at the stage that opened it.
+    const declinedAt = (stage: Stage, state: StageState): DeclinedStage | undefined => {
+        if (state !== 'declined' || (stage.key !== 'review' && stage.key !== 'listing')) return undefined
+        const decline = declines?.[stage.key]
+        return decline ? declinedStage(stage.key, decline, version) : undefined
+    }
+
     return (
         <Panel title="So geht es weiter">
-            {/* Outside the four stages: it undoes them. Said first, because it decides what the stages below still mean. */}
-            {progress.removal && (
+            {/* Outside the four stages: it undoes them, or would have. Said first, because it decides what the stages below still mean. */}
+            {(progress.removal || removalDeclined) && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <InlineNotice tone="neutral">
                         {progress.removal === 'pending'
                             ? `Für diese Version ist das Entfernen vorgeschlagen${proposalRef(removalMrUrl)} - jetzt entscheidet das Katalog-Team.`
-                            : 'Diese Version ist entfernt - das Katalog-Team hat das Entfernen angenommen.'}{' '}
-                        {removalMrUrl && <ExternalAnchor href={removalMrUrl}>In GitLab ansehen</ExternalAnchor>}
+                            : progress.removal === 'done'
+                              ? 'Diese Version ist entfernt - das Katalog-Team hat das Entfernen angenommen.'
+                              : removalDeclined && removalDeclinedNotice(removalDeclined)}{' '}
+                        {/* After the team's words, the proposal where the rest of them is, named as in „In Arbeit“. */}
+                        {removalMrUrl && <ExternalAnchor href={removalMrUrl}>{progress.removal ? 'In GitLab ansehen' : 'Vorschlag ansehen'}</ExternalAnchor>}
                     </InlineNotice>
                     {progress.removal === 'pending' && canCheck && (
                         <Button icon={RefreshCw} pending={pendingIntent === 'status'} disabled={busy} onClick={onCheck} className="shrink-0">
@@ -152,21 +178,33 @@ export function ShareSteps({
                     const state = progress.states[stage.key]
                     const Mark = MARK[state]
                     const reason = blocker(stage, state)
+                    const declined = declinedAt(stage, state)
                     const button = action(stage, state)
                     const mrLink = link(stage, state)
                     const quiet = state === 'later'
                     return (
                         <li
                             key={stage.key}
-                            aria-current={state === 'current' || state === 'waiting' || state === 'blocked' ? 'step' : undefined}
+                            aria-current={state === 'current' || state === 'waiting' || state === 'blocked' || state === 'declined' ? 'step' : undefined}
                             className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
                         >
                             <div className="flex min-w-0 items-start gap-3">
-                                {/* Neutral marks: green already means "verified" and "use case" here. */}
-                                <Mark aria-hidden className={`mt-0.5 size-4 shrink-0 ${state === 'current' || state === 'blocked' ? 'text-primary' : 'text-muted-foreground'}`} />
+                                {/* Neutral marks: green already means "verified" and "use case" here. Only a "no" takes a colour, the warn amber. */}
+                                <Mark
+                                    aria-hidden
+                                    className={`mt-0.5 size-4 shrink-0 ${
+                                        state === 'declined' ? 'text-amber-600 dark:text-warn' : state === 'current' || state === 'blocked' ? 'text-primary' : 'text-muted-foreground'
+                                    }`}
+                                />
                                 <div className="min-w-0">
                                     <p className={`text-sm ${quiet ? 'text-muted-foreground' : 'font-medium text-foreground'}`}>{stage.title}</p>
-                                    <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress)}</p>
+                                    <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress, declined)}</p>
+                                    {declined && (
+                                        <div className="mt-1.5 flex flex-col gap-1.5">
+                                            <p className="break-words text-sm leading-relaxed text-foreground">{declined.reason}</p>
+                                            <InlineNotice tone="neutral">{declined.next}</InlineNotice>
+                                        </div>
+                                    )}
                                     {reason && (
                                         <div className="mt-1.5">
                                             {/* Neutral once nothing is left to do: nobody on this page can change it. */}
@@ -189,8 +227,8 @@ export function ShareSteps({
             <Disclosure summary="Was ist ein Merge Request?">
                 <p className="text-xs leading-relaxed text-muted-foreground">
                     So heißt bei GitLab ein Änderungsvorschlag - hier kurz „Vorschlag“. Das Katalog-Team sieht sich das Paket
-                    dort an und nimmt es an („Merge“) - oder fragt im Vorschlag nach. Erst wenn es angenommen ist, bist du
-                    wieder dran.
+                    dort an und nimmt es an („Merge“) oder nicht - oder fragt im Vorschlag nach. Erst wenn es entschieden hat,
+                    bist du wieder dran.
                 </p>
             </Disclosure>
 
