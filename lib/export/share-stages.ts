@@ -93,6 +93,13 @@ export function nextPatch(version: string): string {
     return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : '1.0.0'
 }
 
+/** The version to suggest where all of `versions` are used up: one step above the highest plain x.y.z, „1.0.0“ when there is none. */
+export function aboveAll(versions: readonly string[]): string {
+    const plain = versions.filter((version) => /^\d+\.\d+\.\d+$/.test(version))
+    const highest = plain.reduce<string | undefined>((best, version) => (!best || isNewerVersion(version, best) ? version : best), undefined)
+    return highest ? nextPatch(highest) : '1.0.0'
+}
+
 /** "Grund: …" with exactly one full stop, whether or not the catalogue team ended their reason with one. */
 function sentence(text: string): string {
     return /[.!?]$/.test(text) ? text : `${text}.`
@@ -139,15 +146,15 @@ export interface DeclinedStage {
 /**
  * The package's or the entry's review of `version`, turned down. A close
  * through the marketplace's account is told as such, never as the team's
- * decision.
+ * decision. `instead` is the version to suggest.
  */
-export function declinedStage(key: 'review' | 'listing', decline: Decline, version: string): DeclinedStage {
+export function declinedStage(key: 'review' | 'listing', decline: Decline, version: string, instead: string = nextPatch(version)): DeclinedStage {
     const who = decline.viaMarketplace
         ? `Über das Marktplatz-Konto geschlossen${declinedOn(decline)} - gilt als nicht angenommen`
         : `${STAGES.find((stage) => stage.key === key)?.who ?? 'Das Katalog-Team'} - nicht angenommen${declinedOn(decline)}`
     const next =
         key === 'review'
-            ? `Für die überarbeitete Fassung nimm eine höhere Version, zum Beispiel ${nextPatch(version)}.`
+            ? `Für die überarbeitete Fassung trag im Steckbrief eine höhere Version ein, zum Beispiel ${instead}.`
             : 'Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag teilst du eine neue Version, die wieder geprüft wird.'
     return { who, reason: reasonWords(decline), next }
 }

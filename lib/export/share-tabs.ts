@@ -112,6 +112,17 @@ export const TAB_OF: Readonly<Record<ShareOutcome, ShareTab | undefined>> = {
 /** A "no" listed in „In Arbeit“ only while current: afterwards nothing is left to move on. */
 const ONLY_WHILE_CURRENT: ReadonlySet<ShareOutcome> = new Set(['declined', 'entry-declined'])
 
+/**
+ * A removal turned down after the entry was: the package stays, but only a new
+ * version can move it on, so the row is listed only while current and makes no dataset busy.
+ */
+function entryUsedUp(outcome: ShareOutcome, row: SharedPackageRow): boolean {
+    return outcome === 'removal-declined' && row.catalog?.state === 'declined'
+}
+
+/** Outcomes with a proposal open at GitLab: a new version of the dataset waits for them, and the server refuses it meanwhile. */
+export const OPEN_OUTCOMES: ReadonlySet<ShareOutcome> = new Set(['in-review', 'change-in-review', 'removal-pending', 'entry-in-review', 'brings-back'])
+
 /** Where a listed version stands, from everything the list read about it. */
 export function rowProgress(row: SharedPackageRow): ShareProgress {
     return shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog, withdrawn: row.withdrawn })
@@ -298,8 +309,9 @@ export interface ShareTabsOptions {
 }
 
 /**
- * Outcomes in „In Arbeit“ that make no dataset busy: one that could not be read
- * (the server checks again on submit), and those whose way on is a new version.
+ * Outcomes in „In Arbeit“ that make no dataset busy: one that could not be
+ * read (the server checks again on submit), and those whose way on is a new
+ * version. A "no" to a removal is busy, unless the entry was turned down too.
  */
 const FREE_TO_CHOOSE: ReadonlySet<ShareOutcome> = new Set(['unreadable', 'declined', 'entry-declined', 'entry-revoked'])
 
@@ -360,8 +372,8 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         }
     })
     const shown = (origin: InstanceMatch) => origin !== 'other'
-    // A "no" to the package or the entry is listed only while it is the sharing side's move; then it is only an ending.
-    const tabOf = (entry: (typeof read)[number]) => (ONLY_WHILE_CURRENT.has(entry.outcome) && !entry.declined?.current ? undefined : TAB_OF[entry.outcome])
+    const onlyWhileCurrent = (entry: (typeof read)[number]) => ONLY_WHILE_CURRENT.has(entry.outcome) || entryUsedUp(entry.outcome, entry.row)
+    const tabOf = (entry: (typeof read)[number]) => (onlyWhileCurrent(entry) && !entry.declined?.current ? undefined : TAB_OF[entry.outcome])
 
     // Per package: the versions replaced, and what is in progress, for the cross-links on each row.
     const byPackage = new Map<string, typeof read>()
@@ -449,7 +461,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
     const busy = new Map<string, TabRow[]>()
     for (const tabbed of inProgress) {
         const datasetId = tabbed.row.source?.id
-        if (!datasetId || FREE_TO_CHOOSE.has(tabbed.outcome)) continue
+        if (!datasetId || FREE_TO_CHOOSE.has(tabbed.outcome) || entryUsedUp(tabbed.outcome, tabbed.row)) continue
         busy.set(datasetId, [...(busy.get(datasetId) ?? []), tabbed])
     }
 

@@ -117,9 +117,9 @@ describe('which proposal is a "no"', () => {
     it('refuses in words that say who closed it: the catalogue team, or the marketplace’s account (R1-R3, S10)', () => {
         const team: Decline = { iid: 31, mrUrl: 'u/31', closedAt: '2026-10-22T10:00:00Z', closedBy: 'spaudanjo', reason: { kind: 'none' } }
         const account: Decline = { ...team, iid: 32, closedBy: 'walkable.cities.2021', viaMarketplace: true }
-        expect(packageRefusal('1.0.0', team, '1.0.1')).toBe('Nicht eingereicht: Version 1.0.0 hat das Katalog-Team am 22.10. nicht angenommen. Nimm eine höhere Version, zum Beispiel 1.0.1.')
+        expect(packageRefusal('1.0.0', team, '1.0.1')).toBe('Nicht eingereicht: Version 1.0.0 hat das Katalog-Team am 22.10. nicht angenommen. Trag im Steckbrief eine höhere Version ein, zum Beispiel 1.0.1.')
         expect(packageRefusal('1.0.0', account, '1.0.1')).toBe(
-            'Nicht eingereicht: Version 1.0.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Nimm eine höhere Version, zum Beispiel 1.0.1.',
+            'Nicht eingereicht: Version 1.0.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Trag im Steckbrief eine höhere Version ein, zum Beispiel 1.0.1.',
         )
         expect(entryRefusal('1.1.4', team)).toBe(
             'Kein Katalog-Eintrag: Das Katalog-Team hat den Eintrag für Version 1.1.4 am 22.10. nicht angenommen (Vorschlag !31). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
@@ -127,6 +127,8 @@ describe('which proposal is a "no"', () => {
         expect(entryRefusal('1.1.4', account)).toBe(
             'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.4 wurde am 22.10. nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
         )
+        // With the next free version where the server could tell it (R6).
+        expect(entryRefusal('1.1.4', account, '1.1.6')).toMatch(/ - teile eine neue Version, zum Beispiel 1\.1\.6\.$/)
         expect(removalRefusal(team)).toBe(
             'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !31). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
         )

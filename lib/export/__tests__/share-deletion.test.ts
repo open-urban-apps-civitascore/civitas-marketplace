@@ -750,7 +750,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         })
         // Told as what it was, a close through the marketplace's account - not as the catalogue team's decision (S10, P4).
         expect(result.detail).toBe(
-            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.0 wurde am 22.10. nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.0 wurde am 22.10. nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version, zum Beispiel 1.1.1.',
         )
         expect(writes(gitlab.calls)).toEqual([])
         // Nobody wrote anything on either: no comment was asked for.
@@ -771,7 +771,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
             const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
             expect(result.status).toBe('invalid')
             expect(result.detail).toBe(
-                'Kein Katalog-Eintrag: Das Katalog-Team hat den Eintrag für Version 1.1.0 am 22.10. nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+                'Kein Katalog-Eintrag: Das Katalog-Team hat den Eintrag für Version 1.1.0 am 22.10. nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version, zum Beispiel 1.1.1.',
             )
         }
     })

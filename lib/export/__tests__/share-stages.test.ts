@@ -218,7 +218,7 @@ describe('the wizard’s words for a "no" (2026-10-22, 3.3)', () => {
         expect(declinedStage('review', no, '1.0.0')).toEqual({
             who: 'Das Katalog-Team - nicht angenommen am 21.10.',
             reason: 'Grund (spaudanjo): „Bitte mit Lizenz.“',
-            next: 'Für die überarbeitete Fassung nimm eine höhere Version, zum Beispiel 1.0.1.',
+            next: 'Für die überarbeitete Fassung trag im Steckbrief eine höhere Version ein, zum Beispiel 1.0.1.',
         })
     })
 

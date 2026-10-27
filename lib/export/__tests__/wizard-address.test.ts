@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
     HISTORY_KEY,
+    newVersionHref,
     parseWizardAddress,
     reachableStep,
+    resubmitHref,
     resumeHref,
     stepsBack,
     trailOf,
@@ -49,6 +51,41 @@ describe('the wizard’s addresses', () => {
             { datasetId: 'ds-1', step: 3 },
         ]
         for (const address of addresses) expect(parse(wizardSearch(address))).toEqual(address)
+    })
+
+    it('reads and writes the shared version a new one starts from (rc.7): its number, its package, and whether the same number goes again', () => {
+        expect(parse('source=dataset:ds-1&from=1.1.0&package=baeume')).toEqual({ datasetId: 'ds-1', step: 1, from: { version: '1.1.0', slug: 'baeume' } })
+        expect(parse('source=dataset:ds-1&step=steckbrief&from=1.1.0&package=baeume&again=1')).toEqual({
+            datasetId: 'ds-1',
+            step: 2,
+            from: { version: '1.1.0', slug: 'baeume', again: true },
+        })
+        // Without a dataset here, it waits for the person's choice.
+        expect(parse('from=1.1.0&package=baeume')).toEqual({ step: 1, from: { version: '1.1.0', slug: 'baeume' } })
+        expect(wizardHref({ step: 1, from: { version: '1.1.0', slug: 'baeume' } })).toBe('/export/new?from=1.1.0&package=baeume')
+        expect(wizardHref({ datasetId: 'ds-1', step: 3, from: { version: '1.1.0', slug: 'baeume', again: true } })).toBe(
+            '/export/new?source=dataset:ds-1&step=vorschau&from=1.1.0&package=baeume&again=1',
+        )
+        for (const address of [
+            { step: 1, from: { version: '1.1.0', slug: 'baeume' } },
+            { datasetId: 'ds-1', step: 1, resume: true, from: { version: '2.0.0' } },
+            { datasetId: 'ds-1', step: 2, from: { version: '1.1.0', slug: 'baeume', again: true } },
+        ] satisfies WizardAddress[]) {
+            expect(parse(wizardSearch(address))).toEqual(address)
+        }
+    })
+
+    it('drops a version that is no x.y.z, and a package name the catalogue would refuse, rather than failing', () => {
+        expect(parse('source=dataset:ds-1&from=1.1&package=baeume')).toEqual({ datasetId: 'ds-1', step: 1 })
+        expect(parse('source=dataset:ds-1&from=1.1.0&package=-Bäume-')).toEqual({ datasetId: 'ds-1', step: 1, from: { version: '1.1.0' } })
+        expect(parse('from=1.1.0&again=yes')).toEqual({ step: 1, from: { version: '1.1.0' } })
+        expect(wizardHref({ step: 1, from: { version: 'neu' } })).toBe('/export/new')
+    })
+
+    it('leads „Neue Version teilen“ and „Erneut einreichen“ into the wizard with the shared version, and the dataset where it is here', () => {
+        expect(newVersionHref({ datasetId: 'ds-1', slug: 'baeume', version: '1.1.0' })).toBe('/export/new?source=dataset:ds-1&from=1.1.0&package=baeume')
+        expect(newVersionHref({ slug: 'baeume', version: '1.1.0' })).toBe('/export/new?from=1.1.0&package=baeume')
+        expect(resubmitHref({ datasetId: 'ds-1', slug: 'baeume', version: '1.1.0' })).toBe('/export/new?source=dataset:ds-1&from=1.1.0&package=baeume&again=1')
     })
 
     it('leads „Weitermachen“ back to the step a started share was saved at, continued', () => {

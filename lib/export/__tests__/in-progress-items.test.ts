@@ -283,13 +283,17 @@ describe('the stage → action table of „In Arbeit“', () => {
         })
     })
 
-    it('leads waiting stages to their proposal at GitLab, and „Neue Version teilen“ to the dataset in the wizard', () => {
+    it('leads waiting stages to their proposal at GitLab, and „Neue Version teilen“ to the dataset in the wizard, filled from this version', () => {
         expect(rowView(itemOf(STAGE_ROWS['in-review']), DATASETS).main?.href).toBe(`${WEB}/31`)
         expect(rowView(itemOf(STAGE_ROWS['entry-in-review']), DATASETS).main?.href).toBe(`${WEB}/8`)
         expect(rowView(itemOf(STAGE_ROWS['removal-pending']), DATASETS).main?.href).toBe(`${WEB}/40`)
-        expect(rowView(itemOf(STAGE_ROWS.accepted), DATASETS).quiet[0]).toEqual({ kind: 'new-version', look: 'quiet', href: '/export/new?source=dataset:ds-a' })
-        // A dataset that is not here (any more): the wizard, to choose one.
-        expect(rowView(itemOf(STAGE_ROWS.accepted), new Map()).quiet[0].href).toBe('/export/new')
+        expect(rowView(itemOf(STAGE_ROWS.accepted), DATASETS).quiet[0]).toEqual({
+            kind: 'new-version',
+            look: 'quiet',
+            href: '/export/new?source=dataset:ds-a&from=1.1.0&package=a',
+        })
+        // A dataset that is not here (any more): the wizard, to choose one for this version.
+        expect(rowView(itemOf(STAGE_ROWS.accepted), new Map()).quiet[0].href).toBe('/export/new?from=1.1.0&package=a')
         expect(ACTION_LABELS['new-version']).toBe('Neue Version teilen')
     })
 
@@ -300,7 +304,7 @@ describe('the stage → action table of „In Arbeit“', () => {
         expect(proposalOf('entry-declined')).toEqual({ label: 'Vorschlag ansehen', href: `${WEB}/8`, heard: ' (!8)' })
         expect(proposalOf('removal-declined')).toEqual({ label: 'Vorschlag ansehen', href: `${WEB}/40`, heard: ' (!40)' })
         // The way on after a "no" is a new version of the dataset (S1, S5).
-        expect(rowView(itemOf(STAGE_ROWS.declined), DATASETS).main).toEqual({ kind: 'new-version', look: 'button', href: '/export/new?source=dataset:ds-a' })
+        expect(rowView(itemOf(STAGE_ROWS.declined), DATASETS).main).toEqual({ kind: 'new-version', look: 'button', href: '/export/new?source=dataset:ds-a&from=1.1.0&package=a' })
         expect(rowView(itemOf(STAGE_ROWS['entry-revoked']), DATASETS).main?.href).toBe(`${WEB}/31`)
     })
 
@@ -532,9 +536,11 @@ describe('a "no" in „In Arbeit“ (2026-10-22, 3.3)', () => {
         const actions = (view: RowView) => [view.main, ...view.quiet].map((action) => action?.kind)
         expect(actions(rowView(during, DATASETS))).not.toContain('propose-entry')
         expect(rowView(during, DATASETS).status.text).toMatch(/· du bist dran: eine neue Version teilen$/)
-        // After its 30 days nobody's, with the way on that is left - never the button the server refuses (R2).
-        const after = rowView(itemOf(both, 'Ewa', NOW + 31 * DAY), DATASETS)
-        expect(actions(after)).toEqual([undefined, 'new-version'])
+        // After its 30 days it leaves „In Arbeit“, as the entry's "no" alone does (S5): nothing is left to move on but a
+        // new version, which „Auswählen“ starts. „Beendet“ keeps both "no"s.
+        const after = shareTabs([both], { instance: HERE, person: 'Ewa', now: NOW + 31 * DAY })
+        expect(after.inProgress).toEqual([])
+        expect(after.ended.map((entry) => `${entry.what}:${entry.ending}`)).toEqual(['removal:not-accepted', 'catalog:not-accepted'])
     })
 
     it('notes a change to the accepted version the catalogue team did not take, and leaves the row’s move as it is (S4)', () => {
@@ -603,8 +609,8 @@ describe('the groups of „In Arbeit“', () => {
         expect(groupOf(inProgressItems([draft('d')], DATASETS, [])[0])).toBe('yours')
         expect([GROUP_TITLES.yours, GROUP_TITLES.others, GROUP_TITLES.unreadable]).toEqual(['Du bist dran', 'Wartet auf andere', 'Stand nicht lesbar'])
         expect(GROUP_LEADS).toEqual({
-            yours: 'Hier ist der nächste Schritt deiner - in jeder Zeile steht, welcher.',
-            others: 'Das Katalog-Team prüft gerade, oder jemand anderes aus deiner Instanz ist dran.',
+            yours: 'Hier liegt der nächste Schritt bei dir - in jeder Zeile steht, welcher.',
+            others: 'Hier ist gerade jemand anderes dran - meist das Katalog-Team, manchmal jemand aus deiner Instanz oder der Betrieb. In jeder Zeile steht, woran es hängt.',
         })
     })
 

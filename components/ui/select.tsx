@@ -21,6 +21,8 @@ export interface SelectOption {
     detail?: string
     /** Only in the open list, as a quieter second line. */
     hint?: string
+    /** Greyed out and skipped by the arrow keys; it shows no tooltip, so the page must say why elsewhere. */
+    disabled?: boolean
 }
 
 /** Radix refuses an item whose value is '', so "no choice" travels as this sentinel. */
@@ -58,10 +60,12 @@ export function Select({ value, onValueChange, options, placeholder, noneLabel, 
             </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <SelectPrimitive.Portal>
+            {/* Capped at the space left, so long options wrap at phone width instead of running off the screen. */}
             <SelectPrimitive.Content
                 position="popper"
                 sideOffset={4}
-                className="relative z-50 max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md"
+                collisionPadding={16}
+                className="relative z-50 max-h-(--radix-select-content-available-height) max-w-(--radix-select-content-available-width) min-w-(--radix-select-trigger-width) overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md"
             >
                 <SelectPrimitive.Viewport className="p-1">
                     {noneLabel && <Item value={NONE} label={noneLabel} />}
@@ -72,13 +76,14 @@ export function Select({ value, onValueChange, options, placeholder, noneLabel, 
     </SelectPrimitive.Root>
 }
 
-function Item({ value, label, detail, hint }: SelectOption) {
+function Item({ value, label, detail, hint, disabled }: SelectOption) {
     const id = useId()
     // Radix names an option by its ItemText alone, which is also what the closed field shows;
     // detail and hint stay outside it and reach a screen reader as the option's description.
     const described = [detail && `${id}-detail`, hint && `${id}-hint`].filter(Boolean).join(' ') || undefined
     return <SelectPrimitive.Item
         value={value}
+        disabled={disabled}
         aria-describedby={described}
         className="relative flex w-full cursor-default items-center rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
     >

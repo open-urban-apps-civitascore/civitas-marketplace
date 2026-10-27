@@ -5,7 +5,7 @@ import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { isNewerVersion, STAGES, takenOutFact, type ShareProgress, type StageKey, type StageState } from '@/lib/export/share-stages'
 import { mergeRequestRef, reviewChangeUrl } from '@/lib/export/share-state'
 import type { ShareOutcome, TabRow } from '@/lib/export/share-tabs'
-import { resumeHref, WIZARD_PATH, wizardHref } from '@/lib/export/wizard-address'
+import { newVersionHref, resumeHref } from '@/lib/export/wizard-address'
 
 /**
  * What „In Arbeit“ lists and what each row says and offers, apart from how it
@@ -169,8 +169,9 @@ export const GROUP_TITLES: Record<InProgressGroup, string> = {
 
 /** One sentence under a group's heading; the rows of „Stand nicht lesbar“ say themselves what failed. */
 export const GROUP_LEADS: Partial<Record<InProgressGroup, string>> = {
-    yours: 'Hier ist der nächste Schritt deiner - in jeder Zeile steht, welcher.',
-    others: 'Das Katalog-Team prüft gerade, oder jemand anderes aus deiner Instanz ist dran.',
+    yours: 'Hier liegt der nächste Schritt bei dir - in jeder Zeile steht, welcher.',
+    // Names the operator too, so the lead is true of every row in the group.
+    others: 'Hier ist gerade jemand anderes dran - meist das Katalog-Team, manchmal jemand aus deiner Instanz oder der Betrieb. In jeder Zeile steht, woran es hängt.',
 }
 
 export function groupOf(item: InProgressItem): InProgressGroup {
@@ -358,10 +359,29 @@ function originOf(row: SharedPackageRow, datasets: DatasetsHere): string | undef
     return parts.length ? parts.join(' · ') : undefined
 }
 
-/** The wizard with the dataset chosen, where it is still here; else the wizard, to choose (prefill is rc.7). */
-function newVersionHref(row: SharedPackageRow, datasets: DatasetsHere): string {
+/** „Neue Version teilen“: the wizard with the dataset chosen where it is still here, and the Steckbrief filled from this version. */
+function newVersionOf(row: SharedPackageRow, datasets: DatasetsHere): string {
     const id = row.source?.id
-    return id && datasets.has(id) ? wizardHref({ datasetId: id, step: 1 }) : WIZARD_PATH
+    return newVersionHref({ ...(id && datasets.has(id) ? { datasetId: id } : {}), slug: row.slug, version: row.version })
+}
+
+/** The id of a shared version's card in „In Arbeit“, stable across readings and valid in an address: the wizard links there. */
+export function rowAnchor(row: Pick<SharedPackageRow, 'targetKey' | 'slug' | 'version'>): string {
+    // Two places may hold a package of the same name: a short tag of the place keeps their rows apart.
+    let hash = 0x811c9dc5
+    for (const char of row.targetKey) {
+        hash ^= char.codePointAt(0) ?? 0
+        hash = Math.imul(hash, 0x01000193) >>> 0
+    }
+    return `in-arbeit-${row.slug}-${row.version}-${hash.toString(36)}`
+}
+
+/** Where „In Arbeit“ is: the first tab of "Teilen", where its menu item leads. */
+export const IN_PROGRESS_PATH = '/export'
+
+/** The page „In Arbeit“, at the row of `row`. */
+export function inProgressHref(row: Pick<SharedPackageRow, 'targetKey' | 'slug' | 'version'>): string {
+    return `${IN_PROGRESS_PATH}#${rowAnchor(row)}`
 }
 
 const withRef = (sentence: string, url: string | undefined) => {
@@ -448,7 +468,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
     const track = trackOf(progress.states)
     const gitlab = (href: string | undefined): RowAction => ({ kind: 'gitlab', look: 'link', href: href ?? row.bundleMr.url })
     const withdraw: RowAction = { kind: 'withdraw', look: 'quiet' }
-    const newVersion: RowAction = { kind: 'new-version', look: 'quiet', href: newVersionHref(row, datasets) }
+    const newVersion: RowAction = { kind: 'new-version', look: 'quiet', href: newVersionOf(row, datasets) }
     const plain = (text: string, link?: RowStatus['link']): RowStatus => ({ text, tone: 'plain', ...(link ? { link } : {}) })
     const decline = item.declined?.decline
     const told = decline ? { reasons: [reasonOf(decline), ...change] } : {}

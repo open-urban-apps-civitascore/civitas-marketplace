@@ -498,6 +498,32 @@ describe('a "no" from the catalogue team (2026-10-22)', () => {
         expect(both('2026-10-21T10:00:00Z', '2026-10-20T10:00:00Z')).toBe('entry-declined')
     })
 
+    it('lets a version whose entry and then whose removal were turned down leave „In Arbeit“ after the 30 days, as the entry’s "no" alone does (S5)', () => {
+        const both = (now: number) =>
+            shareTabs(
+                [
+                    row('regen', '1.0.0', {
+                        bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/9`, declined: decline(9, { closedAt: '2026-10-21T10:00:00Z' }) } }),
+                        catalog: { state: 'declined', mrUrl: `${WEB}/8`, declined: decline(8, { closedAt: '2026-10-10T10:00:00Z' }) },
+                        proposals: [turnedDown('removal', 9), turnedDown('catalog', 8, { closedAt: '2026-10-10T10:00:00Z' }), proposal('bundle', 1, 'merged', sourced)],
+                    }),
+                ],
+                { instance: HERE, person: 'Ewa', now },
+            )
+        const during = both(NOW)
+        expect(during.inProgress.map((tabbed) => [tabbed.outcome, tabbed.mine])).toEqual([['removal-declined', true]])
+        // Its entry is used up, so the way on is a new version, which „Auswählen“ starts: the dataset is not busy.
+        expect([...during.busy.keys()]).toEqual([])
+        const after = both(NOW + 31 * DAY)
+        expect(after.inProgress).toEqual([])
+        expect(after.counts).toEqual({ inProgress: 0, mine: 0, published: 0 })
+        // „Beendet“ keeps both "no"s.
+        expect(after.ended.map((entry) => [entry.what, entry.ending])).toEqual([
+            ['removal', 'not-accepted'],
+            ['catalog', 'not-accepted'],
+        ])
+    })
+
     it('notes a turned-down change on the accepted version, without a block, while it is news (S4: bodenfeuchte !19 and !21)', () => {
         const bodenfeuchte = (now: number) =>
             shareTabs(

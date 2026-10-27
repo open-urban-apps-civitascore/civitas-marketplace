@@ -53,7 +53,7 @@ function heard(html: string): string {
 
 /** The card of one row, by its title: what the rows say, apart from the group headings around them. */
 function card(html: string, title: string): string {
-    const found = [...html.matchAll(/<li class="flex flex-col gap-3 rounded-lg[^"]*">[\s\S]*?<\/li>/g)].find((match) => text(match[0]).includes(title))
+    const found = [...html.matchAll(/<li(?: id="[^"]*" tabindex="-1")? class="flex flex-col gap-3 rounded-lg[^"]*">[\s\S]*?<\/li>/g)].find((match) => text(match[0]).includes(title))
     if (!found) throw new Error(`no row "${title}" in ${html}`)
     return found[0]
 }
@@ -133,7 +133,10 @@ describe('a row of „In Arbeit“', () => {
     it('offers the person’s move as a secondary button, with the quiet ways on and out before it', () => {
         const html = list([row('baeume', { bundle: onBase(), catalog: { state: 'none' } })])
         expect(text(heard(card(html, 'Paket baeume')))).toMatch(/Neue Version teilen Zurückziehen Katalog-Eintrag vorschlagen$/)
-        expect(html).toContain('href="/export/new?source=dataset:ds-baeume"')
+        // The new version starts from this one: the wizard fills its Steckbrief from it (rc.7).
+        expect(html).toContain('href="/export/new?source=dataset:ds-baeume&amp;from=1.1.0&amp;package=baeume"')
+        // The card can be linked to, from the wizard's notice for a busy dataset - and takes the focus a link to it gives.
+        expect(html).toMatch(/<li id="in-arbeit-baeume-1\.1\.0-[a-z0-9]+" tabindex="-1" class=/)
         // One primary per surface, and that is „Neues Paket teilen“ next to the heading.
         expect(html).not.toContain('bg-primary')
     })
@@ -275,8 +278,10 @@ describe('the groups of „In Arbeit“', () => {
         const headings = [...html.matchAll(/<h3[^>]*>(.*?)<\/h3>/g)].map((match) => text(match[1]))
         expect(headings).toEqual(['Du bist dran · 1 , 1 Eintrag', 'Wartet auf andere · 2 , 2 Einträge', 'Stand nicht lesbar · 1 , 1 Eintrag'])
         // Heard without the dot: „Du bist dran, 1 Eintrag“.
-        expect(text(heard(html))).toContain('Du bist dran , 1 Eintrag Hier ist der nächste Schritt deiner - in jeder Zeile steht, welcher.')
-        expect(text(html)).toContain('Wartet auf andere · 2 , 2 Einträge Das Katalog-Team prüft gerade, oder jemand anderes aus deiner Instanz ist dran.')
+        expect(text(heard(html))).toContain('Du bist dran , 1 Eintrag Hier liegt der nächste Schritt bei dir - in jeder Zeile steht, welcher.')
+        expect(text(html)).toContain(
+            'Wartet auf andere · 2 , 2 Einträge Hier ist gerade jemand anderes dran - meist das Katalog-Team, manchmal jemand aus deiner Instanz oder der Betrieb. In jeder Zeile steht, woran es hängt.',
+        )
         expect(html.match(/<h4 /g)).toHaveLength(4)
         expect(html.match(/<ul /g)).toHaveLength(3)
         // The person's move first, then a colleague's, then the catalogue team's, then what could not be read.
@@ -292,7 +297,7 @@ describe('the groups of „In Arbeit“', () => {
         const html = list([waiting('regen')])
         expect([...html.matchAll(/<h3[^>]*>(.*?)<\/h3>/g)].map((match) => text(match[1]))).toEqual(['Du bist dran · 0 , 0 Einträge', 'Wartet auf andere · 1 , 1 Eintrag'])
         // No lead over nothing.
-        expect(text(html)).not.toContain('Hier ist der nächste Schritt')
+        expect(text(html)).not.toContain('Hier liegt der nächste Schritt')
         expect(text(html)).not.toContain('Stand nicht lesbar')
     })
 

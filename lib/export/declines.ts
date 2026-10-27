@@ -166,17 +166,17 @@ export function removalDeclineShown(bundle: BundleStatus | undefined, catalog: C
     return removal && laterDecline(entry, removal) === removal ? removal : undefined
 }
 
-/** Why a version is not submitted again. `instead`: the version to take. */
+/** Why a version is not submitted again; names the Steckbrief, as the refusal comes from its last step. `instead`: the version to take. */
 export function packageRefusal(version: string, decline: Decline, instead: string): string {
-    return `Nicht eingereicht: Version ${version} ${declinedBy(decline)}. Nimm eine höhere Version, zum Beispiel ${instead}.`
+    return `Nicht eingereicht: Version ${version} ${declinedBy(decline)}. Trag im Steckbrief eine höhere Version ein, zum Beispiel ${instead}.`
 }
 
-/** Why an entry is not proposed again for this version, told as {@link packageRefusal} tells it. */
-export function entryRefusal(version: string, decline: Decline): string {
+/** Why an entry is not proposed again for this version; `instead` is optional, as this also answers in „In Arbeit“, which has no Steckbrief. */
+export function entryRefusal(version: string, decline: Decline, instead?: string): string {
     const said = decline.viaMarketplace
         ? `Der Eintrag für Version ${version} wurde${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid}, über das Marktplatz-Konto geschlossen)`
         : `Das Katalog-Team hat den Eintrag für Version ${version}${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid})`
-    return `Kein Katalog-Eintrag: ${said}. Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.`
+    return `Kein Katalog-Eintrag: ${said}. Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version${instead ? `, zum Beispiel ${instead}` : ''}.`
 }
 
 /** Why a removal is not proposed again, with the proposal to look at. */
