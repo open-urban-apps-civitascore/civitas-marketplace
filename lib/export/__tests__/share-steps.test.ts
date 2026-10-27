@@ -61,7 +61,7 @@ describe('„So geht es weiter“ after a "no"', () => {
         expect(review).not.toContain('lucide-circle')
         expect(text(review)).toBe(
             'Paket-Prüfung Das Katalog-Team - nicht angenommen am 21.10. Grund (spaudanjo): „Die Datenquelle ist nicht öffentlich.“ ' +
-                'Für die überarbeitete Fassung nimm eine höhere Version, zum Beispiel 1.0.1.',
+                'Für die überarbeitete Fassung trag im Steckbrief eine höhere Version ein, zum Beispiel 1.0.1.',
         )
         // Nothing to submit and nothing to check: the version is used up.
         expect(html).not.toContain('bg-primary')

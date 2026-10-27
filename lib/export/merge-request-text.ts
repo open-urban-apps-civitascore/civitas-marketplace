@@ -19,6 +19,15 @@ export function displayNameOf(title: string | undefined, version: string): strin
     return match && match[2] === version ? match[1] : undefined
 }
 
+/**
+ * The domain a package proposal re-identified its parts in, from the line
+ * `exportAction` writes ("Publisher `x`, domain `y`"): the manifest keeps it
+ * only inside the URNs. A new version that keeps it keeps their ids.
+ */
+export function domainOf(description: string | null | undefined): string | undefined {
+    return description?.match(/^Publisher `[a-z0-9]+`, domain `([a-z0-9]{2,40})`$/m)?.[1]
+}
+
 /** Who a request was proposed for, from its first line; undefined when it does not name anyone. */
 export function proposerOf(description: string | null | undefined): string | undefined {
     const name = description?.match(/^Proposed by the Open Urban Apps marketplace on behalf of \*\*(.+?)\*\*\./m)?.[1]?.trim()

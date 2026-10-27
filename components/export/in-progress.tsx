@@ -18,6 +18,7 @@ import {
     inProgressItems,
     keptPlaces,
     placesOf,
+    rowAnchor,
     rowView,
     shownGroups,
     withPlace,
@@ -378,9 +379,11 @@ function InProgressRow({
     children?: ReactNode
 }) {
     const view = rowView(item, here)
+    // A link from the wizard („Weiter geht es unter „In Arbeit““) lands on the row it names.
+    const id = item.kind === 'shared' ? rowAnchor(item.row) : undefined
     if (settling) {
         return (
-            <ShareRow title={view.title} titleAs="h4" version={view.version} origin={view.origin} status={<Pending>Wird neu abgefragt …</Pending>}>
+            <ShareRow id={id} title={view.title} titleAs="h4" version={view.version} origin={view.origin} status={<Pending>Wird neu abgefragt …</Pending>}>
                 {children}
             </ShareRow>
         )
@@ -399,6 +402,7 @@ function InProgressRow({
     const actions = [...view.quiet, ...(view.main ? [view.main] : [])]
     return (
         <ShareRow
+            id={id}
             title={view.title}
             titleAs="h4"
             version={view.version}

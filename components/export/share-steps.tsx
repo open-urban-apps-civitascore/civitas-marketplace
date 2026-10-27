@@ -64,6 +64,7 @@ export function ShareSteps({
     catalogMrUrl,
     removalMrUrl,
     version,
+    suggested,
     declines,
     removalDeclined,
     onPropose,
@@ -87,6 +88,8 @@ export function ShareSteps({
     removalMrUrl?: string
     /** The version the stages are about: the way on after a "no" names the one above it. */
     version: string
+    /** The next free version of the package, where the page knows its other versions. */
+    suggested?: string
     /** The catalogue team's "no" to the package and to the entry. */
     declines?: { review?: Decline; listing?: Decline }
     /** Their "no" to the removal, while it is the news (`removalDeclineShown`): the package stays accepted. */
@@ -149,7 +152,7 @@ export function ShareSteps({
     const declinedAt = (stage: Stage, state: StageState): DeclinedStage | undefined => {
         if (state !== 'declined' || (stage.key !== 'review' && stage.key !== 'listing')) return undefined
         const decline = declines?.[stage.key]
-        return decline ? declinedStage(stage.key, decline, version) : undefined
+        return decline ? declinedStage(stage.key, decline, version, suggested) : undefined
     }
 
     return (

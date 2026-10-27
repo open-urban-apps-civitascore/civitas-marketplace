@@ -29,9 +29,9 @@ const ShareListingContext = createContext<ShareListingContextValue | null>(null)
  *
  * It reads only once something on the page asks (`useShareView` with the
  * right to see it): a person without the right would only be refused. The
- * wizard asks too, where the person may submit, to know what became of the
- * package's other versions. Who may see it is each page's own check - layouts
- * do not run again on navigation.
+ * wizard asks too, where the person may submit, for what is busy and which
+ * versions are used. Who may see it is each page's own check - layouts do not
+ * run again on navigation.
  */
 export function ShareListingProvider({
     person,
@@ -82,6 +82,8 @@ export function useShareView(enabled: boolean) {
     return {
         rows,
         tabs,
+        /** This instance as the listing names it, to tell its shares from other instances'. */
+        instance: listing.instance,
         drafts,
         draftsReady,
         discardDraft,

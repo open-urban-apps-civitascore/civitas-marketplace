@@ -5,6 +5,7 @@ import {
     catalogPinOf,
     declineReasonOf,
     displayNameOf,
+    domainOf,
     isMarketplaceLine,
     proposedByOther,
     proposerOf,
@@ -80,6 +81,17 @@ describe('catalogPinOf', () => {
         const description = `Proposed by …\n\nAdds \`urn:stadt:usecase:baeume\` in \`useCases\`, pinned to\n\`${'f'.repeat(40)}\` of https://gitlab.example/group/catalog (path \`packages/baeume\`).`
         expect(catalogPinOf(description)).toEqual({ repo: 'https://gitlab.example/group/catalog', path: 'packages/baeume' })
         expect(catalogPinOf('Adds `x` in `useCases`.')).toBeUndefined()
+    })
+})
+
+describe('domainOf', () => {
+    it('reads the domain a package proposal gave its parts, from the line under it, so a new version keeps their ids', () => {
+        const description = 'Proposed by …\n\n---\nBranch `export/baeume-1.1.0` · exported via the marketplace export\nPublisher `stadt`, domain `environment`\n'
+        expect(domainOf(description)).toBe('environment')
+        // Only that line, whole: not a word in the person's text, not a domain the form would refuse.
+        expect(domainOf('What changed: Publisher `stadt`, domain `environment`')).toBeUndefined()
+        expect(domainOf('Publisher `stadt`, domain `Umwelt`')).toBeUndefined()
+        expect(domainOf(undefined)).toBeUndefined()
     })
 })
 

@@ -24,6 +24,7 @@ import type { Tone } from '@/lib/ui/tones'
  * Server-safe: no hooks; the list passes its buttons in.
  */
 export function ShareRow({
+    id,
     title,
     version,
     origin,
@@ -36,6 +37,8 @@ export function ShareRow({
     titleAs: Title = 'h3',
     children,
 }: {
+    /** The card's id, for a link to it (`rowAnchor`). */
+    id?: string
     title: string
     version?: string
     /** „aus Datensatz „X“ · eingereicht am 12.10. von Ewa“ */
@@ -54,7 +57,12 @@ export function ShareRow({
     children?: ReactNode
 }) {
     return (
-        <li className="flex flex-col gap-3 rounded-lg border bg-card p-5">
+        // Focusable, so a link to the row (`rowAnchor`) moves the focus there, not back to the top of the page.
+        <li
+            id={id}
+            tabIndex={id ? -1 : undefined}
+            className="flex flex-col gap-3 rounded-lg border bg-card p-5 scroll-mt-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-6">
                 <div className="flex min-w-0 items-start gap-3">
                     <IconTile icon={kind.icon} tone={kind.tone} />

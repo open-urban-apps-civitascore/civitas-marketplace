@@ -2,24 +2,45 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { Eye } from 'lucide-react'
-import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
+import { exportAction, inspectExportSource, prepareNewVersion, type ExportActionResult, type ExportIntent, type NewVersionFill } from '@/lib/export-actions'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { draftStart, draftStartedOn, draftStepAt, draftTime, type ShareDraft } from '@/lib/export/share-drafts'
-import { sourceOptions } from '@/lib/export/source-options'
-import { removalDeclineShown } from '@/lib/export/declines'
+import { busyOptions, sourceOptions, type ListingState } from '@/lib/export/source-options'
+import { reasonWords, removalDeclineShown } from '@/lib/export/declines'
+import {
+    asksWhatChanged,
+    BUSY_BLOCKER,
+    busyBeside,
+    CHANGE_NOTE_MAX,
+    changeNoteProblem,
+    filledNotice,
+    followedDecline,
+    followsRefOf,
+    nameTakenIn,
+    sharedPackageOf,
+    stageNotice,
+    startingBasics,
+    suggestedVersion,
+    unfilledNotice,
+    whatChangedLead,
+    whatChangedRefusal,
+    wizardStart,
+    type FollowedDecline,
+    type ListingFacts,
+    type SteckbriefBasics,
+} from '@/lib/export/new-version'
 import { reviewChangeNotice, shareProgress, takenOutNotice } from '@/lib/export/share-stages'
 import { mergeRequestRef, rememberShareResult, reviewChangeBelow, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
-import { slugify } from '@/lib/export/urn'
 import { reachableStep, type WizardStep } from '@/lib/export/wizard-address'
-import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 import { useCaseSlugPattern } from '@/lib/catalog/schema'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { MetadataForm } from '@/components/export/metadata-form'
 import { PackageContents } from '@/components/export/package-contents'
 import { ShareSteps } from '@/components/export/share-steps'
+import { BusySentence, InProgressLink, ListingLine, StageNoticeView } from '@/components/export/source-picker'
 import { useShareListingReload, useShareView } from '@/components/export/share-listing-provider'
 import { useShareDraftActions, useShareDrafts } from '@/components/export/use-share-drafts'
 import { useWizardAddress } from '@/components/export/use-wizard-address'
@@ -56,6 +77,24 @@ function Steps({ current }: { current: number }) {
         </li>)}
     </ol>
 }
+/** Without the right to submit nothing is read, so nothing is greyed out. */
+const NOTHING_READ: ListingState = { state: 'read', rows: [], busy: new Map() }
+
+/** The share listing as „Auswählen“ uses it: still asked, failed, or read. */
+function listingStateOf(enabled: boolean, view: ReturnType<typeof useShareView>): ListingState {
+    if (!enabled) return NOTHING_READ
+    if (view.rows === null) return { state: 'loading' }
+    if (view.error) return { state: 'failed' }
+    return { state: 'read', rows: view.rows, busy: view.tabs.busy, ...(view.instance ? { instance: view.instance } : {}) }
+}
+
+/** The shared version a new Steckbrief is filled from, and the answer. */
+interface FillState {
+    from: string
+    /** Absent while it is asked. */
+    answer?: NewVersionFill
+}
+
 /** What the address's dataset has open on the page: its form, or the question whether to continue its started share. */
 interface Opened {
     id: string
@@ -87,6 +126,10 @@ interface Opened {
  * made anew for every dataset: so a new choice drops the old dataset's form
  * and its pending answer, and focus stays in the dropdown. Moving between the
  * steps of one dataset keeps its form.
+ *
+ * From the share listing, a dataset with something in „In Arbeit“ is greyed
+ * out and the others say where they stand; the Steckbrief starts from the
+ * newest shared version of the package, and after a "no" asks what changed.
  */
 export function ExportPanel(props: PanelProps) {
     const { address, forward, replace, back } = useWizardAddress()
@@ -97,6 +140,14 @@ export function ExportPanel(props: PanelProps) {
     const [restarting, setRestarting] = useState<ShareDraft>()
     const pickerHeading = useRef<HTMLHeadingElement>(null)
     const source = address.datasetId ? props.sources.find((row) => row.id === address.datasetId) : undefined
+    // Kept on every step the wizard moves to, so a reload fills the Steckbrief the same way.
+    const from = address.from
+    const carry = from ? { from } : {}
+    // The share pages' listing, read only where the person may submit.
+    const forgeReady = props.readiness === 'ready' && props.targets.length > 0 && props.mayShare
+    const view = useShareView(forgeReady)
+    const listing = listingStateOf(forgeReady, view)
+    const facts: ListingFacts | undefined = listing.state === 'read' ? listing : undefined
 
     // The address's dataset is opened once this browser's started shares are known: before, a reload would
     // start a fresh form in place of the saved one. A started share is offered first when the dataset was only
@@ -111,17 +162,48 @@ export function ExportPanel(props: PanelProps) {
     if (opened?.restarting && address.step === 1) setOpened({ ...opened, restarting: false })
 
     const hasDraft = drafts.some((entry) => entry.datasetId === source?.id)
+    // A busy dataset shows no content and no button at „Auswählen“, but a later step (reached by a link or a race)
+    // stays open: the server refuses on submit.
+    const start = source ? wizardStart(source, facts, { started: hasDraft, ...(from ? { from } : {}) }, props.targets.map((target) => target.key)) : {}
+    const stage = start.stage
+    const blocked = stage?.kind === 'busy'
+    const notice = source && stage ? stageNotice(stage, source.name) : undefined
     const current: WizardStep = !source ? 1 : opened?.restarting ? 1
         : reachableStep(address.step, { datasetKnown: true, steckbrief: hasDraft || (opened?.reached ?? 1) >= 3 })
     const editing = opened && !opened.offer && opened.id === source?.id && !opened.restarting ? opened : undefined
+    // Asked only once the dataset's content is read, so the content comes first (Next runs server actions one at a
+    // time); not for a continued share, which fills in its own.
+    const [contentRead, setContentRead] = useState<string>()
+    const continued = opened?.id === source?.id && opened?.draft !== undefined
+    const fillWanted = start.fill && forgeReady && !continued && (contentRead === source?.id || current > 1) ? start.fill : undefined
+    const { targetKey: fillTarget, slug: fillSlug, version: fillVersion } = fillWanted ?? {}
+    const fillKey = fillTarget && fillSlug && fillVersion ? `${fillTarget}|${fillSlug}|${fillVersion}` : undefined
+    const [fills, setFills] = useState<Readonly<Record<string, NewVersionFill>>>({})
+    const answered = fillKey ? fills[fillKey] : undefined
+    useEffect(() => {
+        if (!fillKey || answered || !fillTarget || !fillSlug || !fillVersion) return
+        let cancelled = false
+        prepareNewVersion(fillTarget, fillSlug, fillVersion)
+            .then((answer) => {
+                if (!cancelled) setFills((known) => ({ ...known, [fillKey]: answer }))
+            })
+            .catch(() => {
+                if (!cancelled) setFills((known) => ({ ...known, [fillKey]: { status: 'error', detail: 'Die Anfrage an den Server ist fehlgeschlagen.' } }))
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [fillKey, answered, fillTarget, fillSlug, fillVersion])
+    const fill: FillState | undefined = fillVersion && fillKey ? { from: fillVersion, ...(answered ? { answer: answered } : {}) } : undefined
 
     // An address for a step not open to the person yet becomes the step they are on, so the address tells the truth:
     // a dataset not offered here, or a later step without any dataset, is „Auswählen“ with nothing chosen.
     useEffect(() => {
         if (!ready || opened?.restarting) return
         if (!source) {
-            if (address.datasetId || address.step > 1) replace({ step: 1 })
-        } else if (current < address.step) replace({ datasetId: source.id, step: current, resume: true })
+            // A link whose dataset is gone keeps its version: the person chooses another dataset for it.
+            if (address.datasetId || address.step > 1) replace({ step: 1, ...(address.from ? { from: address.from } : {}) })
+        } else if (current < address.step) replace({ datasetId: source.id, step: current, resume: true, ...(address.from ? { from: address.from } : {}) })
     }, [ready, opened?.restarting, address, source, current, replace])
 
     // Back at „Auswählen“, focus goes to this step's heading, as the editor does for its own steps.
@@ -134,6 +216,11 @@ export function ExportPanel(props: PanelProps) {
         }
         previousStep.current = current
     }, [current])
+    // A listing answering after the choice may make the dataset busy and take the focused button away: focus then goes
+    // to this step's heading, not to the top of the page.
+    useEffect(() => {
+        if (blocked && current === 1 && (!document.activeElement || document.activeElement === document.body)) pickerHeading.current?.focus()
+    }, [blocked, current])
 
     /** Forward by a new history entry, back through history: the browser's buttons then go the same way. */
     const go = (step: WizardStep) => {
@@ -144,44 +231,62 @@ export function ExportPanel(props: PanelProps) {
         if (step === current) return
         if (step < current) {
             // `resume`: entered at a later step, back replaces the address, and at „Auswählen“ it continues what is started.
-            back({ datasetId: source.id, step, resume: true })
+            back({ datasetId: source.id, step, resume: true, ...carry })
             return
         }
         // Coming back to „Auswählen“ later continues what is started from here on, rather than asking.
-        if (current === 1) replace({ datasetId: source.id, step: 1, resume: true })
-        forward({ datasetId: source.id, step })
+        if (current === 1) replace({ datasetId: source.id, step: 1, resume: true, ...carry })
+        forward({ datasetId: source.id, step, ...carry })
     }
     // Where the editor finds out the step cannot be had (no data structure, a preview that failed): the step it can.
     const fallBack = (step: WizardStep) => {
-        if (source && step < current) replace({ datasetId: source.id, step, resume: true })
+        if (source && step < current) replace({ datasetId: source.id, step, resume: true, ...carry })
     }
-    const choose = (id: string) => replace({ datasetId: id, step: 1 })
+    // A link's version goes only with the first choice, where the link named no dataset. Failed fills are asked again on
+    // the next choice; the others are kept for the visit.
+    const choose = (id: string) => {
+        setFills((known) => Object.fromEntries(Object.entries(known).filter(([, answer]) => answer.status !== 'error')))
+        replace({ datasetId: id, step: 1, ...(address.datasetId ? {} : carry) })
+    }
     const continueDraft = (draft: ShareDraft) => {
         setOpened((previous) => ({ id: draft.datasetId, run: (previous?.run ?? 0) + 1, draft, reached: 1 }))
-        replace({ datasetId: draft.datasetId, step: 1, resume: true })
-        if (draft.step === 2) forward({ datasetId: draft.datasetId, step: 2 })
+        replace({ datasetId: draft.datasetId, step: 1, resume: true, ...carry })
+        if (draft.step === 2) forward({ datasetId: draft.datasetId, step: 2, ...carry })
         // The notice and its button go away: focus moves to this step's heading, not to the top of the page.
         else pickerHeading.current?.focus()
     }
     const startAfresh = (id: string) => {
         setOpened((previous) => ({ id, run: (previous?.run ?? 0) + 1, reached: 1, ...(current > 1 ? { restarting: true } : {}) }))
-        if (current > 1) back({ datasetId: id, step: 1 })
+        if (current > 1) back({ datasetId: id, step: 1, ...carry })
         else pickerHeading.current?.focus()
     }
+    const options = sourceOptions(props.sources, drafts, listing, { datasetId: address.datasetId, ...(from ? { from } : {}) })
 
     if (!props.sources.length) return <EmptyState>Diese Instanz hat noch keinen Datensatz, den du lesen darfst.</EmptyState>
     // Until this browser was read, a named dataset waits: what opens depends on its started share.
     if (address.datasetId && !ready) return <Steps current={source ? address.step : 1} />
-    const started = opened?.offer ? drafts.find((draft) => draft.datasetId === opened.id) ?? opened.offer : undefined
+    // Busy, the started share is not offered either: the notice points to „In Arbeit“.
+    const started = opened?.offer && !blocked ? drafts.find((draft) => draft.datasetId === opened.id) ?? opened.offer : undefined
+    const startedLine = started ? `Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.` : undefined
     return <div className="flex flex-col gap-6">
         <Steps current={current} />
         {current === 1 && <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
-            <h2 ref={pickerHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Welchen Datensatz möchtest du teilen?</h2>
+            <div className="flex flex-col gap-1">
+                <h2 ref={pickerHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Welchen Datensatz möchtest du teilen?</h2>
+                {/* A link whose dataset is not here: its version waits for the choice. */}
+                {from && !source && <p className="text-sm text-muted-foreground">Wähle den Datensatz, aus dem die neue Version werden soll.</p>}
+            </div>
             {props.sourceNotice && <Notice tone="neutral">{props.sourceNotice}</Notice>}
-            <label className="flex flex-col gap-2 text-sm">
-                <span>Datensatz</span>
-                <Select value={source?.id ?? ''} onValueChange={choose} placeholder="Bitte auswählen …" options={sourceOptions(props.sources, drafts)} />
-            </label>
+            <div className="flex flex-col gap-2">
+                <label className="flex flex-col gap-2 text-sm">
+                    <span>Datensatz</span>
+                    <Select value={source?.id ?? ''} onValueChange={choose} placeholder="Bitte auswählen …" options={options} />
+                </label>
+                {/* Nothing waits for the listing: the server checks again on submit. */}
+                <ListingLine listing={listing} />
+            </div>
+            <BusySentence options={busyOptions(options)} />
+            {notice && <StageNoticeView notice={notice} />}
             {started && (
                 // Neutral: a fact about this dataset, and a choice, not a warning. Its primary stands in for „Weiter zum Steckbrief“.
                 <Notice tone="neutral" title={`Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.`}
@@ -192,13 +297,15 @@ export function ExportPanel(props: PanelProps) {
                     Gespeichert in diesem Browser. „Neu beginnen“ verwirft deine bisherigen Angaben.
                 </Notice>
             )}
-            {/* Focus stays in the dropdown, so the offer appearing below it is said, as the package contents are. */}
-            <p role="status" className="sr-only">{started ? `Für diesen Datensatz hast du am ${draftStartedOn(started)} angefangen.` : ''}</p>
+            {/* Focus stays in the dropdown, so what appears below it is announced. */}
+            <p role="status" className="sr-only">{[notice?.text, startedLine].filter(Boolean).join(' ')}</p>
             {restarting && <DiscardDraftDialog title={draftTitle(restarting)} draft={restarting} onCancel={() => setRestarting(undefined)}
                 onConfirm={() => { setRestarting(undefined); discard(restarting.datasetId); startAfresh(restarting.datasetId) }} />}
         </section>}
         {editing && source && <ExportEditor key={`${source.id}:${editing.run}`} {...props} source={source} draft={editing.draft}
-            step={current} onNavigate={go} onFallBack={fallBack} onProposed={reloadListing} onDiscarded={() => startAfresh(source.id)} />}
+            step={current} blocked={blocked} listing={facts}
+            start={{ ...(start.version ? { version: start.version } : {}), ...(fill ? { fill } : {}) }}
+            onNavigate={go} onFallBack={fallBack} onProposed={reloadListing} onContentRead={() => setContentRead(source.id)} onDiscarded={() => startAfresh(source.id)} />}
     </div>
 }
 
@@ -232,17 +339,25 @@ function stamped(payload: ShareDraft, startedAt: { current: string | undefined }
     startedAt.current ??= at
     return { ...payload, savedAt: at, startedAt: startedAt.current }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, onNavigate, onFallBack, onProposed, onDiscarded }: PanelProps & {
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, blocked, listing, start, onNavigate, onFallBack, onProposed, onContentRead, onDiscarded }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
     /** The wizard's step, from the address: „Auswählen“ (1) shows its dropdown above this. */
     step: WizardStep
+    /** The dataset is busy: „Auswählen“ shows none of its content or buttons, and does not read it. */
+    blocked: boolean
+    /** The share listing, once read: the source of the Steckbrief's notices and „Was hast du geändert?“. */
+    listing?: ListingFacts
+    /** What the form starts with until the person types or sends anything: the version, and the fill with its answer. */
+    start: { version?: string; fill?: FillState }
     /** To another step, as the buttons ask: forward as a new history entry, back through history. */
     onNavigate: (step: WizardStep) => void
     /** This step cannot be had after all (no data structure of its own, a preview that failed): the address becomes `step`. */
     onFallBack: (step: WizardStep) => void
-    /** A merge request was opened or found: "In Arbeit" should read GitLab again. */
+    /** A merge request was opened or found, or a "no" came to light: "In Arbeit" should read GitLab again. */
     onProposed: () => void
+    /** The dataset's content was read, so the panel may ask for the fill. */
+    onContentRead: () => void
     /** The started share was discarded: the panel starts this dataset afresh. */
     onDiscarded: () => void
 }) {
@@ -274,30 +389,38 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         }
     }
     const catalog = source.catalog
-    // The catalogue's own split, not a fourth regex for it: a looser pattern here
-    // seeds a slug the server then rejects, and the author finds out on submit.
-    const address = catalog ? catalogEntryPath(catalog.id) : undefined
-    const nextVersion = catalog?.version.match(/^(\d+)\.(\d+)\.(\d+)$/)
-    const [basics, setBasics] = useState(() => {
-        const initial = {
-            displayName: catalog?.displayName ?? source.name,
-            description: catalog?.description ?? source.description ?? '',
-            slug: address?.slug ?? slugify(source.name), publisher: address?.publisher ?? defaults.publisher,
-            version: nextVersion ? `${nextVersion[1]}.${nextVersion[2]}.${Number(nextVersion[3]) + 1}` : '1.0.0',
-            domain: 'general', maintainer: catalog?.maintainer ?? defaults.maintainer,
-            license: catalog?.license ?? 'EUPL-1.2', keywords: catalog?.keywords.join(', ') ?? '',
-        }
+    const filled = start.fill?.answer?.status === 'ok' ? start.fill.answer.steckbrief : undefined
+    const startingWith = { ...(filled ? { fill: filled } : {}), ...(start.version ? { version: start.version } : {}) }
+    const [basics, setBasics] = useState<SteckbriefBasics>(() => {
+        const initial = startingBasics(source, defaults, startingWith)
         // A draft fills in what it knows; a field it does not know keeps the default.
-        for (const key of Object.keys(initial) as (keyof typeof initial)[]) {
+        for (const key of Object.keys(initial) as (keyof SteckbriefBasics)[]) {
             const saved = draft?.basics[key]
             if (typeof saved === 'string') initial[key] = saved
         }
         return initial
     })
     const [metadata, setMetadata] = useState(() =>
-        draft ? restoreMetadata(draft.metadata, metadataDraft(catalog?.metadata)) : metadataDraft(catalog?.metadata))
+        draft ? restoreMetadata(draft.metadata, metadataDraft(filled?.metadata ?? catalog?.metadata)) : metadataDraft(filled?.metadata ?? catalog?.metadata))
     const [targetKey, setTargetKey] = useState(() =>
-        draft && targets.some((target) => target.key === draft.targetKey) ? draft.targetKey : targets[0]?.key ?? '')
+        draft && targets.some((target) => target.key === draft.targetKey) ? draft.targetKey
+            : filled && targets.some((target) => target.key === filled.targetKey) ? filled.targetKey : targets[0]?.key ?? '')
+    // What arrives after the form opened (the listing, the fill) is taken in only while nothing was typed, sent or
+    // continued: afterwards the form is the person's, and a reading after a submit must not move its version on.
+    const [untouched, setUntouched] = useState(!draft)
+    const startKey = `${filled ? `${filled.targetKey}|${filled.from}` : ''}|${start.version ?? ''}`
+    const [startedWith, setStartedWith] = useState(startKey)
+    // The shared version the form was filled from, for the notice saying so.
+    const [filledFrom, setFilledFrom] = useState(draft ? undefined : filled)
+    if (startKey !== startedWith) {
+        setStartedWith(startKey)
+        if (untouched) {
+            setBasics(startingBasics(source, defaults, startingWith))
+            setMetadata(metadataDraft(filled?.metadata ?? catalog?.metadata))
+            if (filled && targets.some((target) => target.key === filled.targetKey)) setTargetKey(filled.targetKey)
+            setFilledFrom(filled)
+        }
+    }
     // Saved as a draft once something was changed: only opening a dataset, or a draft, writes nothing,
     // so a draft keeps the time of its last real change.
     const [dirty, setDirty] = useState(false)
@@ -329,30 +452,80 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const takenOut = takenOutVersion ? <Notice tone="neutral">{takenOutNotice(takenOutVersion)}</Notice> : undefined
     // The catalogue team changed the version this one follows during review: sharing from the dataset would write over
     // their change, so warn first.
-    const listing = useShareView(forgeReady)
-    const changed = reviewChangeBelow(listing.rows, { targetKey, slug: basics.slug, version: basics.version })
+    const changed = reviewChangeBelow(listing?.rows ?? null, { targetKey, slug: basics.slug, version: basics.version })
     const reviewChange = changed ? (
         <Notice tone="warn" action={<ExternalAnchor href={changed.changeUrl}>Änderung ansehen</ExternalAnchor>}>
             {reviewChangeNotice(changed.version)}
         </Notice>
     ) : undefined
+    // The folder the form proposes into, whoever shared there, as the server's rules read it: the person may have changed
+    // the short name „Auswählen“ found.
+    const formPackage = listing ? sharedPackageOf(listing.rows, { slug: basics.slug, targetKey, anyInstance: true }, listing.instance) : undefined
+    const packageKey = `${targetKey}|${basics.slug.trim().toLowerCase()}`
+    // The "no" this version follows: from the listing, or from a refusal where the listing did not know it yet.
+    const [heard, setHeard] = useState<{ key: string; followed: FollowedDecline }>()
+    const followed = (heard?.key === packageKey ? heard.followed : undefined) ?? (listing ? followedDecline(formPackage, listing.instance) : undefined)
+    const whatChanged = asksWhatChanged(followed, basics.version) ? followed : undefined
+    // The way on after a "no" at the form's version: above it and everything used up in its package.
+    const wayOn = suggestedVersion(formPackage, [basics.version])
+    // Another proposal of the dataset open (a link or a race): said at the top of the step, and the submit gives way to
+    // where it goes on - the server refuses it anyway.
+    const beside = listing ? busyBeside(listing.busy.get(source.id) ?? [], { targetKey, slug: basics.slug, version: basics.version }) : []
+    const busyNotice = beside.length ? stageNotice({ kind: 'busy', rows: beside }, source.name) : undefined
+    // The form's short name is another instance's package: said here too, where it is changed.
+    const nameTaken = listing && !catalog ? nameTakenIn(listing.rows, basics.slug, listing.instance, targetKey) : undefined
+    const nameNotice = nameTaken ? stageNotice({ kind: 'name-taken', slug: nameTaken.slug, pkg: nameTaken }, source.name) : undefined
+    // Where the fill stands, said only while the form is as it started.
+    const fillNotice = !start.fill || !untouched ? undefined
+        : !start.fill.answer ? <Pending>Angaben aus Version {start.fill.from} werden geholt …</Pending>
+            : start.fill.answer.status !== 'ok' ? <Notice tone="neutral">{unfilledNotice(start.fill.from, start.fill.answer.detail)}</Notice>
+                : undefined
+    // Not read for a busy dataset at „Auswählen“: a server action queued for nothing delays the next.
+    const unread = blocked && step === 1
+    // Told once the content is read, by whichever render made it; kept current like `latest` below.
+    const reportRead = useRef(onContentRead)
     useEffect(() => {
+        reportRead.current = onContentRead
+    })
+    useEffect(() => {
+        if (unread) return
         let cancelled = false
-        inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
+        inspectExportSource(source.id).then((value) => {
+            if (cancelled) return
+            setInventory(value)
+            if (!value.error) reportRead.current()
+        })
             // The notice around it already says what failed and offers "Erneut laden"; this names why.
             .catch(() => { if (!cancelled) setInventory({ artifacts: [], warnings: [], error: 'Die Anfrage an den Server ist fehlgeschlagen.' }) })
         return () => { cancelled = true }
-    }, [source.id, inventoryAttempt])
-    const run = (intent: ExportIntent) => startTransition(async () => {
+    }, [source.id, inventoryAttempt, unread])
+    // Back to the Steckbrief, keeping the answer that says what to do there.
+    const toSteckbrief = () => {
+        setKeepAnswer(true)
+        onFallBack(2)
+    }
+    const run = (intent: ExportIntent) => {
+        // A "no" the page learnt of after the Steckbrief is answered there, not on this step.
+        if (intent === 'bundle' && whatChanged && changeNoteProblem(basics.changeNote)) {
+            setResult({ intent, status: 'invalid', detail: whatChangedRefusal(whatChanged) })
+            if (step === 3) toSteckbrief()
+            return
+        }
+        propose(intent)
+    }
+    const propose = (intent: ExportIntent) => startTransition(async () => {
         setPendingIntent(intent)
+        setUntouched(false)
         // The version this request is about, even if the form changes while it runs.
         const requestKey = currentShareKey
+        const requestPackage = packageKey
         const data = new FormData()
         for (const [key, value] of Object.entries(basics)) data.set(key, value)
         data.set('datasetId', source.id)
         data.set('targetKey', targetKey)
         data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
         data.set('demoStreams', JSON.stringify(demoChosen))
+        if (whatChanged) data.set('follows', JSON.stringify(followsRefOf(whatChanged)))
         data.set('intent', intent)
         try {
             const next = await exportAction(null, data)
@@ -362,20 +535,22 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             const failedHere = intent === 'preview' && next.status !== 'ok' && step === 3
             if (next.preview && !failedHere) setPreview(next.preview)
             if (intent === 'preview' && next.status === 'ok') onNavigate(3)
-            if (failedHere) {
-                setKeepAnswer(true)
-                onFallBack(2)
+            if (failedHere) toSteckbrief()
+            // The server knew of a "no" the page did not: the Steckbrief asks what changed from now on.
+            if (next.follows) {
+                setHeard({ key: requestPackage, followed: next.follows })
+                if (step === 3) toSteckbrief()
             }
             // From here on the merge request (or the repository) holds the content: the draft has done its job.
             const landed = next.status === 'ok' || next.status === 'already-open' || next.status === 'unchanged'
             if (intent === 'bundle' && landed) forgetDraft()
-            if ((intent === 'bundle' || intent === 'catalog') && landed) onProposed()
+            // A refusal for a dataset busy meanwhile reads the listing again, so „Auswählen“ greys it out; so does any
+            // answer that tells of a "no", as the next version asks what changed.
+            const saidNo = Boolean(next.bundle?.declined || next.catalog?.state === 'declined' || next.follows)
+            if (((intent === 'bundle' || intent === 'catalog') && (landed || next.busy)) || saidNo) onProposed()
         } catch {
             setResult({ intent, status: 'error', detail: 'Die Anfrage ist fehlgeschlagen. Bitte erneut versuchen.' })
-            if (intent === 'preview' && step === 3) {
-                setKeepAnswer(true)
-                onFallBack(2)
-            }
+            if (intent === 'preview' && step === 3) toSteckbrief()
         } finally {
             setPendingIntent(undefined)
         }
@@ -388,9 +563,10 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         setSavedAt(undefined)
         setDirty(false)
     }
-    const editBasics = (key: keyof typeof basics, value: string) => {
+    const editBasics = (key: keyof SteckbriefBasics, value: string) => {
         setBasics({ ...basics, [key]: value })
         setDirty(true)
+        setUntouched(false)
         if (key === 'publisher' || key === 'slug' || key === 'domain') setAddressOpen(true)
     }
     const addressInvalid = !SEGMENT.test(basics.publisher.trim().toLowerCase()) || !useCaseSlugPattern.test(basics.slug.trim().toLowerCase())
@@ -399,8 +575,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // read exactly as the catalogue spells its pages (catalogEntryHref), and wrong ones as typed: tidied up, an empty
     // Herausgeber-Kürzel would show an address that will never exist.
     const addressHref = `/use-cases/${basics.publisher.trim().toLowerCase()}/${basics.slug.trim().toLowerCase()}`
-    const editMetadata = (next: MetadataDraft) => { setMetadata(next); setDirty(true) }
-    const chooseTarget = (key: string) => { setTargetKey(key); setDirty(true) }
+    const editMetadata = (next: MetadataDraft) => { setMetadata(next); setDirty(true); setUntouched(false) }
+    const chooseTarget = (key: string) => { setTargetKey(key); setDirty(true); setUntouched(false) }
     // Saved shortly after the typing stops, without a button and without validation:
     // a draft may be incomplete (patterns for long forms, 2026-10-16).
     useEffect(() => {
@@ -475,6 +651,11 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         : mayShare ? undefined : 'Einreichen darf hier nur, wer Datenstrukturen anlegen und Datensätze bearbeiten darf, zum Beispiel Data Owner, Data Architect oder Data Steward.'
     // To „Auswählen“, with this dataset still chosen and the form kept; the preview is made again from the Steckbrief.
     const backToChoice = () => onNavigate(1)
+    // A refusal for a busy dataset leads to „In Arbeit“, else to its proposal - unless the step already shows that link.
+    const answerAction = (answer: ExportActionResult) =>
+        answer.busy ? <InProgressLink />
+            : answer.mrUrl && answer.mrUrl !== known.bundle?.mrUrl && answer.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={answer.mrUrl}>In GitLab ansehen</ExternalAnchor>
+                : undefined
     // `run` and `onFallBack` are made anew on every render; the effects below ask for the latest ones, so they run
     // on what changes the step's facts, not on each render. Declared first, so it is current when they run.
     const latest = useRef({ run, onFallBack })
@@ -514,7 +695,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         {/* Asked first: what was typed lives only in this browser. Afterwards the dataset starts afresh at „Auswählen“. */}
         {discarding && <DiscardDraftDialog title={basics.displayName.trim() || source.name} draft={discarding}
             onCancel={() => setDiscarding(undefined)} onConfirm={() => { setDiscarding(undefined); forgetDraft(); onDiscarded() }} />}
-        {step === 1 && <Section title="Was kommt ins Paket?"
+        {step === 1 && !blocked && <Section title="Was kommt ins Paket?"
             lead={<>Das gehört zum Datensatz „{source.name}“ - in der Reihenfolge, in der die Daten fließen.</>}>
             {!inventory ? <Pending>Inhalt wird gelesen …</Pending>
                 : inventory.error ? <Notice tone="error" title="Der Inhalt ließ sich nicht lesen" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
@@ -534,11 +715,17 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 </>}
         </Section>}
         {/* Focus stays in the dropdown, so the contents arriving below it are said, not jumped to. */}
-        {step === 1 && <p role="status" className="sr-only">{inventory && !inventory.error ? `Inhalt von „${source.name}“ gelesen` : ''}</p>}
+        {step === 1 && !blocked && <p role="status" className="sr-only">{inventory && !inventory.error ? `Inhalt von „${source.name}“ gelesen` : ''}</p>}
         {step === 2 && <form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); run('preview') }}>
             <div><h2 ref={stepHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Steckbrief ergänzen</h2><p className="mt-1 text-sm text-muted-foreground">Pflichtfelder sind mit * markiert. Weitere Angaben kannst du ergänzen, soweit sie bekannt sind.</p>
                 <div className="mt-3 flex flex-col gap-2 empty:hidden">
-                    {source.notice && <Notice tone="neutral">{source.notice}</Notice>}
+                    {/* First: while it stands, nothing below can be submitted. */}
+                    {busyNotice && <StageNoticeView notice={busyNotice} />}
+                    {nameNotice && <StageNoticeView notice={nameNotice} />}
+                    {/* Filled from a shared version, its notice replaces the catalogue's prefill notice. */}
+                    {source.notice && !filledFrom && <Notice tone="neutral">{source.notice}</Notice>}
+                    {filledFrom && <Notice tone="neutral">{filledNotice(filledFrom)}</Notice>}
+                    {fillNotice}
                     {/* A second merge request for the same package next to an open one would compete with it, so the advice differs per state. */}
                     {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Vorschlag in Prüfung{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst, wenn er angenommen oder zurückgezogen ist, dann mit einer neuen Version.</Notice>}
                     {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon angenommen. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
@@ -546,6 +733,17 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     {reviewChange}
                 </div></div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
+                {/* First, as it is what this version is about. */}
+                {whatChanged && <section className="flex flex-col gap-2 rounded-xl border bg-card p-5">
+                    <label htmlFor="was-geaendert" className="font-semibold">Was hast du geändert? *</label>
+                    <p id="was-geaendert-warum" className="text-sm text-muted-foreground">{whatChangedLead(whatChanged)}</p>
+                    {/* The catalogue team's words, as „In Arbeit“ shows them. */}
+                    <p id="was-geaendert-grund" className="break-words text-sm text-foreground">{reasonWords(whatChanged.decline)}{' '}
+                        <ExternalAnchor href={whatChanged.decline.mrUrl}>Vorschlag ansehen</ExternalAnchor></p>
+                    <textarea id="was-geaendert" rows={3} maxLength={CHANGE_NOTE_MAX} required className={inputClass} value={basics.changeNote}
+                        aria-describedby="was-geaendert-warum was-geaendert-grund was-geaendert-hinweis" onChange={(event) => editBasics('changeNote', event.target.value)} />
+                    <span id="was-geaendert-hinweis" className="text-xs text-muted-foreground">1 bis {CHANGE_NOTE_MAX} Zeichen. Der Text steht im öffentlichen Vorschlag bei GitLab.</span>
+                </section>}
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
                     {BASIC_FIELDS.map(({ key, label, hint }) =>
@@ -556,7 +754,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 <MetadataForm value={metadata} onChange={editMetadata} />
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Adresse und Version im Katalog</h3>
-                    <p className="text-sm text-muted-foreground md:col-span-2">{catalog ? 'Die nächste Version ist vorgeschlagen. Für eine eigenständige Variante kannst du die Adresse ändern.' : 'Die Adresse ist aus dem Namen des Datensatzes gebildet. Ändern musst du sie nur, wenn sie anders lauten soll.'}</p>
+                    <p className="text-sm text-muted-foreground md:col-span-2">{catalog || filledFrom ? 'Die nächste Version ist vorgeschlagen. Für eine eigenständige Variante kannst du die Adresse ändern.' : 'Die Adresse ist aus dem Namen des Datensatzes gebildet. Ändern musst du sie nur, wenn sie anders lauten soll.'}</p>
                     <label className="flex flex-col gap-1 text-sm"><span>Version *</span><input className={inputClass} value={basics.version} required onChange={(event) => editBasics('version', event.target.value)} />
                         <span className="text-xs text-muted-foreground">Drei Zahlen mit Punkt, zum Beispiel 1.0.0. Eine neue Version muss höher sein als die letzte.</span></label>
                     <p className="text-sm md:col-span-2"><span className="text-muted-foreground">Adresse im Katalog: </span><span className="break-all">{addressHref}</span></p>
@@ -588,6 +786,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             </div>
             {/* The same heading while the preview is made again, so focus stays on it when the preview arrives. */}
             {!preview ? <Pending>Vorschau wird erstellt …</Pending> : <>
+                {busyNotice && <StageNoticeView notice={busyNotice} />}
                 {takenOut}
                 {reviewChange}
                 {/* The one action first, not under all the previews (Ewa's point 8). */}
@@ -595,13 +794,14 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     progress={shareProgress({ version: basics.version, bundle: known.bundle, catalog: known.catalog })}
                     pendingIntent={pending && (pendingIntent === 'bundle' || pendingIntent === 'status' || pendingIntent === 'catalog') ? pendingIntent : undefined}
                     busy={pending}
-                    proposeBlocker={previewBlocker ?? setupBlocker}
+                    proposeBlocker={previewBlocker ?? setupBlocker ?? (beside.length ? BUSY_BLOCKER : undefined)}
                     catalogBlocker={previewBlocker ?? setupBlocker ?? (catalogUrl ? undefined : 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.')}
                     canCheck={forgeReady}
                     bundleMrUrl={known.bundle?.mrUrl}
                     catalogMrUrl={known.catalog?.mrUrl}
                     removalMrUrl={known.bundle?.removal?.mrUrl}
                     version={basics.version}
+                    suggested={wayOn}
                     declines={{ review: known.bundle?.declined, listing: known.catalog?.state === 'declined' ? known.catalog.declined : undefined }}
                     removalDeclined={removalDeclineShown(known.bundle, known.catalog)}
                     onPropose={() => run('bundle')}
@@ -609,23 +809,21 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     onCatalog={() => run('catalog')}
                 />
                 {/* The answer to the last action, under the task it answers. */}
-                {result && <Notice tone={resultTone(result.status)} live
-                    action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>
+                {result && <Notice tone={resultTone(result.status)} live action={answerAction(result)}>
                     <p className="whitespace-pre-wrap">{result.detail}</p>
                 </Notice>}
                 <section className="rounded-xl border bg-card p-5">
                     <h3 className="text-lg font-semibold">{basics.displayName}</h3><p className="mt-2 whitespace-pre-wrap text-sm">{basics.description}</p>
                     <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">{([['Herausgeber', basics.maintainer], ['Lizenz', basics.license], ['Schlagworte', basics.keywords], ['Version', basics.version],
-                        ['Adresse im Katalog', addressHref], ['Fachgebiet', basics.domain]] as const).map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value || 'Keine Angabe'}</dd></div>)}</dl>
+                        ['Adresse im Katalog', addressHref], ['Fachgebiet', basics.domain]] as const).map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value || 'Keine Angabe'}</dd></div>)}
+                        {whatChanged && <div className="sm:col-span-2"><dt className="text-muted-foreground">Was hast du geändert?</dt><dd className="whitespace-pre-wrap break-words">{basics.changeNote}</dd></div>}</dl>
                     <div className="mt-5"><MetadataReview metadata={metadata} /></div>
                 </section>
                 <Preview preview={preview} />
             </>}
         </>}
         {pending && step !== 3 && <Pending>Anfrage wird verarbeitet …</Pending>}
-        {/* Not twice: once a step shows its merge request, the answer does not repeat the link. */}
-        {result && !refused && step !== 3 && <Notice tone={resultTone(result.status)} live
-            action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>
+        {result && !refused && step !== 3 && <Notice tone={resultTone(result.status)} live action={answerAction(result)}>
             <p className="whitespace-pre-wrap">{result.detail}</p>
         </Notice>}
         {refused && <div className="flex flex-col gap-3">

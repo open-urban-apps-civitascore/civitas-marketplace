@@ -201,7 +201,7 @@ describe('a version whose package the catalogue team turned down (R1, 2026-10-22
         vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [], folder: [] }).fetchImpl)
         const result = await exportAction(null, bundleForm('1.1.0'))
         expect(result).toMatchObject({ intent: 'bundle', status: 'invalid', mrUrl: declined.mrUrl, bundle: { declined }, catalog: { state: 'none' } })
-        expect(result.detail).toBe('Nicht eingereicht: Version 1.1.0 hat das Katalog-Team am 22.10. nicht angenommen. Nimm eine höhere Version, zum Beispiel 1.1.1.')
+        expect(result.detail).toBe('Nicht eingereicht: Version 1.1.0 hat das Katalog-Team am 22.10. nicht angenommen. Trag im Steckbrief eine höhere Version ein, zum Beispiel 1.1.1.')
         // Nothing is built for it: the platform is not read.
         expect(readUseCase).not.toHaveBeenCalled()
         expect(openMergeRequest).not.toHaveBeenCalled()
@@ -223,7 +223,7 @@ describe('a version whose package the catalogue team turned down (R1, 2026-10-22
         vi.mocked(readBundleStatus).mockResolvedValue({ state: 'none', reason: 'no-package', declined: { ...declined, closedBy: 'walkable.cities.2021', viaMarketplace: true } })
         vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [], folder: [] }).fetchImpl)
         expect((await exportAction(null, bundleForm('1.1.0'))).detail).toBe(
-            'Nicht eingereicht: Version 1.1.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Nimm eine höhere Version, zum Beispiel 1.1.1.',
+            'Nicht eingereicht: Version 1.1.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Trag im Steckbrief eine höhere Version ein, zum Beispiel 1.1.1.',
         )
     })
 
