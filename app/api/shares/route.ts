@@ -1,5 +1,5 @@
 import { readShareListing } from '@/lib/export/share-listing'
-import { fetchShareRight, LISTING_HIDDEN_BECAUSE } from '@/lib/export/share-permission'
+import { fetchShareRight, LISTING_HIDDEN_BECAUSE, SIGNED_OUT } from '@/lib/export/share-permission'
 import { accessTokenOrUndefined, currentSession } from '@/lib/session'
 
 /**
@@ -21,8 +21,6 @@ import { accessTokenOrUndefined, currentSession } from '@/lib/session'
 const PRIVATE = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
 const answer = (body: unknown, status = 200) => Response.json(body, { status, headers: PRIVATE })
-
-const SIGNED_OUT = 'Deine Anmeldung ist abgelaufen - bitte lade die Seite neu und melde dich wieder an.'
 
 export async function GET() {
     if (!(await currentSession())) return answer({ error: SIGNED_OUT }, 401)

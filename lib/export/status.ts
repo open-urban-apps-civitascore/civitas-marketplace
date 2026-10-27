@@ -1,4 +1,4 @@
-import { indexRowOf, isListed } from '@/lib/export/catalog-entry'
+import { indexRowOf, isListed, maintainerOf } from '@/lib/export/catalog-entry'
 import { bundleBranch, catalogBranch, packageDir, parseCatalogBranch, removalBranch, type CatalogRepo, type ExportTarget } from '@/lib/export/config'
 import { sinceStart, startedOver, type Decline } from '@/lib/export/declines'
 import {
@@ -99,6 +99,8 @@ export interface CatalogStatus {
     takenOut?: { version: string; reason?: string }
     /** For `mr-open`: taking the proposal in would bring back what the catalogue team took out. */
     bringsBack?: boolean
+    /** For `listed`: the Herausgeber in the catalogue row (`maintainer`), shown in „Veröffentlicht“. */
+    maintainer?: string
 }
 
 /** Tree ids of the package directory in the three states that matter; undefined where unreadable. */
@@ -318,6 +320,8 @@ export async function readBundleStatus(
 export interface CatalogInspection {
     status: CatalogStatus
     floor?: string
+    /** The `index.json` this inspection read, for reuse in the same request (`readVersionCatalog`). */
+    read?: { index: string | undefined }
 }
 
 export async function inspectCatalog(
@@ -333,7 +337,7 @@ export async function inspectCatalog(
     const context = await readVersionCatalog(client, project.id, catalog, slug, version, true, bot)
     const floor = catalogFloor(context, id)
     const declined = await readCatalogDecline(client, project.id, context, id, bot)
-    return { status: catalogStatusIn(context, slug, version, id, declined), ...(floor ? { floor } : {}) }
+    return { status: catalogStatusIn(context, slug, version, id, declined), ...(floor ? { floor } : {}), read: { index: context.index } }
 }
 
 export async function readCatalogStatus(
@@ -362,10 +366,12 @@ export async function readVersionCatalog(
     version: string,
     others = true,
     bot: () => Promise<{ id: number }> = lazyAccount(client),
+    /** The index already read in this request (`CatalogInspection.read`). */
+    known?: { index: string | undefined },
 ): Promise<CatalogContext> {
     const [requests, index, byBot] = await Promise.all([
         findMergeRequests(client, projectId, catalogBranch(slug, version)),
-        readFile(client, projectId, 'index.json', catalog.baseBranch),
+        known ? Promise.resolve(known.index) : readFile(client, projectId, 'index.json', catalog.baseBranch),
         others ? bot().then((account) => listMergeRequestsBy(client, projectId, account.id)) : Promise.resolve([]),
     ])
     const merged = new Map([...requests, ...byBot].filter((mr) => mr.state === 'merged').map((mr) => [mr.iid, mr]))
@@ -529,7 +535,10 @@ export function catalogStatusIn(context: CatalogContext, slug: string, version: 
     const branch = catalogBranch(slug, version)
     const open = context.openRequests.find((mr) => mr.source_branch === branch && mr.state === 'opened')
     if (open) return { state: 'mr-open', mrUrl: open.web_url, ...takenOut, ...(out?.thisVersion ? { bringsBack: true } : {}) }
-    if (context.index && isListed(context.index, id, version)) return { state: 'listed' }
+    if (context.index && isListed(context.index, id, version)) {
+        const maintainer = maintainerOf(context.index, id)
+        return { state: 'listed', ...(maintainer ? { maintainer } : {}) }
+    }
     if (out?.thisVersion) return { state: 'withdrawn', ...takenOut }
     if (declined) return { state: 'declined', mrUrl: declined.mrUrl, declined, ...takenOut }
     return { state: 'none', ...takenOut }

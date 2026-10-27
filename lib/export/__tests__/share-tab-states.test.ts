@@ -10,16 +10,14 @@ vi.mock('next/link', () => ({
     default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => createElement('a', { href, ...rest }, children),
 }))
 
-import { EndedRow } from '@/components/export/ended-shares'
 import { InProgress } from '@/components/export/in-progress'
 import { SHARE_PROCESS_STEPS, ShareProcessBlock, shareProcessOpens } from '@/components/export/share-process'
 import { ShareListAccess } from '@/components/export/share-tab-frame'
 import { EmptyTab, TAB_LEADS } from '@/components/export/share-tab-states'
-import { endedLine } from '@/lib/export/ended-lines'
 import type { ShareDraft } from '@/lib/export/share-drafts'
-import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { LISTING_HIDDEN_BECAUSE } from '@/lib/export/share-permission'
-import { shareTabs, type EndedEntry } from '@/lib/export/share-tabs'
+import { shareTabs } from '@/lib/export/share-tabs'
 
 /** What a reader meets: the text, without markup. */
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -50,10 +48,10 @@ describe('an empty tab', () => {
     it('has a lead for every tab', () => {
         expect(TAB_LEADS['in-progress']).toBe(
             'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist. ' +
-                'Was das Katalog-Team nicht angenommen hat, steht hier 30 Tage, danach unter „Beendet“.',
+                'Was das Katalog-Team nicht angenommen hat, bleibt hier 30 Tage lang und steht von Anfang an auch unter „Beendet“.',
         )
         expect(TAB_LEADS.published).toContain('Herausnehmen kann einen Eintrag nur das Katalog-Team.')
-        expect(TAB_LEADS.ended).toBe('Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.')
+        expect(TAB_LEADS.ended).toBe('Was zurückgezogen, nicht angenommen, entfernt oder aus dem Katalog genommen wurde, mit Datum und Namen. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.')
     })
 })
 
@@ -91,7 +89,7 @@ describe('the list „In Arbeit“', () => {
 
     it('offers no way on for a started share whose dataset is gone', () => {
         const html = list({ drafts: [draft(2)], datasets: [{ id: 'other', name: 'Andere' }] })
-        expect(text(html)).toContain('Der Datensatz „Bäume“ ist auf dieser Instanz nicht mehr da.')
+        expect(text(html)).toContain('Der Datensatz „Bäume“ ist auf dieser Instanz nicht mehr da · du bist dran: Zwischenstand verwerfen')
         expect(html).not.toContain('/export/new')
     })
 
@@ -174,58 +172,5 @@ describe('„So läuft Teilen ab“', () => {
         expect(html).toMatch(/<div id="[^"]+" inert=""/)
         expect(render(createElement(ShareProcessBlock, { open: true }))).toContain('aria-expanded="true"')
         expect(SHARE_PROCESS_STEPS).toHaveLength(4)
-    })
-})
-
-describe('a row of „Beendet“', () => {
-    const WEB = 'https://gitlab.example/group/catalog/-/merge_requests'
-    const row: SharedPackageRow = {
-        key: 't#export/baeume-1.1.0',
-        targetKey: 't',
-        targetLabel: 'Ablage',
-        slug: 'baeume',
-        version: '1.1.0',
-        displayName: 'Bäume',
-        bundleMr: { url: `${WEB}/4`, state: 'closed' },
-    }
-    const proposal = (extra: Partial<ShareProposal>): ShareProposal => ({ kind: 'bundle', iid: 4, url: `${WEB}/4`, state: 'closed', ...extra })
-    const entry = (extra: Partial<EndedEntry>): EndedEntry => ({ key: 'k', ending: 'withdrawn', what: 'bundle', row, version: '1.1.0', origin: 'this', ...extra })
-
-    it('says what ended, how, when and through whom', () => {
-        const line = endedLine(entry({ proposal: proposal({ withdrawnBy: 'Ewa', closedAt: '2026-10-12T09:00:00Z' }), at: '2026-10-12T09:00:00Z' }))
-        expect(line).toEqual({ title: 'Bäume', version: '1.1.0', what: 'Paket', ending: 'Zurückgezogen', when: '12.10.2026', who: 'von Ewa', url: `${WEB}/4` })
-        const html = render(createElement('ul', null, createElement(EndedRow, { line })))
-        expect(text(html)).toBe('Bäume Version 1.1.0 Paket · Zurückgezogen 12.10.2026 · von Ewa In GitLab ansehen')
-        expect(html).toContain(`href="${WEB}/4"`)
-    })
-
-    it('names reviewers by GitLab username, and the marketplace’s account as such', () => {
-        expect(endedLine(entry({ ending: 'not-accepted', proposal: proposal({ closedBy: 'daniel' }) })).who).toBe('von daniel')
-        expect(endedLine(entry({ ending: 'not-accepted', proposal: proposal({ closedBy: 'oua-bot', closedByBot: true }) })).who).toBe('über das Marktplatz-Konto')
-    })
-
-    it('names who proposed and who accepted a removal, and a removal by hand', () => {
-        const removal = proposal({ kind: 'removal', iid: 9, url: `${WEB}/9`, state: 'merged', proposedBy: 'Ewa', mergedBy: 'daniel', mergedAt: '2026-10-14T12:00:00Z' })
-        expect(endedLine(entry({ ending: 'removed', what: 'removal', proposal: removal, at: removal.mergedAt }))).toMatchObject({
-            what: 'Entfernen',
-            ending: 'Entfernt',
-            when: '14.10.2026',
-            who: 'vorgeschlagen von Ewa, angenommen von daniel',
-            url: `${WEB}/9`,
-        })
-        const byHand = endedLine(entry({ ending: 'removed', what: 'version', byHand: true }))
-        expect(byHand).toMatchObject({ ending: 'Entfernt', when: 'Datum unbekannt', who: 'von Hand bei GitLab', url: `${WEB}/4` })
-        expect(byHand.what).toBeUndefined()
-    })
-
-    it('says that the catalogue team took a version out, with their reason', () => {
-        const line = endedLine(entry({ ending: 'taken-out', what: 'version', version: '1.0.2', reason: 'Doppelt eingetragen' }))
-        expect(line).toMatchObject({ version: '1.0.2', ending: 'Aus dem Katalog genommen', when: 'Datum unbekannt', who: 'Katalog-Team', reason: 'Doppelt eingetragen' })
-        expect(text(render(createElement(EndedRow, { line })))).toContain('Grund: Doppelt eingetragen')
-    })
-
-    it('leaves out whom nobody can tell', () => {
-        expect(endedLine(entry({ proposal: proposal({}) })).who).toBeUndefined()
-        expect(text(render(createElement(EndedRow, { line: endedLine(entry({})) })))).toBe('Bäume Version 1.1.0 Paket · Zurückgezogen Datum unbekannt In GitLab ansehen')
     })
 })

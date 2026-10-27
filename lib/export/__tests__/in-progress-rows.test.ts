@@ -9,7 +9,8 @@ vi.mock('next/link', () => ({
     default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => createElement('a', { href, ...rest }, children),
 }))
 
-import { elsewhereLine, InProgress } from '@/components/export/in-progress'
+import { InProgress } from '@/components/export/in-progress'
+import { elsewhereLine } from '@/components/export/share-tab-states'
 import { ShareTrack } from '@/components/export/share-track'
 import type { ShareDraft } from '@/lib/export/share-drafts'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'

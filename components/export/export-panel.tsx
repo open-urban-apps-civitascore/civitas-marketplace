@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { Eye } from 'lucide-react'
-import { exportAction, inspectExportSource, prepareNewVersion, type ExportActionResult, type ExportIntent, type NewVersionFill } from '@/lib/export-actions'
+import { exportAction, inspectExportSource, type ExportActionResult, type ExportIntent } from '@/lib/export-actions'
+import { FILL_REQUEST_FAILED, requestNewVersionFill } from '@/lib/export/fill-request'
+import type { NewVersionFill } from '@/lib/export/new-version-fill'
 import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { draftStart, draftStartedOn, draftStepAt, draftTime, type ShareDraft } from '@/lib/export/share-drafts'
@@ -13,6 +15,7 @@ import {
     BUSY_BLOCKER,
     busyBeside,
     CHANGE_NOTE_MAX,
+    declineIsNews,
     changeNoteProblem,
     filledNotice,
     followedDecline,
@@ -34,7 +37,7 @@ import { reviewChangeNotice, shareProgress, takenOutNotice } from '@/lib/export/
 import { mergeRequestRef, rememberShareResult, reviewChangeBelow, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { reachableStep, type WizardStep } from '@/lib/export/wizard-address'
-import { useCaseSlugPattern } from '@/lib/catalog/schema'
+import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { MetadataForm } from '@/components/export/metadata-form'
@@ -171,8 +174,7 @@ export function ExportPanel(props: PanelProps) {
     const current: WizardStep = !source ? 1 : opened?.restarting ? 1
         : reachableStep(address.step, { datasetKnown: true, steckbrief: hasDraft || (opened?.reached ?? 1) >= 3 })
     const editing = opened && !opened.offer && opened.id === source?.id && !opened.restarting ? opened : undefined
-    // Asked only once the dataset's content is read, so the content comes first (Next runs server actions one at a
-    // time); not for a continued share, which fills in its own.
+    // Asked only once the dataset's content is read, so the content comes first; not for a continued share, which fills in its own.
     const [contentRead, setContentRead] = useState<string>()
     const continued = opened?.id === source?.id && opened?.draft !== undefined
     const fillWanted = start.fill && forgeReady && !continued && (contentRead === source?.id || current > 1) ? start.fill : undefined
@@ -182,17 +184,16 @@ export function ExportPanel(props: PanelProps) {
     const answered = fillKey ? fills[fillKey] : undefined
     useEffect(() => {
         if (!fillKey || answered || !fillTarget || !fillSlug || !fillVersion) return
-        let cancelled = false
-        prepareNewVersion(fillTarget, fillSlug, fillVersion)
+        // A route, not a server action: it holds up no other action, and a new choice cancels it.
+        const request = new AbortController()
+        requestNewVersionFill({ targetKey: fillTarget, slug: fillSlug, version: fillVersion }, request.signal)
             .then((answer) => {
-                if (!cancelled) setFills((known) => ({ ...known, [fillKey]: answer }))
+                if (!request.signal.aborted) setFills((known) => ({ ...known, [fillKey]: answer }))
             })
             .catch(() => {
-                if (!cancelled) setFills((known) => ({ ...known, [fillKey]: { status: 'error', detail: 'Die Anfrage an den Server ist fehlgeschlagen.' } }))
+                if (!request.signal.aborted) setFills((known) => ({ ...known, [fillKey]: { status: 'error', detail: FILL_REQUEST_FAILED } }))
             })
-        return () => {
-            cancelled = true
-        }
+        return () => request.abort()
     }, [fillKey, answered, fillTarget, fillSlug, fillVersion])
     const fill: FillState | undefined = fillVersion && fillKey ? { from: fillVersion, ...(answered ? { answer: answered } : {}) } : undefined
 
@@ -274,7 +275,7 @@ export function ExportPanel(props: PanelProps) {
             <div className="flex flex-col gap-1">
                 <h2 ref={pickerHeading} tabIndex={-1} className="scroll-mt-20 text-xl font-semibold focus:outline-none">Welchen Datensatz möchtest du teilen?</h2>
                 {/* A link whose dataset is not here: its version waits for the choice. */}
-                {from && !source && <p className="text-sm text-muted-foreground">Wähle den Datensatz, aus dem die neue Version werden soll.</p>}
+                {from && !source && <p className="text-sm text-muted-foreground">Wähle den Datensatz, aus dem die neue Version entstehen soll.</p>}
             </div>
             {props.sourceNotice && <Notice tone="neutral">{props.sourceNotice}</Notice>}
             <div className="flex flex-col gap-2">
@@ -544,9 +545,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             // From here on the merge request (or the repository) holds the content: the draft has done its job.
             const landed = next.status === 'ok' || next.status === 'already-open' || next.status === 'unchanged'
             if (intent === 'bundle' && landed) forgetDraft()
-            // A refusal for a dataset busy meanwhile reads the listing again, so „Auswählen“ greys it out; so does any
-            // answer that tells of a "no", as the next version asks what changed.
-            const saidNo = Boolean(next.bundle?.declined || next.catalog?.state === 'declined' || next.follows)
+            // A refusal for a dataset busy meanwhile reads the listing again, so „Auswählen“ greys it out; so does a "no"
+            // the listing does not know yet.
+            const saidNo = declineIsNews(listing?.rows, next)
             if (((intent === 'bundle' || intent === 'catalog') && (landed || next.busy)) || saidNo) onProposed()
         } catch {
             setResult({ intent, status: 'error', detail: 'Die Anfrage ist fehlgeschlagen. Bitte erneut versuchen.' })
@@ -742,7 +743,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                         <ExternalAnchor href={whatChanged.decline.mrUrl}>Vorschlag ansehen</ExternalAnchor></p>
                     <textarea id="was-geaendert" rows={3} maxLength={CHANGE_NOTE_MAX} required className={inputClass} value={basics.changeNote}
                         aria-describedby="was-geaendert-warum was-geaendert-grund was-geaendert-hinweis" onChange={(event) => editBasics('changeNote', event.target.value)} />
-                    <span id="was-geaendert-hinweis" className="text-xs text-muted-foreground">1 bis {CHANGE_NOTE_MAX} Zeichen. Der Text steht im öffentlichen Vorschlag bei GitLab.</span>
+                    <span id="was-geaendert-hinweis" className="text-xs text-muted-foreground">1 bis {CHANGE_NOTE_MAX} Zeichen. Das Katalog-Team liest den Text im öffentlichen Vorschlag bei GitLab.</span>
                 </section>}
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
@@ -795,6 +796,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     pendingIntent={pending && (pendingIntent === 'bundle' || pendingIntent === 'status' || pendingIntent === 'catalog') ? pendingIntent : undefined}
                     busy={pending}
                     proposeBlocker={previewBlocker ?? setupBlocker ?? (beside.length ? BUSY_BLOCKER : undefined)}
+                    proposeWaits={!previewBlocker && !setupBlocker && beside.length > 0}
                     catalogBlocker={previewBlocker ?? setupBlocker ?? (catalogUrl ? undefined : 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.')}
                     canCheck={forgeReady}
                     bundleMrUrl={known.bundle?.mrUrl}

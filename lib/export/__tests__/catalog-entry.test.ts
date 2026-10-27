@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyCatalogEntry, buildCatalogEntry, indexRowOf, isListed } from '@/lib/export/catalog-entry'
+import { applyCatalogEntry, buildCatalogEntry, indexRowOf, isListed, maintainerOf } from '@/lib/export/catalog-entry'
 
 const SHA = 'b95660bc21b90c67f13bae25ef8452c9a8293227'
 
@@ -88,5 +88,20 @@ describe('indexRowOf', () => {
     it('tells a missing row from an index nobody can read', () => {
         expect(indexRowOf(index([]), ID)).toBeUndefined()
         expect(indexRowOf('not json', ID)).toBeNull()
+    })
+})
+
+describe('maintainerOf', () => {
+    const ID = 'urn:musterstadt:usecase:kiez-baumkataster'
+
+    it('reads whom the index names as the Herausgeber', () => {
+        expect(maintainerOf(index([entry()]), ID)).toBe('Stadt Musterstadt')
+    })
+
+    it('names nobody for a row without one, no row, or an index nobody can read', () => {
+        expect(maintainerOf(index([{ ...entry(), maintainer: '  ' }]), ID)).toBeUndefined()
+        expect(maintainerOf(index([{ id: ID, version: '1.0.0' }]), ID)).toBeUndefined()
+        expect(maintainerOf(index([]), ID)).toBeUndefined()
+        expect(maintainerOf('not json', ID)).toBeUndefined()
     })
 })

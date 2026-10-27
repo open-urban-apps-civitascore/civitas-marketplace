@@ -685,7 +685,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         const { plan, alternative } = await planShareDeletion(WEB, 'baeume', '1.1.0')
         expect(plan).toMatchObject({ kind: 'none', closes: [], mrUrl: `${WEB}/-/merge_requests/12` })
         expect(plan?.reason).toBe(
-            'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !12). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !12). Noch einmal vorschlagen geht von hier nicht - nur das Katalog-Team kann den Vorschlag wieder öffnen.',
         )
         expect(alternative).toBeUndefined()
         const result = await deleteShare(WEB, 'baeume', '1.1.0', plan!.fingerprint)
@@ -710,7 +710,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         const plan = await planOf(world({ removalMrs: [viaAccount], failing: ['/notes'] }))
         expect(plan).toMatchObject({ kind: 'none', mrUrl: `${WEB}/-/merge_requests/12` })
         expect(plan.reason).toBe(
-            'Das Entfernen dieser Version wurde am 22.10. nicht angenommen (Vorschlag !12, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Entfernen dieser Version wurde am 22.10. nicht angenommen (Vorschlag !12, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - nur das Katalog-Team kann den Vorschlag wieder öffnen.',
         )
     })
 

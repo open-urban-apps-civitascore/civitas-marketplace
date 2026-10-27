@@ -241,7 +241,8 @@ const TABLE: [string, { track?: TrackMark[]; status: string; tone?: string; reas
         {
             track: ['done', 'done', 'problem', 'later'],
             status: 'Katalog-Eintrag (3 von 4) - der ganze Eintrag ist aus dem Katalog genommen · weiter geht es erst, wenn das Katalog-Team ihn wieder freigibt',
-            reasons: ['Das Katalog-Team hat Version 1.0.0 aus dem Katalog genommen.'],
+            // The status sentence says what was taken out; the line only which version was in (and why, where the team said).
+            reasons: ['Zuletzt stand Version 1.0.0 im Katalog.'],
             main: 'link:gitlab',
             quiet: ['withdraw'],
         },
@@ -276,7 +277,7 @@ describe('the stage → action table of „In Arbeit“', () => {
         const [gone] = inProgressItems([draft('gone')], DATASETS, [])
         expect(summary(rowView(gone, DATASETS))).toEqual({
             track: undefined,
-            status: 'Der Datensatz „Datensatz gone“ ist auf dieser Instanz nicht mehr da.',
+            status: 'Der Datensatz „Datensatz gone“ ist auf dieser Instanz nicht mehr da · du bist dran: Zwischenstand verwerfen',
             tone: 'neutral',
             main: undefined,
             quiet: ['discard'],
@@ -381,9 +382,11 @@ describe('whose move it is', () => {
         for (const person of ['Ewa', 'Kim', 'Lea']) {
             const tabs = shareTabs(rows, { instance: HERE, person, drafts: 1 })
             const items = inProgressItems([draft('d')], DATASETS, tabs.inProgress)
-            expect(items.filter(isMine).length, person).toBe(tabs.counts.mine)
-            expect(items.filter((item) => whoseMove(item) === 'du bist dran').length, person).toBe(tabs.counts.mine)
-            expect(items.filter((item) => groupOf(item) === 'yours').length, person).toBe(tabs.counts.mine)
+            // The started share, and the rows the tab rules call the person's own.
+            const mine = tabs.inProgress.filter((tabbed) => tabbed.mine).length + 1
+            expect(items.filter(isMine).length, person).toBe(mine)
+            expect(items.filter((item) => whoseMove(item) === 'du bist dran').length, person).toBe(mine)
+            expect(items.filter((item) => groupOf(item) === 'yours').length, person).toBe(mine)
         }
     })
 })
@@ -502,17 +505,19 @@ describe('a "no" in „In Arbeit“ (2026-10-22, 3.3)', () => {
                 proposals: [{ ...turnedDown('removal', 40), ...extra }, merged31],
             })
         const later = NOW + 31 * DAY
-        // Afterwards the sentence alone: the team's words stay in „Beendet“ (3.3, S8 "afterwards").
+        // Afterwards the sentence, with what the row still offers: the team's words stay in „Beendet“ (3.3, S8 "afterwards").
+        // The dataset stays greyed out in „Auswählen“, which sends the person here for the entry or a new version: both stay.
         expect(summary(viewOf(removalNo(), 'Ewa', later))).toEqual({
             track: ['done', 'done', 'later', 'later'],
-            status: 'Paket angenommen, nicht im Katalog - das Entfernen hat das Katalog-Team am 21.10. nicht angenommen',
+            status:
+                'Paket angenommen, nicht im Katalog - das Entfernen hat das Katalog-Team am 21.10. nicht angenommen · den Katalog-Eintrag kannst du weiterhin vorschlagen oder eine neue Version teilen',
             tone: 'plain',
             reasons: undefined,
             main: undefined,
-            quiet: ['propose-entry'],
+            quiet: ['propose-entry', 'new-version'],
         })
         expect(viewOf(removalNo({ closedByBot: true, closedBy: 'walkable.cities.2021' }), 'Ewa', later).status.text).toBe(
-            'Paket angenommen, nicht im Katalog - das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen)',
+            'Paket angenommen, nicht im Katalog - das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen) · den Katalog-Eintrag kannst du weiterhin vorschlagen oder eine neue Version teilen',
         )
         // While it is news, with a reason: reading it is the move.
         expect(viewOf(removalNo({ reason: { kind: 'given', text: 'Wird noch gebraucht.' } })).status.text).toBe(
@@ -522,6 +527,9 @@ describe('a "no" in „In Arbeit“ (2026-10-22, 3.3)', () => {
         const unconfigured = removalNo({}, { state: 'unconfigured' })
         expect(viewOf(unconfigured).quiet.map((action) => action.kind)).toEqual(['new-version'])
         expect(viewOf(unconfigured, 'Ewa', later).quiet.map((action) => action.kind)).toEqual(['new-version'])
+        expect(viewOf(unconfigured, 'Ewa', later).status.text).toBe(
+            'Paket angenommen, nicht im Katalog - das Entfernen hat das Katalog-Team am 21.10. nicht angenommen · eine neue Version kannst du jederzeit teilen',
+        )
     })
 
     it('offers no entry the catalogue team turned down already, when they turned down its removal after it (S5, then S8)', () => {
@@ -541,6 +549,27 @@ describe('a "no" in „In Arbeit“ (2026-10-22, 3.3)', () => {
         const after = shareTabs([both], { instance: HERE, person: 'Ewa', now: NOW + 31 * DAY })
         expect(after.inProgress).toEqual([])
         expect(after.ended.map((entry) => `${entry.what}:${entry.ending}`)).toEqual(['removal:not-accepted', 'catalog:not-accepted'])
+    })
+
+    it('offers no „Zurückziehen“ where the catalogue team turned the removal down already: the server refuses it (R3)', () => {
+        // The removal turned down on 10.10., the entry proposed from that row and turned down on 22.10.: the later "no" is the
+        // entry's, and taking the package out again is still refused.
+        const removalNo = { ...declineOf(40), closedAt: '2026-10-10T10:00:00.000Z' }
+        const entryAfter = row('a', {
+            bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/40`, declined: removalNo } }),
+            catalog: { state: 'declined', mrUrl: `${WEB}/8`, declined: { ...declineOf(8), closedAt: '2026-10-22T10:00:00.000Z' } },
+            proposals: [{ ...turnedDown('catalog', 8), closedAt: '2026-10-22T10:00:00.000Z' }, { ...turnedDown('removal', 40), closedAt: '2026-10-10T10:00:00.000Z' }, merged31],
+        })
+        expect(itemOf(entryAfter)).toMatchObject({ outcome: 'entry-declined' })
+        expect(rowView(itemOf(entryAfter), DATASETS).quiet.map((action) => action.kind)).toEqual([])
+        // Nor beside the whole entry taken out (S9): only the link to GitLab is left.
+        const revoked = row('a', {
+            bundle: onBase({ removal: { state: 'closed', mrUrl: `${WEB}/40`, declined: removalNo } }),
+            catalog: { state: 'withdrawn', takenOut: { version: '0.9.0' } },
+        })
+        expect(itemOf(revoked)).toMatchObject({ outcome: 'entry-revoked' })
+        expect(rowView(itemOf(revoked), DATASETS).quiet).toEqual([])
+        expect(rowView(itemOf(STAGE_ROWS['entry-declined']), DATASETS).quiet.map((action) => action.kind)).toEqual(['withdraw'])
     })
 
     it('notes a change to the accepted version the catalogue team did not take, and leaves the row’s move as it is (S4)', () => {
@@ -584,7 +613,11 @@ describe('a "no" in „In Arbeit“ (2026-10-22, 3.3)', () => {
         ]
         const tabs = shareTabs(rows, { instance: HERE, person: 'Ewa', now: NOW })
         expect(tabs.inProgress.map((tabbed) => tabbed.row.version)).toEqual(['1.1.5'])
-        expect(rowView(inProgressItems([], DATASETS, tabs.inProgress)[0], DATASETS).earlier).toBe('Frühere Versionen: 1.1.3 · 1.1.4 nicht angenommen')
+        // The package of 1.1.4 was accepted: what was not, was its entry - as the option in „Auswählen“ says it.
+        expect(rowView(inProgressItems([], DATASETS, tabs.inProgress)[0], DATASETS).earlier).toBe('Frühere Versionen: 1.1.3 · 1.1.4 Katalog-Eintrag nicht angenommen')
+        const packageNo = versioned('1.1.4', { bundleMr: { url: `${WEB}/33`, state: 'closed' }, proposals: [turnedDown('bundle', 33)] })
+        const either = shareTabs([rows[0], packageNo, rows[2]], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(rowView(inProgressItems([], DATASETS, either.inProgress)[0], DATASETS).earlier).toBe('Frühere Versionen: 1.1.3 · 1.1.4 nicht angenommen')
     })
 
     // S11's own sentence („… - wieder geöffnet, wartet auf das Katalog-Team“) is not told: GitLab names a reopen only in a

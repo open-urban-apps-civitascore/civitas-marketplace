@@ -4,7 +4,7 @@ import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Disclosure } from '@/components/ui/disclosure'
 import { Panel } from '@/components/ui/layout'
 import { InlineNotice } from '@/components/ui/notice'
-import type { Decline } from '@/lib/export/declines'
+import { reasonWords, type Decline } from '@/lib/export/declines'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { declinedStage, removalDeclinedNotice, STAGES, WAITING_FOR_TEAM, type DeclinedStage, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
 
@@ -58,6 +58,7 @@ export function ShareSteps({
     pendingIntent,
     busy,
     proposeBlocker,
+    proposeWaits,
     catalogBlocker,
     canCheck,
     bundleMrUrl,
@@ -78,6 +79,8 @@ export function ShareSteps({
     busy: boolean
     /** Why the package cannot be proposed from here, if it cannot. */
     proposeBlocker?: string
+    /** `proposeBlocker` is another open proposal of the dataset: a fact, so said in neutral. */
+    proposeWaits?: boolean
     /** Why the catalogue step cannot be taken from here, if it cannot. */
     catalogBlocker?: string
     /** GitLab can be asked at all (sharing set up, and the person may). */
@@ -131,11 +134,12 @@ export function ShareSteps({
 
     const link = (stage: Stage, state: StageState) => {
         const url = stage.key === 'propose' || stage.key === 'review' ? bundleMrUrl : catalogMrUrl
-        // Once per merge request: at the stage that waits on it, afterwards at the stage that opened it.
+        // Once per merge request: at the stage that waits on it, afterwards at the stage that opened it - after a "no",
+        // only as „Vorschlag ansehen“ after the team's words.
         const shows =
-            (stage.key === 'propose' && state === 'done' && progress.states.review !== 'waiting') ||
+            (stage.key === 'propose' && state === 'done' && progress.states.review !== 'waiting' && !declinedAt(STAGES[1], progress.states.review)) ||
             (stage.key === 'review' && state === 'waiting') ||
-            (stage.key === 'catalog' && state === 'done' && progress.states.listing !== 'waiting') ||
+            (stage.key === 'catalog' && state === 'done' && progress.states.listing !== 'waiting' && !declinedAt(STAGES[3], progress.states.listing)) ||
             (stage.key === 'listing' && state === 'waiting')
         if (!url || !shows) return undefined
         return <ExternalAnchor href={url} className="text-xs">In GitLab ansehen</ExternalAnchor>
@@ -148,26 +152,23 @@ export function ShareSteps({
         return undefined
     }
 
-    // The team's "no" at a stage they turned down; the proposal's link stays at the stage that opened it.
-    const declinedAt = (stage: Stage, state: StageState): DeclinedStage | undefined => {
+    // The team's "no" at a stage they turned down, with the proposal's address.
+    function declinedAt(stage: Stage, state: StageState): (DeclinedStage & { url: string }) | undefined {
         if (state !== 'declined' || (stage.key !== 'review' && stage.key !== 'listing')) return undefined
         const decline = declines?.[stage.key]
-        return decline ? declinedStage(stage.key, decline, version, suggested) : undefined
+        return decline ? { ...declinedStage(stage.key, decline, version, suggested), url: decline.mrUrl } : undefined
     }
 
     return (
         <Panel title="So geht es weiter">
             {/* Outside the four stages: it undoes them, or would have. Said first, because it decides what the stages below still mean. */}
-            {(progress.removal || removalDeclined) && (
+            {progress.removal ? (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <InlineNotice tone="neutral">
                         {progress.removal === 'pending'
                             ? `Für diese Version ist das Entfernen vorgeschlagen${proposalRef(removalMrUrl)} - jetzt entscheidet das Katalog-Team.`
-                            : progress.removal === 'done'
-                              ? 'Diese Version ist entfernt - das Katalog-Team hat das Entfernen angenommen.'
-                              : removalDeclined && removalDeclinedNotice(removalDeclined)}{' '}
-                        {/* After the team's words, the proposal where the rest of them is, named as in „In Arbeit“. */}
-                        {removalMrUrl && <ExternalAnchor href={removalMrUrl}>{progress.removal ? 'In GitLab ansehen' : 'Vorschlag ansehen'}</ExternalAnchor>}
+                            : 'Diese Version ist entfernt - das Katalog-Team hat das Entfernen angenommen.'}{' '}
+                        {removalMrUrl && <ExternalAnchor href={removalMrUrl}>In GitLab ansehen</ExternalAnchor>}
                     </InlineNotice>
                     {progress.removal === 'pending' && canCheck && (
                         <Button icon={RefreshCw} pending={pendingIntent === 'status'} disabled={busy} onClick={onCheck} className="shrink-0">
@@ -175,6 +176,15 @@ export function ShareSteps({
                         </Button>
                     )}
                 </div>
+            ) : (
+                removalDeclined && (
+                    <div className="flex flex-col gap-1.5">
+                        <InlineNotice tone="neutral">{removalDeclinedNotice(removalDeclined)}</InlineNotice>
+                        <p className="break-words text-sm leading-relaxed text-foreground">
+                            {reasonWords(removalDeclined)} <ExternalAnchor href={removalMrUrl ?? removalDeclined.mrUrl}>Vorschlag ansehen</ExternalAnchor>
+                        </p>
+                    </div>
+                )
             )}
             <ol className="flex flex-col">
                 {STAGES.map((stage) => {
@@ -204,14 +214,18 @@ export function ShareSteps({
                                     <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress, declined)}</p>
                                     {declined && (
                                         <div className="mt-1.5 flex flex-col gap-1.5">
-                                            <p className="break-words text-sm leading-relaxed text-foreground">{declined.reason}</p>
+                                            {/* A reason cut at 300 characters goes on in the proposal. */}
+                                            <p className="break-words text-sm leading-relaxed text-foreground">
+                                                {declined.reason} <ExternalAnchor href={declined.url}>Vorschlag ansehen</ExternalAnchor>
+                                            </p>
                                             <InlineNotice tone="neutral">{declined.next}</InlineNotice>
                                         </div>
                                     )}
                                     {reason && (
                                         <div className="mt-1.5">
-                                            {/* Neutral once nothing is left to do: nobody on this page can change it. */}
-                                            <InlineNotice tone={progress.finished ? 'neutral' : 'warn'}>{reason}</InlineNotice>
+                                            {/* Neutral once nothing is left to do - nobody on this page can change it - and for a proposal open
+                                                elsewhere, which is a fact, not a problem. */}
+                                            <InlineNotice tone={progress.finished || (stage.key === 'propose' && proposeWaits) ? 'neutral' : 'warn'}>{reason}</InlineNotice>
                                         </div>
                                     )}
                                 </div>
@@ -230,16 +244,18 @@ export function ShareSteps({
             <Disclosure summary="Was ist ein Merge Request?">
                 <p className="text-xs leading-relaxed text-muted-foreground">
                     So heißt bei GitLab ein Änderungsvorschlag - hier kurz „Vorschlag“. Das Katalog-Team sieht sich das Paket
-                    dort an und nimmt es an („Merge“) oder nicht - oder fragt im Vorschlag nach. Erst wenn es entschieden hat,
-                    bist du wieder dran.
+                    dort an und nimmt es an („Merge“) oder nicht. Hat es vorher eine Frage, steht sie im Vorschlag bei GitLab -
+                    schau dort nach, wenn es länger dauert.
                 </p>
             </Disclosure>
 
-            {/* Said at the moment someone might leave: the way back has to be known before it is needed. */}
+            {/* Said at the moment someone might leave: the way back has to be known before it is needed.
+                „dort geht es nach der Prüfung weiter“ only while a review is open; otherwise the package
+                waits for the person's own move. */}
             {progress.states.propose === 'done' && !progress.finished && !progress.removal && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                    Du kannst diese Seite jetzt verlassen. Du findest das Paket jederzeit unter „Teilen“ › „In Arbeit“ - dort
-                    geht es nach der Prüfung weiter.
+                    Du kannst diese Seite jetzt verlassen. Du findest das Paket jederzeit unter „Teilen“ › „In Arbeit“
+                    {progress.turn === 'reviewers' ? ' - dort geht es nach der Prüfung weiter.' : '.'}
                 </p>
             )}
         </Panel>

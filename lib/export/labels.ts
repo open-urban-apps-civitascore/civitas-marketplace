@@ -1,4 +1,4 @@
-import type { BundleVerification, CatalogStatus } from '@/lib/export/status'
+import type { BundleVerification } from '@/lib/export/status'
 
 /** How the export pages name the states of a share. Pure, for client components. */
 
@@ -13,22 +13,4 @@ export function verificationLabel(verification: BundleVerification): string {
         default:
             return 'nicht prüfbar'
     }
-}
-
-export function mergeRequestStateLabel(state: string): string {
-    return state === 'opened' ? 'in Prüfung' : state === 'merged' ? 'angenommen' : state === 'closed' ? 'nicht angenommen' : state
-}
-
-export function catalogStateLabel(state: CatalogStatus['state']): string {
-    return state === 'listed'
-        ? 'im Katalog'
-        : state === 'mr-open'
-          ? 'Eintrag in Prüfung'
-          : state === 'unconfigured'
-            ? 'Katalog nicht eingerichtet'
-            : state === 'withdrawn'
-              ? 'aus dem Katalog genommen'
-              : state === 'declined'
-                ? 'Eintrag nicht angenommen'
-                : 'noch nicht im Katalog'
 }

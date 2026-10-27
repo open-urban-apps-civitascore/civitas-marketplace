@@ -7,7 +7,7 @@ import type { MergeRequestNote } from '@/lib/export/gitlab'
 import { inProgressItems, rowProgress } from '@/lib/export/in-progress-items'
 import { shareSourceLine, withdrawalMark } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
-import { readShareListing, servesSameIndex } from '@/lib/export/share-listing'
+import { olderProposalsUrl, readShareListing, servesSameIndex } from '@/lib/export/share-listing'
 import { shareTabs } from '@/lib/export/share-tabs'
 
 const HEAD = 'f'.repeat(40)
@@ -217,6 +217,23 @@ describe('readShareListing', () => {
         // The bot's requests on the catalogue are the ones the target already read: same project, same visit.
         expect(count(gitlab.calls, 'author_id=42')).toBe(1)
         expect(count(gitlab.calls, '/user')).toBe(1)
+    })
+
+    it('reads a listed version’s Herausgeber from the index, and keeps the package’s id for „Im Katalog ansehen“, without asking GitLab more', async () => {
+        const index = JSON.stringify({ version: '1.0.0', useCases: [{ id: 'urn:stadt:usecase:baeume', version: '1.1.0', maintainer: 'Stadt Musterstadt' }] })
+        const entry = { ...listedOnce(5, '1.1.0'), merged_at: '2026-10-14T10:00:00Z' }
+        const gitlab = fakeGitLab([], { botMrs: [BOT_MRS[1], entry, BOT_MRS[2], BOT_MRS[3]], openMrs: [], files: { ...FILES, 'main|index.json': index } })
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { rows } = await readShareListing()
+        const current = rows.find((row) => row.version === '1.1.0')
+        const older = rows.find((row) => row.version === '1.0.0')
+        expect(current?.catalog).toEqual({ state: 'listed', maintainer: 'Stadt Musterstadt' })
+        expect(current?.packageId).toBe('urn:stadt:usecase:baeume')
+        // 1.1.0 took its place in the repository, and is the same package: the same id.
+        expect(older?.packageId).toBe('urn:stadt:usecase:baeume')
+        // 1.0.0 was in the catalogue through its own entry proposal before 1.1.0 took its place there.
+        expect(shareTabs(rows).published.map((tabbed) => [tabbed.row.version, tabbed.listedEarlier])).toEqual([['1.1.0', ['1.0.0']]])
+        expect(count(gitlab.calls, 'files/index.json')).toBe(1)
     })
 
     it('keeps an open proposal that would bring a taken-out version back in "In Arbeit", as the person’s move', async () => {
@@ -627,11 +644,30 @@ describe('how much is listed', () => {
         expect(rows[0].slug).toBe('paket0x0')
     })
 
-    it('stops at the first page that is not full', async () => {
+    it('says where GitLab keeps the account’s older proposals once it stopped at three full pages, by the account’s name', async () => {
+        const page = (n: number) =>
+            Array.from({ length: 100 }, (_, i) => ({ iid: n * 100 + i + 1, state: 'closed', source_branch: `export/paket${n}x${i}-1.0.0`, web_url: `${WEB}/-/merge_requests/${n * 100 + i + 1}` }))
+        const gitlab = fakeGitLab([], { pages: [page(0), page(1), page(2), page(3)], openMrs: [] })
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const { older } = await readShareListing()
+        expect(older).toBe(`${WEB}/-/merge_requests?scope=all&state=all&author_username=bot`)
+        // Nothing more asked for it: the project and the account are read anyway.
+        expect(count(gitlab.calls, '/user')).toBe(1)
+    })
+
+    it('stops at the first page that is not full, and then knows of nothing older', async () => {
         const gitlab = fakeGitLab([], { pages: [BOT_MRS] })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
-        await readShareListing()
+        const { older } = await readShareListing()
         expect(count(gitlab.calls, 'author_id=42')).toBe(1)
+        expect(older).toBeUndefined()
+    })
+
+    it('builds the address of the older proposals from the project and the account', () => {
+        expect(olderProposalsUrl('https://gitlab.example/group/sub/project/', 'walkable.cities.2021')).toBe(
+            'https://gitlab.example/group/sub/project/-/merge_requests?scope=all&state=all&author_username=walkable.cities.2021',
+        )
+        expect(olderProposalsUrl('https://gitlab.example/g/p', 'a b')).toBe('https://gitlab.example/g/p/-/merge_requests?scope=all&state=all&author_username=a%20b')
     })
 
     it('keeps what 300 accepted packages need, so the next visit asks only what can have changed', async () => {
@@ -756,6 +792,6 @@ describe('the tabs, fed from the listing', () => {
         // Bäume 1.1.0 waits for its entry, but came from dev; 1.0.0 was replaced by it.
         expect(tabs.elsewhere).toEqual({ 'in-progress': 1, published: 0, ended: 0 })
         expect([...tabs.busy.keys()]).toEqual(['ds-pegel'])
-        expect(tabs.counts).toEqual({ inProgress: 1, mine: 0, published: 0 })
+        expect(tabs.counts).toEqual({ inProgress: 1, published: 0 })
     })
 })

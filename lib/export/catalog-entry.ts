@@ -235,6 +235,18 @@ export function isListed(indexJson: string, id: string, version: string): boolea
     }
 }
 
+/** The Herausgeber the index names for a use case (its row's `maintainer`), for „Veröffentlicht“; undefined where none. */
+export function maintainerOf(indexJson: string, id: string): string | undefined {
+    try {
+        const index = JSON.parse(indexJson) as { useCases?: unknown }
+        const rows = Array.isArray(index.useCases) ? (index.useCases as Record<string, unknown>[]) : []
+        const maintainer = rows.find((candidate) => candidate?.id === id)?.maintainer
+        return typeof maintainer === 'string' && maintainer.trim() ? maintainer.trim() : undefined
+    } catch {
+        return undefined
+    }
+}
+
 /** One use case's row in the index, as far as the share pages care: the version, and whether the catalogue team withdrew it. */
 export interface IndexRow {
     version?: string

@@ -13,6 +13,7 @@
  * proposed (`withdrawMergeRequest`). No code path merges.
  */
 
+import { sinceStart, startedOver } from '@/lib/export/declines'
 import { declineReasonOf, withdrawalMarkIn, withdrawalNoteIn, type DeclineReason } from '@/lib/export/merge-request-text'
 
 export class GitLabError extends Error {
@@ -29,7 +30,7 @@ export class GitLabError extends Error {
 export class HeldBranchError extends GitLabError {
     constructor(readonly held: MergeRequestRef) {
         super(
-            `Vorschlag !${held.iid} wurde geschlossen, ohne angenommen zu werden. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.`,
+            `Vorschlag !${held.iid} wurde nicht angenommen. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.`,
             0,
         )
         this.name = 'HeldBranchError'
@@ -59,8 +60,9 @@ export interface GitLabClient {
     /** Injected for tests; defaults to the global fetch. */
     fetchImpl?: typeof fetch
     /**
-     * Keeps the answers that cannot change (see {@link GitLabReadCache}). Opt-in:
-     * the list of shared packages sets one, single reads go without.
+     * Keeps the answers that cannot change (see {@link GitLabReadCache}), and
+     * the project and the account, which do not for the server's life. Opt-in:
+     * the share pages and their actions set one.
      */
     cache?: GitLabReadCache
     /** How long a read may take; {@link READ_TIMEOUT_MS} unless a test shortens it. */
@@ -259,8 +261,9 @@ async function gl<T>(
 
 const encode = (value: string) => encodeURIComponent(value)
 
+/** A project by its path, kept for the server's life: its id and place do not change. Its permissions may; a new process reads them again. */
 export async function getProject(client: GitLabClient, projectPath: string): Promise<GitLabProject> {
-    return gl<GitLabProject>(client, `/projects/${encode(projectPath)}`)
+    return readOnce(client, `project|${projectPath}`, true, () => gl<GitLabProject>(client, `/projects/${encode(projectPath)}`))
 }
 
 /** Developer (30) or above may push branches; anything below goes through a fork. */
@@ -449,9 +452,9 @@ export async function listOpenMergeRequests(client: GitLabClient, projectId: num
     }
 }
 
-/** The account the token belongs to: the bot every export is proposed by. */
+/** The account the token belongs to: the bot every export is proposed by. Kept with the client's cache: one deployment has one token. */
 export async function currentUser(client: GitLabClient): Promise<{ id: number; username: string }> {
-    return gl<{ id: number; username: string }>(client, '/user')
+    return readOnce(client, 'bot', true, () => gl<{ id: number; username: string }>(client, '/user'))
 }
 
 /**
@@ -620,11 +623,16 @@ export async function withdrawMergeRequest(
  * The request whose branch must stay: the newest of the account's own requests
  * from it (of any package), when it was closed without being withdrawn - even
  * after an earlier merge, as the team reopening a later "no" needs its branch.
+ * Counted only since the version last started over (`restartedBy`), as the
+ * callers' refusals count it: else a version shared again after „Entfernt“
+ * would be offered „Erneut einreichen“ that fails each time.
  */
-async function heldBy(client: GitLabClient, projectId: number, requests: MergeRequestRef[]): Promise<MergeRequestRef | undefined> {
+async function heldBy(client: GitLabClient, projectId: number, requests: MergeRequestRef[], restartedBy?: string): Promise<MergeRequestRef | undefined> {
     if (!requests.some((mr) => mr.state === 'closed')) return undefined
     const account = await currentUser(client)
-    const newest = requests.find((mr) => mr.author?.id === account.id)
+    const restarts = restartedBy ? await findMergeRequests(client, projectId, restartedBy) : []
+    const since = startedOver(restarts.filter((mr) => mr.state === 'merged').map((mr) => mr.merged_at ?? mr.created_at))
+    const newest = requests.find((mr) => mr.author?.id === account.id && sinceStart(mr.created_at, since))
     if (newest?.state !== 'closed') return undefined
     return (await readClosing(client, projectId, newest)).withdrawnBy ? undefined : newest
 }
@@ -656,6 +664,8 @@ export async function openMergeRequest(
         existingPaths: Set<string>
         /** Paths on the base branch the merge request removes. */
         deletedPaths?: string[]
+        /** The branch whose merge starts this one's requests over (a version's removal); see `heldBy`. */
+        restartedBy?: string
     },
 ): Promise<MergeRequestOutcome> {
     const requests = await findMergeRequests(client, input.upstream.id, input.branch)
@@ -670,7 +680,7 @@ export async function openMergeRequest(
     if (await branchHead(client, source.id, input.branch)) {
         // Never the branch of a turned-down proposal: the catalogue team takes their "no" back by reopening it,
         // which needs the branch. The callers refuse such a version first.
-        const held = await heldBy(client, input.upstream.id, requests)
+        const held = await heldBy(client, input.upstream.id, requests, input.restartedBy)
         if (held) throw new HeldBranchError(held)
         await gl(client, `/projects/${source.id}/repository/branches/${encode(input.branch)}`, {
             method: 'DELETE',

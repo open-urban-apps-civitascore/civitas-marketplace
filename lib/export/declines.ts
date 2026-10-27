@@ -184,5 +184,5 @@ export function removalRefusal(decline: Decline): string {
     const said = decline.viaMarketplace
         ? `Das Entfernen dieser Version wurde${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid}, über das Marktplatz-Konto geschlossen)`
         : `Das Katalog-Team hat das Entfernen dieser Version${declinedOn(decline)} nicht angenommen (Vorschlag !${decline.iid})`
-    return `${said}. Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.`
+    return `${said}. Noch einmal vorschlagen geht von hier nicht - nur das Katalog-Team kann den Vorschlag wieder öffnen.`
 }

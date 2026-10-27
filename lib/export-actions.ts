@@ -1,6 +1,6 @@
 'use server'
 
-import { useCaseSlugPattern } from '@/lib/catalog/schema'
+import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 import { applyCatalogEntry, buildCatalogEntry, catalogInputFromManifest } from '@/lib/export/catalog-entry'
 import {
     bundleBranch,
@@ -9,6 +9,7 @@ import {
     exportReadiness,
     packageDir,
     removalBranch,
+    SHARING_NOT_SET_UP,
     thisInstance,
     type ExportConfig,
     type ExportTarget,
@@ -16,7 +17,6 @@ import {
 import {
     clientFor,
     currentUser,
-    findMergeRequests,
     getProject,
     GitLabError,
     gitlabMessage,
@@ -26,13 +26,13 @@ import {
     listTree,
     openMergeRequest,
     parseProjectUrl,
-    readFile,
     type GitLabClient,
     type GitLabProject,
 } from '@/lib/export/gitlab'
 import { entryRefusal, packageRefusal, removalDeclineShown } from '@/lib/export/declines'
+import { SHARE_READS } from '@/lib/export/share-cache'
 import { DELETION_SCOPES, readDeletion, runDeletion, type DeletionPlan, type DeletionResult, type DeletionScope } from '@/lib/export/share-deletion'
-import { domainOf, readmeSourceOf, shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
+import { shareSourceLine, shareSourceOf } from '@/lib/export/merge-request-text'
 import {
     busyRefusal,
     changeNoteProblem,
@@ -42,17 +42,15 @@ import {
     followsRefOf,
     openSharesOf,
     parseFollows,
+    proposedHere,
     proposedVersionsIn,
-    steckbriefFromManifest,
     versionBelow,
     whatChangedRefusal,
-    type FilledSteckbrief,
     type FollowedDecline,
     type FollowsRef,
     type OpenShare,
 } from '@/lib/export/new-version'
 import { aboveAll, isNewerVersion, nextPatch, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
-import { instanceMatch } from '@/lib/export/share-tabs'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -125,6 +123,15 @@ interface ExportForm {
     options: Omit<ExportOptions, 'provenance' | 'simulations'>
     /** The "no" a new version follows, with what the person changed since, in their words. */
     follows?: FollowsRef & { note: string }
+}
+
+/**
+ * A GitLab client with the share pages' memory (`SHARE_READS`), as a submit
+ * checks many rules that each ask for the same project, account and commits.
+ * Lists of proposals and anything read at a branch stay fresh.
+ */
+function shareClient(url: string, token: string): GitLabClient {
+    return { ...clientFor(url, token), cache: SHARE_READS }
 }
 
 const SLUG = useCaseSlugPattern
@@ -408,12 +415,12 @@ export async function exportAction(
             }
         }
         const token = config.token as string
-        const client = clientFor(target.url, token)
+        const client = shareClient(target.url, token)
 
         if (form.intent === 'status') {
             const bundle = await readBundleStatus(client, target, form.options.slug, form.options.version, id)
             const catalog = await readCatalogStatus(
-                config.catalog ? clientFor(config.catalog.url, token) : client,
+                config.catalog ? shareClient(config.catalog.url, token) : client,
                 config.catalog,
                 form.options.slug,
                 form.options.version,
@@ -449,7 +456,7 @@ export async function exportAction(
             if (folderRefusal) return { intent: 'bundle', status: 'invalid', detail: folderRefusal, bundle: current }
             // What reached the catalogue is used up as well, also after it was taken out again.
             const catalogue = config.catalog
-                ? await inspectCatalog(clientFor(config.catalog.url, token), config.catalog, form.options.slug, form.options.version, id)
+                ? await inspectCatalog(shareClient(config.catalog.url, token), config.catalog, form.options.slug, form.options.version, id)
                 : undefined
             const usedUp = catalogue && catalogRefusalOf(form.options.version, catalogue)
             if (usedUp) return { intent: 'bundle', status: 'invalid', detail: usedUp, bundle: current, catalog: catalogue.status }
@@ -480,7 +487,7 @@ export async function exportAction(
             if (open) return { intent: 'bundle', status: 'invalid', detail: busyRefusal(open), mrUrl: open.url, busy: true, bundle: current }
             // A new version after a "no" says what changed. Where the page's listing did not know the "no", the refusal
             // carries it, so the Steckbrief asks.
-            const followed = await followedOnServer(client, project, config, token, form.options.slug, form.options.version, id)
+            const followed = await followedOnServer(client, project, config, token, form.options.slug, form.options.version, id, catalogue)
             if (followed && !form.follows) return { intent: 'bundle', status: 'invalid', detail: whatChangedRefusal(followed), follows: followed, bundle: current }
             // The line names the "no" as GitLab tells it, where found here; else the page's, checked above.
             const proposing: ExportForm = followed && form.follows ? { ...form, follows: { ...followsRefOf(followed), note: form.follows.note } } : form
@@ -513,6 +520,8 @@ export async function exportAction(
                 files,
                 existingPaths: existing,
                 ...(stale.length ? { deletedPaths: stale } : {}),
+                // „Erneut einreichen“ after „Entfernt“: a "no" from before the removal holds no branch.
+                restartedBy: removalBranch(form.options.slug, form.options.version),
             })
             if (outcome.status === 'already-open') {
                 return {
@@ -574,7 +583,7 @@ async function openShareOf(config: ExportConfig, token: string, datasetId: strin
     const projects = new Map([...config.targets.map((target) => target.url), ...(config.catalog ? [config.catalog.url] : [])].map((url) => [withoutSlash(url), url]))
     const found = await Promise.all(
         [...projects.values()].map(async (url) => {
-            const where = clientFor(url, token)
+            const where = shareClient(url, token)
             const project = await getProject(where, parseProjectUrl(url).projectPath)
             const [requests, bot] = await Promise.all([listOpenMergeRequests(where, project.id), currentUser(where)])
             return openSharesOf(requests, datasetId, bot.id, instance)
@@ -585,8 +594,9 @@ async function openShareOf(config: ExportConfig, token: string, datasetId: strin
 
 /**
  * The "no" a new version follows, as `followedDecline` reads it on the page: to
- * the highest version below it the account proposed, as a package or an entry,
- * from this instance or one that names none (`followedHere`).
+ * the highest version below it proposed from this instance (`proposedHere`), as
+ * a package or an entry. `inspected` is the catalogue the submit just read, so
+ * its index is not read twice.
  */
 async function followedOnServer(
     client: GitLabClient,
@@ -596,21 +606,22 @@ async function followedOnServer(
     slug: string,
     version: string,
     id: string,
+    inspected?: CatalogInspection,
 ): Promise<FollowedDecline | undefined> {
     const bot = await currentUser(client)
     const requests = await listMergeRequestsBy(client, project.id, bot.id)
-    const before = versionBelow(proposedVersionsIn(requests, slug, bot.id), version)
-    if (!before) return undefined
     const instance = thisInstance()
+    const before = versionBelow(proposedHere(requests, slug, bot.id, instance), version)
+    if (!before) return undefined
     // Read as `inspectBundle` reads it (since the version last started over), from the listing at hand.
     const branch = (name: string) => requests.filter((mr) => mr.source_branch === name)
     const removals = branch(removalBranch(slug, before))
     const packageNo = await readDecline(client, project.id, presentRequests(branch(bundleBranch(slug, before)), removals), async () => bot)
     if (packageNo) return followedHere(before, 'package', packageNo, requests.find((mr) => mr.iid === packageNo.iid)?.description, instance)
     if (!config.catalog) return undefined
-    const catalogClient = clientFor(config.catalog.url, token)
+    const catalogClient = shareClient(config.catalog.url, token)
     const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
-    const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, before, false)
+    const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, before, false, lazyAccount(catalogClient), inspected?.read)
     const declined = await readCatalogDecline(catalogClient, catalogProject.id, catalogue, id, lazyAccount(catalogClient))
     // Listed or taken out since, it is no "no" any more.
     const status = catalogStatusIn(catalogue, slug, before, id, declined)
@@ -683,7 +694,7 @@ async function proposeCatalog(
         return { intent: 'catalog', status: 'unconfigured', detail: CATALOG_NOT_SET_UP }
     }
     const { status: bundle, manifestRaw, merged } = await inspectBundle(
-        clientFor(target.url, token),
+        shareClient(target.url, token),
         target,
         slug,
         version,
@@ -720,7 +731,7 @@ async function proposeCatalog(
         }
     }
 
-    const catalogClient = clientFor(config.catalog.url, token)
+    const catalogClient = shareClient(config.catalog.url, token)
     const catalogProject = await getProject(catalogClient, parseProjectUrl(config.catalog.url).projectPath)
     const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, version, false)
     const packageId = bundle.packageId ?? expectedId ?? ''
@@ -730,7 +741,7 @@ async function proposeCatalog(
     // An entry turned down is not proposed again for this version. The reading goes along, so the page drops its
     // button at once.
     if (catalog.state === 'declined' && catalog.declined) {
-        const used = await proposedVersionsOf(clientFor(target.url, token), target, slug)
+        const used = await proposedVersionsOf(shareClient(target.url, token), target, slug)
         const floor = catalogFloor(catalogue, packageId)
         return {
             intent: 'catalog',
@@ -878,69 +889,6 @@ export async function proposeSharedCatalogEntry(
     }
 }
 
-/** What `prepareNewVersion` answers: the Steckbrief of a shared version, or why there is none. */
-export interface NewVersionFill {
-    /**
-     * - `ok`: `steckbrief` holds it
-     * - `missing`: this marketplace did not share that version, or its package cannot be found at its last commit
-     * - `invalid`: the address names no version, or its package's Steckbrief is broken
-     * - `forbidden`, `unconfigured`, `error`: as for the other actions
-     */
-    status: 'ok' | 'missing' | 'invalid' | 'forbidden' | 'unconfigured' | 'error'
-    detail?: string
-    steckbrief?: FilledSteckbrief
-}
-
-/**
- * The Steckbrief of a new version, from one shared before: for „Neue Version
- * teilen“, an update of a catalogue entry, and the way on after a "no".
- *
- * Checked again here, as a server action answers any caller. Read at the
- * proposal's last commit, which GitLab keeps after its branch is gone, so a
- * withdrawn or turned-down version fills too. Every field is copied only where
- * the share came from this instance, else only the package's own
- * (`steckbriefFromManifest`).
- */
-export async function prepareNewVersion(targetKey: string, slug: string, version: string): Promise<NewVersionFill> {
-    await requireSession()
-    const refusal = shareRefusal(await fetchShareRight())
-    if (refusal) return { status: 'forbidden', detail: refusal }
-    const config = exportConfig()
-    // Exactly as named, no fallback to the only target: the listing names every package's.
-    const target = config.targets.find((candidate) => candidate.key === targetKey)
-    if (exportReadiness(config) !== 'ready' || !target) return { status: 'unconfigured', detail: SHARING_NOT_SET_UP }
-    if (!SLUG.test(slug) || !VERSION.test(version)) return { status: 'invalid', detail: 'Ungültiger Kurzname oder ungültige Version.' }
-    const notShared = `Version ${version} von „${slug}“ ist nicht über diesen Marktplatz geteilt.`
-    try {
-        const client = clientFor(target.url, config.token as string)
-        const [project, bot] = await Promise.all([getProject(client, parseProjectUrl(target.url).projectPath), currentUser(client)])
-        const [requests, removals] = await Promise.all([
-            findMergeRequests(client, project.id, bundleBranch(slug, version)),
-            findMergeRequests(client, project.id, removalBranch(slug, version)),
-        ])
-        const own = requests.filter((mr) => mr.author?.id === bot.id)
-        // The accepted one, unless a removal undid it: then the newest, even a withdrawn one, holds the newer text.
-        const present = presentRequests(own, removals)
-        const shared = present.find((mr) => mr.state === 'merged') ?? present[0] ?? own[0]
-        if (!shared?.sha) return { status: 'missing', detail: notShared }
-        const dir = packageDir(target, slug)
-        const line = shareSourceOf(shared.description)
-        const [manifest, readme] = await Promise.all([
-            readFile(client, project.id, `${dir}/core-ir/manifest.json`, shared.sha),
-            line ? Promise.resolve(undefined) : readFile(client, project.id, `${dir}/README.md`, shared.sha),
-        ])
-        if (!manifest) return { status: 'missing', detail: notShared }
-        const origin = instanceMatch(line ?? readmeSourceOf(readme), thisInstance())
-        const domain = domainOf(shared.description)
-        const steckbrief = steckbriefFromManifest(manifest, { full: origin === 'this', ...(origin === 'other' ? { elsewhere: true } : {}), ...(domain ? { domain } : {}) })
-        if (typeof steckbrief === 'string') return { status: 'invalid', detail: steckbrief }
-        return { status: 'ok', steckbrief: { ...steckbrief, from: version, targetKey: target.key } }
-    } catch (error) {
-        if (error instanceof GitLabError) return { status: 'error', detail: gitlabMessage(error) }
-        throw error
-    }
-}
-
 /** The target a withdrawal acts in, or why there is none. Arguments are checked again: a server action answers any caller. */
 function deletionTarget(targetKey: string, slug: string, version: string): { config: ExportConfig; target: ExportTarget; token: string } | DeletionResult {
     const config = exportConfig()
@@ -1015,9 +963,6 @@ export async function deleteShare(
 
 /** Said where a catalogue step is asked for and the instance has no catalogue: one wording for every place. */
 const CATALOG_NOT_SET_UP = 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.'
-
-/** The same for sharing as a whole: no place to store packages, or no access to GitLab. */
-const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
 
 /** Whether „Stand prüfen“ found a "no" to the package, its entry or its removal, told in the neutral tone. */
 function hasDecline(bundle: BundleStatus, catalog: CatalogStatus): boolean {

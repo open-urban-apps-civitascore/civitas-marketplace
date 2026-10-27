@@ -37,11 +37,13 @@ async function fetchListing(signal: AbortSignal): Promise<ShareListing> {
  * readings that came back, answer or failure, so a caller can tell "read
  * since" from "same as before"; `pending` is true while one is under way;
  * `readAt` is when the last one came back without an error. `instance` is
- * this instance as the listing names it, for the tab rules (`share-tabs.ts`).
+ * this instance as the listing names it, for the tab rules (`share-tabs.ts`);
+ * `older` where GitLab keeps more of the account's proposals than were read.
  */
 export function useSharedListing(enabled: boolean) {
     const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
     const [instance, setInstance] = useState<string>()
+    const [older, setOlder] = useState<string>()
     const [error, setError] = useState<string>()
     const [readAt, setReadAt] = useState<string>()
     const [attempt, setAttempt] = useState(0)
@@ -58,6 +60,7 @@ export function useSharedListing(enabled: boolean) {
                 if (controller.signal.aborted) return
                 setRows(listing.rows)
                 setInstance(listing.instance)
+                setOlder(listing.older)
                 setError(listing.error)
                 if (!listing.error) setReadAt(new Date().toISOString())
             })
@@ -75,5 +78,5 @@ export function useSharedListing(enabled: boolean) {
     }, [enabled, attempt])
 
     const reload = useCallback(() => setAttempt((n) => n + 1), [])
-    return { rows, instance, error, readAt, loaded, pending: enabled && answered !== attempt, reload }
+    return { rows, instance, older, error, readAt, loaded, pending: enabled && answered !== attempt, reload }
 }

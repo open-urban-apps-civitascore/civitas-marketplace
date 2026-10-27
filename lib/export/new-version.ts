@@ -1,15 +1,16 @@
 import { catalogInputFromManifest } from '@/lib/export/catalog-entry'
 import { parseBundleBranch, parseCatalogBranch, parseRemovalBranch } from '@/lib/export/config'
-import { declinedBy, declinedProposal, declineOf, mayBeWithdrawn, type Decline } from '@/lib/export/declines'
+import { declinedBy, declinedProposal, declineOf, mayBeWithdrawn, sinceStart, startedOver, type Decline } from '@/lib/export/declines'
 import type { MergeRequestRef } from '@/lib/export/gitlab'
-import { inProgressHref } from '@/lib/export/in-progress-items'
+import { inProgressHref, mayProposeEntry } from '@/lib/export/in-progress-items'
 import type { ExportMetadata } from '@/lib/export/metadata'
 import { shareSourceOf, withdrawalMarkIn } from '@/lib/export/merge-request-text'
+import { slugify } from '@/lib/export/names'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
+import { higherFirst, lastDecided, sameVersionAgain, sharedPackageOf, usedVersions, type SharedPackage } from '@/lib/export/shared-package'
 import { aboveAll, isNewerVersion, nextPatch, STAGES, takenOutNotice } from '@/lib/export/share-stages'
-import { instanceMatch, OPEN_OUTCOMES, rowOutcome, type ShareOutcome, type TabRow } from '@/lib/export/share-tabs'
+import { instanceMatch, OPEN_OUTCOMES, type ShareOutcome, type TabRow } from '@/lib/export/share-tabs'
 import type { ExportSource } from '@/lib/export/sources'
-import { slugify } from '@/lib/export/urn'
 import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 
 /**
@@ -21,90 +22,8 @@ import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 
 // ── One package, as the listing knows it ────────────────────────────────────
 
-/** One version of a package, with what became of it (`rowOutcome`). */
-export interface VersionFact {
-    version: string
-    row: SharedPackageRow
-    outcome: ShareOutcome
-}
-
-/** Every version proposed into a package's folder, highest first, from any instance: a number counts wherever it was shared from. */
-export interface SharedPackage {
-    targetKey: string
-    slug: string
-    versions: VersionFact[]
-}
-
-/**
- * What a package is found by: its dataset, else its short name. By name only
- * among this instance's shares unless `anyInstance` (the name is the package's
- * own): matching names alone never make another instance's package this one's.
- */
-export interface PackageMatch {
-    datasetId?: string
-    slug?: string
-    targetKey?: string
-    anyInstance?: boolean
-}
-
-const higherFirst = (a: { version: string }, b: { version: string }) => (isNewerVersion(a.version, b.version) ? -1 : isNewerVersion(b.version, a.version) ? 1 : 0)
-
-/** When anything about a row was last proposed: of two packages a dataset was shared as, the newer one counts. */
-const lastProposed = (row: SharedPackageRow) => Math.max(0, ...(row.proposals ?? []).map((proposal) => Date.parse(proposal.createdAt ?? '') || 0))
-
-/**
- * The package a dataset was shared as: by its id in this instance's source
- * lines, else by short name ({@link PackageMatch}). Of two, the one proposed last.
- */
-export function sharedPackageOf(rows: readonly SharedPackageRow[], match: PackageMatch, instance?: string): SharedPackage | undefined {
-    const slug = match.slug?.trim().toLowerCase()
-    const notElsewhere = (row: SharedPackageRow) => instanceMatch(row.source, instance) !== 'other'
-    const byDataset = match.datasetId ? rows.filter((row) => row.source?.id === match.datasetId && notElsewhere(row)) : []
-    const bySlug = slug
-        ? rows.filter((row) => row.slug === slug && (!match.targetKey || row.targetKey === match.targetKey) && (match.anyInstance || notElsewhere(row)))
-        : []
-    const found = byDataset.length ? byDataset : bySlug
-    if (!found.length) return undefined
-    const newest = found.reduce((best, row) => (lastProposed(row) > lastProposed(best) ? row : best))
-    const versions = rows
-        .filter((row) => row.targetKey === newest.targetKey && row.slug === newest.slug)
-        .map((row) => ({ version: row.version, row, outcome: rowOutcome(row) }))
-        .sort(higherFirst)
-    return { targetKey: newest.targetKey, slug: newest.slug, versions }
-}
-
-/** Outcomes whose number may be proposed again: nothing about it was decided, or it left the repository before the catalogue. */
-const NOT_USED_UP: ReadonlySet<ShareOutcome> = new Set(['withdrawn', 'removed', 'gone'])
-
-/** Outcomes that decided nothing about what the package holds: the last decision about it is further down. */
-const UNDECIDED: ReadonlySet<ShareOutcome> = new Set(['withdrawn', 'removed', 'gone', 'unreadable'])
-
-/** The "no" to a version's entry, from its proposals - also after the version left the repository; never an unread withdrawal. */
-function entryNoOf(row: SharedPackageRow): ShareProposal | undefined {
-    const turnedDown = declinedProposal(row.proposals ?? [], 'catalog')
-    return turnedDown && !mayBeWithdrawn(turnedDown) ? turnedDown : undefined
-}
-
-/**
- * Whether the catalogue decided about a version's entry (it got in once, or was
- * turned down). Either way the version is used up, even after it left the
- * repository: a removal starts its package over, not its entry.
- */
-function entryDecided(row: SharedPackageRow): boolean {
-    const listedOnce = (row.proposals ?? []).some((proposal) => proposal.kind === 'catalog' && proposal.state === 'merged')
-    return listedOnce || row.catalog?.state === 'declined' || entryNoOf(row) !== undefined
-}
-
-/**
- * The versions a new one must not reuse: every one proposed, except those
- * withdrawn or removed before their entry was decided, plus what the catalogue
- * took out. An unreadable one counts too: a suggestion above it is free either way.
- */
-export function usedVersions(pkg: SharedPackage): string[] {
-    const proposed = pkg.versions.filter((fact) => !NOT_USED_UP.has(fact.outcome) || entryDecided(fact.row)).map((fact) => fact.version)
-    const takenOut = pkg.versions.flatMap((fact) => (fact.row.catalog?.takenOut ? [fact.row.catalog.takenOut.version] : []))
-    return [...new Set([...proposed, ...takenOut])]
-}
+// Kept in `shared-package.ts`, so „Beendet“ loads them without this module's catalogue and form code.
+export { sameVersionAgain, sharedPackageOf, usedVersions, type PackageMatch, type SharedPackage, type VersionFact } from '@/lib/export/shared-package'
 
 /** The version a new one is suggested at: above every used-up one of the package and above `also` (an installed dataset's catalogue version). */
 export function suggestedVersion(pkg: SharedPackage | undefined, also: readonly string[] = []): string {
@@ -114,17 +33,6 @@ export function suggestedVersion(pkg: SharedPackage | undefined, also: readonly 
 /** The version a new Steckbrief is filled from: the highest proposed, whatever became of it (its text is the newest), unless unreadable. */
 export function fillVersionOf(pkg: SharedPackage | undefined): string | undefined {
     return pkg?.versions.find((fact) => fact.outcome !== 'unreadable')?.version
-}
-
-/** Whether `version` may be submitted again with the same number („Erneut einreichen“): withdrawn, or removed before its entry was decided. */
-export function sameVersionAgain(pkg: SharedPackage | undefined, version: string): boolean {
-    const fact = pkg?.versions.find((one) => one.version === version)
-    return Boolean(pkg && fact && NOT_USED_UP.has(fact.outcome) && !usedVersions(pkg).includes(version))
-}
-
-/** The highest version the last decision about the package lies at, skipping undecided ones (but not one whose entry was decided). */
-function lastDecided(pkg: SharedPackage | undefined): VersionFact | undefined {
-    return pkg?.versions.find((fact) => !UNDECIDED.has(fact.outcome) || (fact.outcome !== 'unreadable' && entryDecided(fact.row)))
 }
 
 // ── A new version after a "no" ──────────────────────────────────────────────
@@ -145,12 +53,12 @@ const originOf = (proposal: ShareProposal | undefined, row: SharedPackageRow) =>
 /**
  * The "no" a new version of the package follows: the last decision about it
  * was the catalogue team turning down its highest version, package or entry.
- * None after a withdrawal or a "no" that may have been one (`mayBeWithdrawn`),
- * nor after another instance's "no": its people answer it. The server mirrors
- * this (`followedHere`).
+ * None after a withdrawal or a "no" that may have been one (`mayBeWithdrawn`).
+ * Another instance's versions are passed over: its people answer its "no", and
+ * instances share one account. The server mirrors this (`followedHere`).
  */
 export function followedDecline(pkg: SharedPackage | undefined, instance?: string): FollowedDecline | undefined {
-    const last = lastDecided(pkg)
+    const last = lastDecided(pkg, (fact) => instanceMatch(fact.row.source, instance) === 'other')
     if (!last) return undefined
     const proposals = last.row.proposals ?? []
     if (last.outcome === 'declined') {
@@ -165,6 +73,22 @@ export function followedDecline(pkg: SharedPackage | undefined, instance?: strin
     const entry = last.row.catalog ? (last.row.catalog.state === 'declined' ? last.row.catalog.declined : undefined) : turnedDown && declineOf(turnedDown)
     if (!entry || instanceMatch(originOf(turnedDown, last.row), instance) === 'other') return undefined
     return { version: last.version, kind: 'entry', decline: entry }
+}
+
+/**
+ * Whether the server's answer tells of a "no" the listing does not know yet, so
+ * the page reads the listing again. One the listing has, by its proposal, is no
+ * news; before the listing was read, every one is.
+ */
+export function declineIsNews(
+    rows: readonly SharedPackageRow[] | undefined,
+    answer: { bundle?: { declined?: Pick<Decline, 'mrUrl'> }; catalog?: { state: string; declined?: Pick<Decline, 'mrUrl'> }; follows?: { decline: Pick<Decline, 'mrUrl'> } },
+): boolean {
+    const told = [answer.bundle?.declined, answer.catalog?.state === 'declined' ? answer.catalog.declined : undefined, answer.follows?.decline].filter(
+        (decline): decline is Pick<Decline, 'mrUrl'> => Boolean(decline),
+    )
+    const known = (url: string) => rows?.some((row) => row.proposals?.some((proposal) => proposal.url === url && proposal.state === 'closed'))
+    return told.some((decline) => !known(decline.mrUrl))
 }
 
 /** Whether „Was hast du geändert?“ is asked: `version` is above the one turned down (a lower or equal one is refused anyway). */
@@ -253,14 +177,19 @@ export interface Opening {
     started?: boolean
 }
 
-/** Whether `from` names this row: its version, and its package where the link names one. */
-const namedBy = (tabbed: TabRow, from: Opening['from']) => Boolean(from && tabbed.row.version === from.version && (!from.slug || tabbed.row.slug === from.slug))
+/**
+ * Whether `from` leads on from this row: its package (where named) at its
+ * version or a higher one. So „Neue Version teilen“ on a version turned down
+ * above an accepted one (1.1.0 accepted, 1.1.1 turned down) leads on from both.
+ */
+const namedBy = (tabbed: TabRow, from: Opening['from']) =>
+    Boolean(from && (!from.slug || tabbed.row.slug === from.slug) && !isNewerVersion(tabbed.row.version, from.version))
 
 /**
  * The rows that stand in the way of a new version: every one with a proposal
  * open (the server refuses next to those too), and one accepted without an
- * entry yet - unless `from` names it (`namedBy`) or a share of it was started
- * in this browser.
+ * entry yet - unless the new version leads on from it (`namedBy`) or a share of
+ * it was started in this browser.
  */
 export function blockingRows(busy: readonly TabRow[] | undefined, opening: Opening = {}): TabRow[] {
     return (busy ?? []).filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) || !(opening.started || namedBy(tabbed, opening.from)))
@@ -342,7 +271,7 @@ export function stageHint(stage: DatasetStage): string | undefined {
                 : `Version ${stage.followed.version} nicht angenommen - du teilst eine neue Version`
         case 'taken-out':
             return stage.whole
-                ? 'Ganzer Eintrag aus dem Katalog genommen - frag beim Katalog-Team nach'
+                ? 'Ganzer Eintrag aus dem Katalog genommen - nur das Katalog-Team kann ihn wieder freigeben'
                 : `Version ${stage.takenOut.version} aus dem Katalog genommen - du teilst eine neue Version`
         case 'listed':
             return `Im Katalog als ${stage.version} - du teilst eine neue Version`
@@ -363,8 +292,13 @@ export interface StageNotice {
     link?: { label: string; href: string }
 }
 
-/** The accepted versions whose row in „In Arbeit“ offers the entry as well as a new version: the others say there what goes next. */
-const ENTRY_NEXT: ReadonlySet<ShareOutcome> = new Set(['accepted', 'removal-declined'])
+/** What an accepted version's row in „In Arbeit“ offers next, as the busy notice says it. */
+function nextOnRow(tabbed: TabRow): string {
+    if (tabbed.outcome === 'accepted' || (tabbed.outcome === 'removal-declined' && mayProposeEntry(tabbed.row))) {
+        return 'Unter „In Arbeit“ schlägst du den Katalog-Eintrag vor oder teilst eine neue Version.'
+    }
+    return tabbed.outcome === 'removal-declined' ? 'Unter „In Arbeit“ teilst du eine neue Version.' : 'Unter „In Arbeit“ steht, was als Nächstes geht.'
+}
 
 /**
  * What „Auswählen“ says under the dropdown once the dataset is chosen, each a
@@ -377,9 +311,9 @@ export function stageNotice(stage: DatasetStage, datasetName: string): StageNoti
             const open = stage.rows.find((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome))
             const shown = open ?? stage.rows[0]
             const link = { label: 'Zu „In Arbeit“', href: inProgressHref(shown.row) }
-            if (open) return { text: `Für „${datasetName}“ läuft schon ein Vorschlag (Version ${open.row.version}, ${busyStage(open)}). Weiter geht es unter „In Arbeit“.`, link }
-            const next = ENTRY_NEXT.has(shown.outcome) ? 'dort schlägst du den Katalog-Eintrag vor oder teilst eine neue Version' : 'dort steht, was als Nächstes geht'
-            return { text: `Für „${datasetName}“ ist Version ${shown.row.version} angenommen, steht aber noch nicht im Katalog. Weiter geht es unter „In Arbeit“ - ${next}.`, link }
+            // The link says where it goes on, so the sentence does not.
+            if (open) return { text: `Für „${datasetName}“ läuft schon ein Vorschlag (Version ${open.row.version}, ${busyStage(open)}).`, link }
+            return { text: `Für „${datasetName}“ ist Version ${shown.row.version} angenommen, steht aber noch nicht im Katalog. ${nextOnRow(shown)}`, link }
         }
         case 'listed':
             return { text: `„${stage.name}“ steht schon im Katalog (Version ${stage.version}). Du teilst eine neue Version - die bisherige bleibt im Katalog, bis das Katalog-Team die neue aufnimmt.` }
@@ -391,7 +325,7 @@ export function stageNotice(stage: DatasetStage, datasetName: string): StageNoti
             return {
                 text:
                     `Das Katalog-Team hat den ganzen Eintrag aus dem Katalog genommen (zuletzt Version ${stage.takenOut.version}).${reason} ` +
-                    'Auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team ihn wieder freigibt - frag dort nach, bevor du eine neue Version teilst.',
+                    'Auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team den Eintrag wieder freigibt.',
             }
         }
         case 'name-taken':
@@ -416,8 +350,8 @@ export function busyBeside(rows: readonly TabRow[], form: { targetKey: string; s
     return rows.filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) && !own(tabbed))
 }
 
-/** What „So geht es weiter“ offers in place of „Zur Prüfung einreichen“ while another proposal of the dataset is open. */
-export const BUSY_BLOCKER = 'Für diesen Datensatz läuft schon ein Vorschlag - weiter geht es unter „In Arbeit“.'
+/** Said in place of „Zur Prüfung einreichen“ while another proposal is open: neutral, as it is no problem. */
+export const BUSY_BLOCKER = 'Einreichen geht erst, wenn über den anderen Vorschlag entschieden ist.'
 
 /** How `ExportPanel` starts a new version: see {@link wizardStart}. */
 export interface WizardStart {
@@ -429,7 +363,7 @@ export interface WizardStart {
     suggested?: string
     /** Where the form starts: the same version for „Erneut einreichen“ where allowed, else `suggested`. */
     version?: string
-    /** The shared version the Steckbrief is filled from (`prepareNewVersion`), where there is one. */
+    /** The shared version the Steckbrief is filled from (`readNewVersionFill`), where there is one. */
     fill?: { targetKey: string; slug: string; version: string }
 }
 
@@ -455,7 +389,7 @@ export function wizardStart(
     const version = again && from ? from.version : suggested
     const fillVersion = from?.version ?? fillVersionOf(pkg)
     const fillSlug = from?.slug ?? pkg?.slug
-    // `prepareNewVersion` takes only an exact target: the package's, else the only one.
+    // `readNewVersionFill` takes only an exact target: the package's, else the only one.
     const fillTarget = (pkg && pkg.slug === fillSlug ? pkg.targetKey : undefined) ?? (targets.length === 1 ? targets[0] : undefined)
     const asks = stage?.kind !== 'busy' && !opening.started
     return {
@@ -472,7 +406,7 @@ export function wizardStart(
 /** The Steckbrief's basic fields as the form holds them, „Was hast du geändert?“ (`changeNote`) among them. */
 export type SteckbriefBasics = Record<'displayName' | 'description' | 'slug' | 'publisher' | 'version' | 'domain' | 'maintainer' | 'license' | 'keywords' | 'changeNote', string>
 
-/** What the Steckbrief takes from a shared version (`prepareNewVersion` in export-actions.ts). */
+/** What the Steckbrief takes from a shared version (`readNewVersionFill` in new-version-fill.ts). */
 export interface FilledSteckbrief {
     /** The version it was filled from. */
     from: string
@@ -622,22 +556,51 @@ const OPEN_STAGE: Record<ShareProposal['kind'], string> = { bundle: 'Paket-Prüf
 
 /** Why a new version of a dataset is not submitted while another of its proposals is open (the server's check of the greyed-out choice). */
 export function busyRefusal(open: OpenShare): string {
-    return `Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version ${open.version}, ${OPEN_STAGE[open.kind]}, Vorschlag !${open.iid}). Eine neue Version geht erst, wenn er entschieden oder zurückgezogen ist - weiter geht es unter „In Arbeit“.`
+    return `Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version ${open.version}, ${OPEN_STAGE[open.kind]}, Vorschlag !${open.iid}). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.`
 }
+
+/** The account's requests from the branch `parse` reads as `slug` at `version`. */
+const onBranch = (requests: readonly MergeRequestRef[], parse: (branch: string) => { slug: string; version: string } | undefined, slug: string, version: string) =>
+    requests.filter((mr) => {
+        const branch = parse(mr.source_branch)
+        return branch?.slug === slug && branch.version === version
+    })
+
+/** Closed with the withdrawal mark: taken back, nothing decided. */
+const withdrawnByMark = (mr: MergeRequestRef) => mr.state === 'closed' && Boolean(withdrawalMarkIn(mr.description, mr.closed_at))
 
 /**
  * The versions in a package's folder a refusal counts as used up, as
- * `usedVersions` does on the page but from one listing without comments: the
- * account's proposals not withdrawn by mark - at worst one version too high.
+ * `usedVersions` does on the page but from one listing without comments: a
+ * package proposal since the version last started over and not withdrawn by
+ * mark, or an entry decided. At worst this suggests one version too high.
  */
 export function proposedVersionsIn(requests: readonly MergeRequestRef[], slug: string, botId: number): string[] {
-    const versions = requests.flatMap((mr) => {
+    const own = requests.filter((mr) => mr.author?.id === botId)
+    const proposed = new Set(own.flatMap((mr) => {
         const branch = parseBundleBranch(mr.source_branch)
-        if (!branch || branch.slug !== slug || mr.author?.id !== botId) return []
-        if (mr.state === 'closed' && withdrawalMarkIn(mr.description, mr.closed_at)) return []
-        return [branch.version]
+        return branch?.slug === slug ? [branch.version] : []
+    }))
+    return [...proposed].filter((version) => {
+        const entry = onBranch(own, parseCatalogBranch, slug, version)
+        if (entry.some((mr) => mr.state === 'merged' || (mr.state === 'closed' && !withdrawnByMark(mr)))) return true
+        const removed = onBranch(own, parseRemovalBranch, slug, version).filter((mr) => mr.state === 'merged')
+        const since = startedOver(removed.map((mr) => mr.merged_at ?? mr.created_at))
+        return onBranch(own, parseBundleBranch, slug, version).some((mr) => sinceStart(mr.created_at, since) && !withdrawnByMark(mr))
     })
-    return [...new Set(versions)]
+}
+
+/**
+ * Of `proposedVersionsIn`, those whose newest package proposal names this
+ * instance or none: the server's side of `followedDecline`, which passes other
+ * instances over.
+ */
+export function proposedHere(requests: readonly MergeRequestRef[], slug: string, botId: number, instance: string | undefined): string[] {
+    const own = requests.filter((mr) => mr.author?.id === botId)
+    return proposedVersionsIn(own, slug, botId).filter((version) => {
+        const newest = [...onBranch(own, parseBundleBranch, slug, version)].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
+        return instanceMatch(shareSourceOf(newest?.description), instance) !== 'other'
+    })
 }
 
 // ── What the Steckbrief says about where it was filled from ─────────────────
@@ -653,10 +616,10 @@ const sentenceOf = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() :
 export function filledNotice(steckbrief: Pick<FilledSteckbrief, 'from' | 'full' | 'elsewhere'>): string {
     const { from } = steckbrief
     if (steckbrief.full) return `Die Angaben sind aus Version ${from} übernommen.`
-    const whose = steckbrief.elsewhere ? 'und das war eine andere' : 'und welche das war, ist nicht zu erkennen'
+    const whose = steckbrief.elsewhere ? ', und das ist eine andere als deine' : ' - welche das war, ist nicht bekannt'
     return (
         `Die Angaben sind aus Version ${from} übernommen - bis auf Umsetzung, Kontakt, Kosten, Wirkungslogik, Kooperation und Bilder. ` +
-        `Diese Abschnitte beschreiben die Umsetzung bei der Instanz, die Version ${from} geteilt hat, ${whose}. Ergänze sie für deine Instanz, soweit du sie kennst.`
+        `Diese Abschnitte gehören zu der Instanz, die Version ${from} geteilt hat${whose}. Ergänze sie für deine Instanz, soweit du sie kennst.`
     )
 }
 
@@ -665,7 +628,7 @@ export function unfilledNotice(from: string, detail: string | undefined): string
     return `Die Angaben aus Version ${from} ließen sich nicht übernehmen${detail ? `: ${sentenceOf(detail)}` : '.'} Die Felder sind vorbelegt wie bei einem neuen Paket.`
 }
 
-/** Under „Was hast du geändert?“: the "no" it answers, and who reads it. */
+/** Under „Was hast du geändert?“: the "no" it answers; the field's hint says who reads the text. */
 export function whatChangedLead(followed: FollowedDecline): string {
-    return `Die neue Version folgt auf Vorschlag !${followed.decline.iid}: ${followedFact(followed)}. Schreib kurz, was sie anders macht - das Katalog-Team liest es im neuen Vorschlag.`
+    return `Die neue Version folgt auf Vorschlag !${followed.decline.iid}: ${followedFact(followed)}. Schreib kurz, was die neue Version anders macht.`
 }

@@ -101,7 +101,7 @@ export function aboveAll(versions: readonly string[]): string {
 }
 
 /** "Grund: …" with exactly one full stop, whether or not the catalogue team ended their reason with one. */
-function sentence(text: string): string {
+export function sentence(text: string): string {
     return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
@@ -118,7 +118,7 @@ export function takenOutFact(takenOut: { version: string; reason?: string }): st
  * page can undo it.
  */
 export function takenOutNotice(takenOut: { version: string; reason?: string }): string {
-    return `${takenOutFact(takenOut)} Frag dort nach, bevor du eine neue Version teilst.`
+    return `${takenOutFact(takenOut)} Frag beim Katalog-Team nach, bevor du eine neue Version teilst.`
 }
 
 /**
@@ -150,19 +150,19 @@ export interface DeclinedStage {
  */
 export function declinedStage(key: 'review' | 'listing', decline: Decline, version: string, instead: string = nextPatch(version)): DeclinedStage {
     const who = decline.viaMarketplace
-        ? `Über das Marktplatz-Konto geschlossen${declinedOn(decline)} - gilt als nicht angenommen`
+        ? `Über das Marktplatz-Konto - nicht angenommen${declinedOn(decline)}`
         : `${STAGES.find((stage) => stage.key === key)?.who ?? 'Das Katalog-Team'} - nicht angenommen${declinedOn(decline)}`
     const next =
         key === 'review'
             ? `Für die überarbeitete Fassung trag im Steckbrief eine höhere Version ein, zum Beispiel ${instead}.`
-            : 'Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag teilst du eine neue Version, die wieder geprüft wird.'
+            : `Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag trag im Steckbrief eine höhere Version ein, zum Beispiel ${instead} - sie wird wieder geprüft.`
     return { who, reason: reasonWords(decline), next }
 }
 
-/** Above „So geht es weiter“ once the removal was turned down: the package stays, with their words. A close through the account names nobody. */
+/** Above „So geht es weiter“ once the removal was turned down: the package stays. A close through the account names nobody. */
 export function removalDeclinedNotice(decline: Decline): string {
     const said = decline.viaMarketplace ? `Das Entfernen ${declinedBy(decline)}` : `Das Katalog-Team hat das Entfernen${declinedOn(decline)} nicht angenommen`
-    return `${said} - das Paket bleibt angenommen. ${reasonWords(decline)}`
+    return `${said} - das Paket bleibt angenommen.`
 }
 
 /**
@@ -170,7 +170,7 @@ export function removalDeclinedNotice(decline: Decline): string {
  * team made in review (`changedInReview`) is lost unless the instance has it too.
  */
 export function reviewChangeNotice(version: string): string {
-    return `Bei der Prüfung von ${version} hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf der Instanz.`
+    return `Bei der Prüfung von Version ${version} hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf deiner Instanz.`
 }
 
 /** "Aus dem Katalog genommen", with the reason when there is one. */
@@ -364,12 +364,4 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
         finished: false,
         summary: 'Noch nicht eingereicht',
     }
-}
-
-/** "Du bist dran", or that the catalogue team is; undefined when nobody on either side can move. */
-export function turnLabel(progress: ShareProgress): string | undefined {
-    // The catalogue team decides on a removal, as it did on the package.
-    if (progress.removal === 'pending') return WAITING_FOR_TEAM
-    if (!progress.active || !progress.turn) return undefined
-    return progress.turn === 'you' ? 'Du bist dran' : WAITING_FOR_TEAM
 }

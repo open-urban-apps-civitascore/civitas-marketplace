@@ -137,6 +137,9 @@ export function thisInstance(env: EnvLike = process.env): string | undefined {
 
 export type ExportReadiness = 'ready' | 'missing-targets' | 'missing-token'
 
+/** The share actions' answer where sharing is not ready (`exportReadiness`) or the named target is not configured. */
+export const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
+
 /** Composing and previewing always works; opening merge requests needs targets and a token. */
 export function exportReadiness(config: ExportConfig): ExportReadiness {
     if (config.targets.length === 0) return 'missing-targets'

@@ -16,6 +16,7 @@ import {
 } from '@/lib/export/config'
 import { declinedProposal, declineOf, type Decline } from '@/lib/export/declines'
 import {
+    AUTHOR_PAGES,
     clientFor,
     currentUser,
     getProject,
@@ -106,6 +107,8 @@ export interface SharedPackageRow {
      * listed while the newer one is reviewed.
      */
     catalog?: CatalogStatus
+    /** The package id the catalogue knows, from the base branch (also where a newer version took its place): for „Im Katalog ansehen“. */
+    packageId?: string
     /** Why the state could not be read completely; the row then shows its merge request only. */
     problem?: string
     /**
@@ -133,8 +136,15 @@ export interface ShareListing {
     rows: SharedPackageRow[]
     /** This instance as its proposals name it (`thisInstance`); absent when `PORTAL_URL` is not set. */
     instance?: string
+    /** For „Ältere in GitLab ansehen“ under „Beendet“: set only where the listing stopped at `AUTHOR_PAGES` pages, else nothing older exists. */
+    older?: string
     /** Why nothing could be listed. */
     error?: string
+}
+
+/** The account's proposals in one project at GitLab, any state - by its name, so others' proposals stay out. */
+export function olderProposalsUrl(projectUrl: string, account: string): string {
+    return `${projectUrl.replace(/\/+$/, '')}/-/merge_requests?scope=all&state=all&author_username=${encodeURIComponent(account)}`
 }
 
 /** How many packages are checked at once: side by side, but not every request at the same moment. */
@@ -149,7 +159,9 @@ interface Visit {
     project: (client: GitLabClient, url: string) => Promise<GitLabProject>
     bot: (client: GitLabClient) => Promise<{ id: number; username: string }>
     /** The account's merge requests into one project, newest created first, any state. */
-    botRequests: (client: GitLabClient, projectId: number) => Promise<MergeRequestRef[]>
+    botRequests: (client: GitLabClient, project: GitLabProject) => Promise<MergeRequestRef[]>
+    /** Projects where the account has more proposals than are read: project address to account name. */
+    cut: Map<string, string>
 }
 
 function newVisit(): Visit {
@@ -169,10 +181,24 @@ function newVisit(): Visit {
             return SHARE_READS.read(`${client.apiBase}|project|${path}`, () => getProject(client, path))
         },
         bot: (client) => SHARE_READS.read(`${client.apiBase}|bot`, () => currentUser(client)),
-        botRequests: (client, projectId) =>
-            once(`${client.apiBase}|requests|${projectId}`, async () => listMergeRequestsBy(client, projectId, (await visit.bot(client)).id)),
+        botRequests: (client, project) =>
+            once(`${client.apiBase}|requests|${project.id}`, async () => {
+                const bot = await visit.bot(client)
+                const requests = await listMergeRequestsBy(client, project.id, bot.id)
+                // Every page read was full: there may be more, which only GitLab shows.
+                if (requests.length >= AUTHOR_PAGES * 100) visit.cut.set(project.web_url, bot.username)
+                return requests
+            }),
+        cut: new Map(),
     }
     return visit
+}
+
+/** Where „Ältere in GitLab ansehen“ leads: the first cut package target (most endings are about packages), else the catalogue. */
+function olderOf(visit: Visit, targets: readonly ExportTarget[]): string | undefined {
+    const cut = [...visit.cut]
+    const [url, account] = cut.find(([project]) => targets.some((target) => sameProjectUrl(project, target.url))) ?? cut[0] ?? []
+    return url && account ? olderProposalsUrl(url, account) : undefined
 }
 
 /** The catalogue repository as one listing reads it, for every row at once. */
@@ -216,7 +242,10 @@ export async function readShareListing(config: ExportConfig = exportConfig()): P
     try {
         const rows: SharedPackageRow[] = []
         for (const target of config.targets) rows.push(...(await sharedRowsOf(target, token, visit, catalog)))
-        return { rows, ...named }
+        // The catalogue's proposals count too; a failure there is the rows' to tell.
+        await catalog.catch(() => undefined)
+        const older = olderOf(visit, config.targets)
+        return { rows, ...named, ...(older ? { older } : {}) }
     } catch (error) {
         if (error instanceof GitLabError) return { rows: [], ...named, error: gitlabMessage(error) }
         throw error
@@ -234,7 +263,7 @@ async function sharedRowsOf(target: ExportTarget, token: string, visit: Visit, c
     const [project, bot] = await Promise.all([visit.project(client, target.url), visit.bot(client)])
     const base = readBaseTrees(client, project.id, target)
     base.catch(() => {})
-    const requests = await visit.botRequests(client, project.id)
+    const requests = await visit.botRequests(client, project)
 
     // Newest first, so a branch's first request is the newest. The account names
     // the export branches, so its own requests are all there are from them:
@@ -322,7 +351,7 @@ async function stateOf(
     removal: MergeRequestRef | undefined,
     mr: MergeRequestRef,
     ended: Promise<ShareProposal[]>,
-): Promise<Pick<SharedPackageRow, 'bundle' | 'catalog' | 'problem'>> {
+): Promise<Pick<SharedPackageRow, 'bundle' | 'catalog' | 'packageId' | 'problem'>> {
     if (mr.state !== 'merged') return {}
     const { target, client, projectId } = context
     try {
@@ -340,7 +369,11 @@ async function stateOf(
         const packageId = bundle.packageId ?? samePackageOnBase(bundle, slug)
         if (!packageId) return { bundle }
         const side = await context.catalog
-        return { bundle, catalog: side ? catalogStatusIn(side.context, slug, version, packageId, declineAmong(proposals, 'catalog')) : { state: 'unconfigured' } }
+        return {
+            bundle,
+            catalog: side ? catalogStatusIn(side.context, slug, version, packageId, declineAmong(proposals, 'catalog')) : { state: 'unconfigured' },
+            packageId,
+        }
     } catch (error) {
         // One package GitLab cannot answer for does not take the list down with it.
         if (error instanceof GitLabError) return { problem: gitlabMessage(error) }
@@ -457,7 +490,7 @@ async function readCatalogSide(repo: CatalogRepo | undefined, token: string, vis
     const [openRequests, index, byBot, bot] = await Promise.all([
         listOpenMergeRequests(client, project.id),
         readFile(client, project.id, 'index.json', repo.baseBranch),
-        visit.botRequests(client, project.id),
+        visit.botRequests(client, project),
         visit.bot(client),
     ])
     if (index !== undefined && servesSameIndex(repo)) expireCatalogIfOlder(index)
