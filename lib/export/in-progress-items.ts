@@ -2,9 +2,9 @@ import { declinedBy, declinedOn, reasonLine, reasonWords, type Decline } from '@
 import { verificationLabel } from '@/lib/export/labels'
 import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
 import type { SharedPackageRow } from '@/lib/export/share-listing'
-import { isNewerVersion, STAGES, takenOutFact, type ShareProgress, type StageKey, type StageState } from '@/lib/export/share-stages'
+import { isNewerVersion, sentence, STAGES, type ShareProgress, type StageKey, type StageState } from '@/lib/export/share-stages'
 import { mergeRequestRef, reviewChangeUrl } from '@/lib/export/share-state'
-import type { ShareOutcome, TabRow } from '@/lib/export/share-tabs'
+import type { ShareOutcome, TabRow, TurnedDown } from '@/lib/export/share-tabs'
 import { newVersionHref, resumeHref } from '@/lib/export/wizard-address'
 
 /**
@@ -38,7 +38,7 @@ export type InProgressItem =
           /** Versions this one replaced, lowest first. */
           earlier: string[]
           /** Lower versions the catalogue team turned down, lowest first. */
-          declinedEarlier: string[]
+          declinedEarlier: TabRow['declinedEarlier']
           /** The "no" the row stands at, and whether it is still the sharing side's move. */
           declined?: TabRow['declined']
           /** A change to this accepted version that the catalogue team did not take. */
@@ -384,6 +384,16 @@ export function inProgressHref(row: Pick<SharedPackageRow, 'targetKey' | 'slug' 
     return `${IN_PROGRESS_PATH}#${rowAnchor(row)}`
 }
 
+/**
+ * The words of the cross-link from „Veröffentlicht“ and „Beendet“ to a
+ * version's row in „In Arbeit“. At a "no" it says what was not accepted, as
+ * „Auswählen“ says it: read as progress, a "no" would mislead.
+ */
+export function inProgressLinkText(version: string, declined?: TurnedDown): string {
+    if (declined === 'entry') return `Katalog-Eintrag für ${version} nicht angenommen`
+    return declined === 'package' ? `Version ${version} nicht angenommen` : `Version ${version} ist in Arbeit`
+}
+
 const withRef = (sentence: string, url: string | undefined) => {
     const ref = mergeRequestRef(url)
     return ref ? `${sentence} · Vorschlag ${ref}` : sentence
@@ -401,8 +411,8 @@ const proposalLink = (decline: Decline): NonNullable<ReasonLine['link']> => ({ l
 /** A "no" in the team's words, with the proposal they turned down. */
 const reasonOf = (decline: Decline): ReasonLine => ({ text: reasonLine(decline), link: proposalLink(decline) })
 
-/** A change the catalogue team did not take: said beside whatever the row says, as the version stays accepted. */
-const changeNoteOf = (version: string, change: Decline): ReasonLine => ({
+/** A change the catalogue team did not take: said beside whatever the row says, as the version stays accepted. Also in „Veröffentlicht“. */
+export const changeNoteOf = (version: string, change: Decline): ReasonLine => ({
     text: `Die Änderung an Version ${version} (Vorschlag !${change.iid}) ${declinedBy(change)}. ${reasonWords(change)}`,
     link: proposalLink(change),
 })
@@ -410,22 +420,31 @@ const changeNoteOf = (version: string, change: Decline): ReasonLine => ({
 /** The move after a "no": reading why, where they said why - with no reason, „Grund lesen“ would be no move at all. */
 const afterNo = (decline: Decline | undefined, then: string) => (decline?.reason.kind === 'none' ? then : `Grund lesen und ${then}`)
 
+/** What a turned-down lower version adds among „Frühere Versionen“; a replaced one shows its number only. */
+const EARLIER_NO: Record<TurnedDown, string> = { package: 'nicht angenommen', entry: 'Katalog-Eintrag nicht angenommen' }
+
 /** „Frühere Versionen: 1.1.3 · 1.1.4 nicht angenommen“, lowest first, or nothing. */
-function earlierLine(replaced: readonly string[], declined: readonly string[]): string | undefined {
-    const versions = [...replaced.map((version) => ({ version, no: false })), ...declined.map((version) => ({ version, no: true }))].sort((a, b) =>
+function earlierLine(replaced: readonly string[], declined: TabRow['declinedEarlier']): string | undefined {
+    const versions = [...replaced.map((version) => ({ version, no: undefined })), ...declined.map(({ version, kind }) => ({ version, no: kind }))].sort((a, b) =>
         isNewerVersion(a.version, b.version) ? 1 : isNewerVersion(b.version, a.version) ? -1 : 0,
     )
-    return versions.length ? `Frühere Versionen: ${versions.map(({ version, no }) => (no ? `${version} nicht angenommen` : version)).join(' · ')}` : undefined
+    return versions.length ? `Frühere Versionen: ${versions.map(({ version, no }) => (no ? `${version} ${EARLIER_NO[no]}` : version)).join(' · ')}` : undefined
 }
 
 /**
  * Proposing the entry from a row that is not at that step: only where the
  * catalogue is set up, the package is the one reviewed, and the entry was not
  * turned down for this version already, which the server would refuse.
+ * „Auswählen“ says the same (`stageNotice`).
  */
-function mayProposeEntry(row: SharedPackageRow): boolean {
+export function mayProposeEntry(row: SharedPackageRow): boolean {
     const verification = row.bundle?.verification
     return row.catalog?.state !== 'unconfigured' && row.catalog?.state !== 'declined' && (!verification || verification.state === 'verified')
+}
+
+/** „Zurückziehen“ on an accepted package proposes its removal: not where the team turned that down already, as the server refuses it. */
+function mayWithdraw(row: SharedPackageRow): boolean {
+    return !row.bundle?.removal?.declined
 }
 
 /**
@@ -440,7 +459,13 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
         const version = draft.basics.version?.trim() || undefined
         const discard: RowAction = { kind: 'discard', look: 'quiet' }
         if (!item.available) {
-            return { title, version, status: { text: `Der Datensatz „${draft.datasetName}“ ist auf dieser Instanz nicht mehr da.`, tone: 'neutral' }, quiet: [discard] }
+            // Still the person's: the move is the only one there is, in the words of its button.
+            return {
+                title,
+                version,
+                status: { text: `Der Datensatz „${draft.datasetName}“ ist auf dieser Instanz nicht mehr da · ${whoseMove(item, 'Zwischenstand verwerfen')}`, tone: 'neutral' },
+                quiet: [discard],
+            }
         }
         return {
             title,
@@ -572,14 +597,14 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             }
         case 'entry-declined':
             // The entry turned down: the package stays accepted, and the entry is not proposed again for this version.
-            // „Zurückziehen“ proposes taking the package out.
+            // „Zurückziehen“ proposes taking the package out, unless that was turned down before.
             return {
                 ...base,
                 ...told,
                 track,
                 status: plain(dot(`${stepName('listing')} - nicht angenommen${on}`, whoseMove(item, afterNo(decline, 'bei Bedarf eine neue Version teilen')))),
                 main: { ...newVersion, look: 'button' },
-                quiet: [withdraw],
+                quiet: mayWithdraw(row) ? [withdraw] : [],
             }
         case 'removal-declined': {
             // The removal turned down: the package stays accepted and may still get its entry. No progress line while it is
@@ -596,26 +621,29 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                     quiet: [...proposeEntry, newVersion],
                 }
             }
-            // Where the entry cannot follow any more (turned down too, or not set up), the way on is a new version.
+            // Afterwards it waits for nobody and stays: the status names what it still offers, as „Auswählen“ does.
+            const offers = entry ? 'den Katalog-Eintrag kannst du weiterhin vorschlagen oder eine neue Version teilen' : 'eine neue Version kannst du jederzeit teilen'
             return {
                 ...base,
                 track: trackOf(progress.states, { catalog: 'later' }),
-                status: plain(decline ? `Paket angenommen, nicht im Katalog - das Entfernen ${declinedBy(decline)}` : progress.summary),
-                quiet: entry ? proposeEntry : [newVersion],
+                status: plain(dot(decline ? `Paket angenommen, nicht im Katalog - das Entfernen ${declinedBy(decline)}` : progress.summary, offers)),
+                quiet: [...proposeEntry, newVersion],
             }
         }
         case 'entry-revoked': {
             // The whole entry taken out at an earlier version: nobody here can bring this one in. The way out of the list is
             // proposing to take the package out as well.
             const takenOut = row.catalog?.takenOut
+            // The status sentence says what was taken out; the line under it only which version was in, and why.
+            const reason = takenOut?.reason ? ` Grund: ${sentence(takenOut.reason)}` : ''
             return {
                 ...base,
-                ...(takenOut ? { reasons: [{ text: takenOutFact(takenOut) }, ...change] } : {}),
+                ...(takenOut ? { reasons: [{ text: `Zuletzt stand Version ${takenOut.version} im Katalog.${reason}` }, ...change] } : {}),
                 track,
                 // Who can move it on, without a contact, as `takenOutBlocker` says it in the wizard.
                 status: plain(`${stepName('catalog')} - der ganze Eintrag ist aus dem Katalog genommen · weiter geht es erst, wenn das Katalog-Team ihn wieder freigibt`),
                 main: gitlab(row.bundleMr.url),
-                quiet: [withdraw],
+                quiet: mayWithdraw(row) ? [withdraw] : [],
             }
         }
         default:

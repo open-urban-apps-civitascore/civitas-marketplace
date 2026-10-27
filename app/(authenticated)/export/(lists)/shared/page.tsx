@@ -1,4 +1,4 @@
-import { SharedPackages } from '@/components/export/shared-packages'
+import { PublishedShares } from '@/components/export/published-shares'
 import { ShareListAccess, ShareTabFrame } from '@/components/export/share-tab-frame'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { fetchShareRight } from '@/lib/export/share-permission'
@@ -17,7 +17,7 @@ export default async function PublishedPage() {
 
     return (
         <ShareTabFrame tab="published" enabled={canList}>
-            {canList ? <SharedPackages /> : <ShareListAccess tab="published" readiness={readiness} right={right} />}
+            {canList ? <PublishedShares /> : <ShareListAccess tab="published" readiness={readiness} right={right} />}
         </ShareTabFrame>
     )
 }

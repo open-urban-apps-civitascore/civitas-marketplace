@@ -4,6 +4,8 @@ import path from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
+import { brokenRules, STRICT_RULES, strictProblemsOf } from './wording-rules'
+
 import { bundleBranch, catalogBranch, removalBranch } from '@/lib/export/config'
 import { displayNameOf, proposerOf, shareSourceLine, shareSourceOf, withdrawerOf } from '@/lib/export/merge-request-text'
 
@@ -28,6 +30,13 @@ import { displayNameOf, proposerOf, shareSourceLine, shareSourceOf, withdrawerOf
  *   C and a space, a "Löschen" button) are banned in every text.
  * - `validate-bundle-script.ts` is a Python script sent along with each
  *   package, English and out of scope (13 Oct), and is not read.
+ *
+ * And the strict test of rc.7 (plan, section 8.2): the same words and more
+ * („Dataset“, „index.json“, „urn:“ …) are banned from every text, whatever
+ * language it seems to be in - the JSX text and string props of the pages
+ * and components first of all - with an allow-list only for the English
+ * texts written to GitLab and for code identifiers. Every tab rendered to
+ * plain text is checked against the same rules in `tab-wording.test.ts`.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '../../..')
@@ -55,6 +64,8 @@ function sources(): string[] {
 interface Text {
     where: string
     text: string
+    /** JSX text, or a string in a JSX prop or expression: what the page shows as it is written. */
+    jsx?: boolean
 }
 
 /** Every text in one file, as the code writes it, without comments and module names. */
@@ -62,18 +73,20 @@ function textsOf(file: string): Text[] {
     const source = readFileSync(path.join(ROOT, file), 'utf8')
     const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
     const found: Text[] = []
-    const add = (node: ts.Node, text: string) => {
+    const add = (node: ts.Node, text: string, jsx: boolean) => {
         const where = `${file}:${tree.getLineAndCharacterOfPosition(node.getStart()).line + 1}`
-        if (text.trim()) found.push({ where, text: text.replace(/\s+/g, ' ').trim() })
+        if (text.trim()) found.push({ where, text: text.replace(/\s+/g, ' ').trim(), ...(jsx ? { jsx } : {}) })
     }
-    const visit = (node: ts.Node) => {
+    // `jsx`: inside a JSX prop or `{…}` - a string there is shown as written, unless a function in between makes it something else.
+    const visit = (node: ts.Node, jsx: boolean) => {
         if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return
-        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) add(node, node.text)
-        else if (ts.isTemplateExpression(node)) add(node, [node.head.text, ...node.templateSpans.map((span) => `…${span.literal.text}`)].join(''))
-        else if (ts.isJsxText(node)) add(node, node.text)
-        ts.forEachChild(node, visit)
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) add(node, node.text, jsx)
+        else if (ts.isTemplateExpression(node)) add(node, [node.head.text, ...node.templateSpans.map((span) => `…${span.literal.text}`)].join(''), jsx)
+        else if (ts.isJsxText(node)) add(node, node.text, true)
+        const inner = ts.isArrowFunction(node) || ts.isFunctionExpression(node) ? false : jsx || ts.isJsxAttribute(node) || ts.isJsxExpression(node)
+        ts.forEachChild(node, (child) => visit(child, inner))
     }
-    visit(tree)
+    visit(tree, false)
     return found
 }
 
@@ -213,6 +226,94 @@ describe('the share pages’ wording', () => {
         expect(sample('Kein GitLab-Zugang hinterlegt: EXPORT_REPO_TOKEN setzen.')).toEqual([])
         expect(sample('Export use case: … …')).toEqual([])
         expect(sample('- `…/` (… files) — a CORE-IR use-case package exported from a running instance')).toEqual([])
+    })
+})
+
+/**
+ * What may break the strict rules anyway, and why: English texts written to
+ * GitLab - which must not be translated, see the last block - and the one
+ * fold-out that explains the word „Merge Request“. Each names its file and
+ * how its text starts; each must still match one, so the list cannot rot.
+ */
+const STRICT_ALLOWED: readonly { file: string; starts: string; why: string }[] = [
+    { file: 'components/export/share-steps.tsx', starts: 'Was ist ein Merge Request?', why: 'the fold-out that explains the word' },
+    { file: 'lib/export/share-deletion.ts', starts: 'Branch `…` · proposed via', why: 'English, in the removal proposal at GitLab' },
+    { file: 'lib/export-actions.ts', starts: 'Branch `…` · exported via', why: 'English, in the package proposal at GitLab' },
+    { file: 'lib/export-actions.ts', starts: '- `…/` (… files) —', why: 'English, in the package proposal at GitLab' },
+    { file: 'lib/export-actions.ts', starts: 'Nothing is listed yet.', why: 'English, in the package proposal at GitLab' },
+    { file: 'lib/export/transform.ts', starts: '# … — CORE-IR Use-Case Package', why: 'the English README template, out of scope since 13 Oct' },
+]
+
+/**
+ * A code identifier: one word without a space, broken only by `urn:` or
+ * `index.json` - an id or its prefix the code compares, the file the
+ * catalogue is, never a sentence a person reads.
+ */
+const isIdentifier = (text: string) => !/\s/.test(text) && brokenRules(text).every((pattern) => /urn|index/.test(pattern.source))
+
+const allowedFor = (where: string, text: string) => STRICT_ALLOWED.find((allowed) => where.startsWith(`${allowed.file}:`) && text.startsWith(allowed.starts))
+
+describe('the strict wording test (plan of 2026-10-18, section 8.2)', () => {
+    const files = sources()
+    const texts = files.flatMap(textsOf)
+    const pages = (text: Text) => /^(components\/export|app\/\(authenticated\)\/export)\//.test(text.where)
+
+    it('reads the JSX text and string props of the pages and their components', () => {
+        const jsx = texts.filter((text) => text.jsx && pages(text))
+        expect(jsx.length).toBeGreaterThan(300)
+        for (const label of ['Im Katalog ansehen', 'Ältere anzeigen', 'Ältere in GitLab ansehen', 'Erneut einreichen', 'Instanz unbekannt', 'Neue Version teilen']) {
+            expect(texts.some((text) => pages(text) && text.text === label), label).toBe(true)
+        }
+        // Props too, not only text between tags.
+        expect(jsx.some((text) => text.text === 'Bitte auswählen …')).toBe(true)
+    })
+
+    // An identifier is let through only outside JSX: in JSX, `<code>index.json</code>` would be shown as it is written.
+    const exempt = ({ where, text, jsx }: Text) => (!jsx && isIdentifier(text)) || allowedFor(where, text) !== undefined
+
+    it('finds none of the banned words in any text the share pages show, but where the allow-list says why', () => {
+        const problems = texts.flatMap((found) => (exempt(found) ? [] : strictProblemsOf(found.text).map((why) => `${found.where}: ${why}: ${found.text.slice(0, 120)}`)))
+        expect(problems).toEqual([])
+    })
+
+    it('keeps the allow-list short and true: each entry still names a text that needs it', () => {
+        for (const allowed of STRICT_ALLOWED) {
+            const matched = texts.filter((text) => allowedFor(text.where, text.text) === allowed)
+            expect(matched.some((text) => strictProblemsOf(text.text).length > 0), `${allowed.file}: ${allowed.starts}`).toBe(true)
+        }
+    })
+
+    it('would catch what it is meant to, in German and in English alike', () => {
+        for (const text of [
+            'Wähle einen Use Case dieser Instanz.',
+            'Use-Case-Paket',
+            'Vorschlag (MR !31) ansehen',
+            'Merge Request opened',
+            'Der Branch export/baeume-1.1.0 fehlt.',
+            'Liegt im Repository.',
+            'Kein Zielrepository',
+            'Ungültige Dataset-Kennung',
+            'Paket gemergt',
+            'Steht nicht in der index.json.',
+            'Kennung: urn:stadt:usecase:baeume',
+            'Paket angenommen — Katalog nicht eingerichtet',
+            '2–40 Kleinbuchstaben',
+            'Löschen',
+        ]) {
+            expect(strictProblemsOf(text), text).not.toEqual([])
+        }
+        for (const text of ['Was ist ein Vorschlag?', 'Im Katalog ansehen', 'Version 1.1.4 ist in Arbeit', 'Datensatz', 'Ablageort', '2 bis 40 Kleinbuchstaben', 'Zurückziehen']) {
+            expect(strictProblemsOf(text), text).toEqual([])
+        }
+        expect(isIdentifier('urn:…:usecase:…')).toBe(true)
+        expect(isIdentifier('index.json')).toBe(true)
+        expect(isIdentifier('Kennung urn:x')).toBe(false)
+        expect(isIdentifier('Dataset')).toBe(false)
+        // Shown as written in JSX, an identifier is a banned word like any other.
+        expect(exempt({ where: 'components/export/x.tsx:1', text: 'index.json' })).toBe(true)
+        expect(exempt({ where: 'components/export/x.tsx:1', text: 'index.json', jsx: true })).toBe(false)
+        expect(exempt({ where: 'components/export/x.tsx:1', text: 'urn:…:usecase:…', jsx: true })).toBe(false)
+        expect(STRICT_RULES.length).toBeGreaterThanOrEqual(12)
     })
 })
 

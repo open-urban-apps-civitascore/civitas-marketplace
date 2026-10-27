@@ -130,10 +130,10 @@ describe('which proposal is a "no"', () => {
         // With the next free version where the server could tell it (R6).
         expect(entryRefusal('1.1.4', account, '1.1.6')).toMatch(/ - teile eine neue Version, zum Beispiel 1\.1\.6\.$/)
         expect(removalRefusal(team)).toBe(
-            'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !31). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !31). Noch einmal vorschlagen geht von hier nicht - nur das Katalog-Team kann den Vorschlag wieder öffnen.',
         )
         expect(removalRefusal({ ...account, closedAt: undefined })).toBe(
-            'Das Entfernen dieser Version wurde nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Entfernen dieser Version wurde nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - nur das Katalog-Team kann den Vorschlag wieder öffnen.',
         )
     })
 

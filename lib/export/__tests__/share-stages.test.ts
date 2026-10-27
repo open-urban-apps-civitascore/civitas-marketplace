@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { declinedStage, isNewerVersion, nextPatch, removalDeclinedNotice, reviewChangeNotice, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
+import { declinedStage, isNewerVersion, nextPatch, removalDeclinedNotice, reviewChangeNotice, shareProgress, takenOutNotice } from '@/lib/export/share-stages'
 
 const verified = { state: 'verified' as const, mergedMrUrl: 'https://gitlab.example/mr/1' }
 
@@ -8,7 +8,7 @@ describe('shareProgress', () => {
     it('starts with the person proposing the package', () => {
         const progress = shareProgress({})
         expect(progress.states).toEqual({ propose: 'current', review: 'later', catalog: 'later', listing: 'later' })
-        expect(turnLabel(progress)).toBe('Du bist dran')
+        expect(progress.turn).toBe('you')
         expect(progress.finished).toBe(false)
     })
 
@@ -17,7 +17,7 @@ describe('shareProgress', () => {
             const progress = shareProgress(facts)
             expect(progress.states.review).toBe('waiting')
             expect(progress.active).toBe('review')
-            expect(turnLabel(progress)).toBe('Wartet auf das Katalog-Team')
+            expect(progress.turn).toBe('reviewers')
             expect(progress.summary).toBe('Paket in Prüfung')
         }
     })
@@ -26,30 +26,30 @@ describe('shareProgress', () => {
         const progress = shareProgress({ bundleMrState: 'merged', bundle: { state: 'on-base', verification: verified }, catalog: { state: 'none' } })
         expect(progress.states).toEqual({ propose: 'done', review: 'done', catalog: 'current', listing: 'later' })
         expect(progress.summary).toBe('Paket angenommen - jetzt Katalog-Eintrag vorschlagen')
-        expect(turnLabel(progress)).toBe('Du bist dran')
+        expect(progress.turn).toBe('you')
     })
 
     it('waits for the catalogue team on the entry, then is finished', () => {
         const waiting = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'mr-open', mrUrl: 'u' } })
         expect(waiting.states.listing).toBe('waiting')
-        expect(turnLabel(waiting)).toBe('Wartet auf das Katalog-Team')
+        expect(waiting.turn).toBe('reviewers')
         const listed = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'listed' } })
         expect(listed.finished).toBe(true)
         expect(listed.active).toBeUndefined()
-        expect(turnLabel(listed)).toBeUndefined()
+        expect(listed.turn).toBeUndefined()
     })
 
     it('stops at the catalogue step, with the reason, when the merged state cannot be confirmed', () => {
         const progress = shareProgress({ bundle: { state: 'on-base', verification: { state: 'changed-after-merge' } }, catalog: { state: 'none' } })
         expect(progress.states.catalog).toBe('blocked')
         expect(progress.blockedBy).toContain('nach der Prüfung geändert')
-        expect(turnLabel(progress)).toBe('Du bist dran')
+        expect(progress.turn).toBe('you')
     })
 
     it('blames nobody on the page when no catalogue is set up', () => {
         const progress = shareProgress({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'unconfigured' } })
         expect(progress.states.catalog).toBe('blocked')
-        expect(turnLabel(progress)).toBeUndefined()
+        expect(progress.turn).toBeUndefined()
     })
 
     it('counts a version replaced by a NEWER one, or closed, as finished', () => {
@@ -69,7 +69,7 @@ describe('shareProgress', () => {
         expect(missing.states.catalog).toBe('blocked')
         expect(missing.blockedBy).toContain('nicht mehr im Ablageort')
         expect(missing.summary).toBe('Paket angenommen, aber nicht mehr im Ablageort')
-        expect(turnLabel(missing)).toBeUndefined()
+        expect(missing.turn).toBeUndefined()
 
         const older = shareProgress({
             version: '1.1.0',
@@ -93,7 +93,7 @@ describe('shareProgress', () => {
         expect(deleted).toMatchObject({ finished: true, summary: 'Aus dem Katalog genommen' })
         expect(deleted.states.catalog).toBe('blocked')
         expect(deleted.active).toBeUndefined()
-        expect(turnLabel(deleted)).toBeUndefined()
+        expect(deleted.turn).toBeUndefined()
 
         const revoked = shareProgress({
             version: '1.0.2',
@@ -120,7 +120,7 @@ describe('shareProgress', () => {
         })
         expect(progress).toMatchObject({ finished: false, active: 'listing', turn: 'you', summary: 'Katalog-Eintrag in Prüfung - bringt einen herausgenommenen Eintrag zurück' })
         expect(progress.states.listing).toBe('blocked')
-        expect(turnLabel(progress)).toBe('Du bist dran')
+        expect(progress.turn).toBe('you')
     })
 
     it('does not offer to propose a version again that was in the catalogue, but does a higher one', () => {
@@ -132,11 +132,11 @@ describe('shareProgress', () => {
     })
 
     it('tells who took a version out, why, and what to do before the next one', () => {
-        expect(takenOutNotice({ version: '1.0.2' })).toBe('Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Frag dort nach, bevor du eine neue Version teilst.')
+        expect(takenOutNotice({ version: '1.0.2' })).toBe('Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Frag beim Katalog-Team nach, bevor du eine neue Version teilst.')
         // One full stop, whether or not the reason brings its own.
         for (const reason of ['Datenquelle abgeschaltet', 'Datenquelle abgeschaltet.']) {
             expect(takenOutNotice({ version: '1.0.2', reason })).toBe(
-                'Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Grund: Datenquelle abgeschaltet. Frag dort nach, bevor du eine neue Version teilst.',
+                'Das Katalog-Team hat Version 1.0.2 aus dem Katalog genommen. Grund: Datenquelle abgeschaltet. Frag beim Katalog-Team nach, bevor du eine neue Version teilst.',
             )
         }
     })
@@ -150,7 +150,7 @@ describe('shareProgress', () => {
         expect(progress).toMatchObject({ removal: 'pending', finished: false, summary: 'Entfernen vorgeschlagen' })
         expect(progress.active).toBeUndefined()
         expect(progress.states.catalog).toBe('later')
-        expect(turnLabel(progress)).toBe('Wartet auf das Katalog-Team')
+        expect(progress.turn).toBe('reviewers')
     })
 
     it('is finished once the removal is merged and the version gone, and back when it was shared again', () => {
@@ -160,7 +160,7 @@ describe('shareProgress', () => {
             bundle: { state: 'none', reason: 'no-package', removal: { state: 'merged', mrUrl: 'u/remove' } },
         })
         expect(removed).toMatchObject({ removal: 'done', finished: true, summary: 'Paket entfernt' })
-        expect(turnLabel(removed)).toBeUndefined()
+        expect(removed.turn).toBeUndefined()
 
         const back = shareProgress({
             bundleMrState: 'merged',
@@ -224,23 +224,23 @@ describe('the wizard’s words for a "no" (2026-10-22, 3.3)', () => {
 
     it('says at the entry review that a different entry is a new version, and tells a close through the account as one (S5, S10)', () => {
         expect(declinedStage('listing', { ...no, viaMarketplace: true, reason: { kind: 'none' } }, '1.1.4')).toEqual({
-            who: 'Über das Marktplatz-Konto geschlossen am 21.10. - gilt als nicht angenommen',
+            who: 'Über das Marktplatz-Konto - nicht angenommen am 21.10.',
             reason: 'Ohne Begründung.',
-            next: 'Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag teilst du eine neue Version, die wieder geprüft wird.',
+            next: 'Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag trag im Steckbrief eine höhere Version ein, zum Beispiel 1.1.5 - sie wird wieder geprüft.',
         })
     })
 
     it('says that a removal turned down leaves the package accepted (S8)', () => {
-        // In the note's words (3.3, S8): who decided first.
-        expect(removalDeclinedNotice(no)).toBe('Das Katalog-Team hat das Entfernen am 21.10. nicht angenommen - das Paket bleibt angenommen. Grund (spaudanjo): „Bitte mit Lizenz.“')
+        // In the note's words (3.3, S8): who decided first. Their words are a line of their own under it.
+        expect(removalDeclinedNotice(no)).toBe('Das Katalog-Team hat das Entfernen am 21.10. nicht angenommen - das Paket bleibt angenommen.')
         expect(removalDeclinedNotice({ ...no, viaMarketplace: true, reason: { kind: 'none' } })).toBe(
-            'Das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen) - das Paket bleibt angenommen. Ohne Begründung.',
+            'Das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen) - das Paket bleibt angenommen.',
         )
     })
 
     it('warns that a new version from the dataset writes over what the team changed in review (S3)', () => {
         expect(reviewChangeNotice('1.1.4')).toBe(
-            'Bei der Prüfung von 1.1.4 hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf der Instanz.',
+            'Bei der Prüfung von Version 1.1.4 hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf deiner Instanz.',
         )
     })
 })

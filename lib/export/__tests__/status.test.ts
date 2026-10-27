@@ -103,6 +103,13 @@ describe('a version the catalogue team took out', () => {
         expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'listed' })
     })
 
+    it('names the Herausgeber the catalogue lists a version with, for „Veröffentlicht“', () => {
+        const context = { openRequests: [], index: indexOf([{ id: ID, version: '1.1.0', maintainer: ' Stadt Musterstadt ' }]), merged: [] }
+        expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'listed', maintainer: 'Stadt Musterstadt' })
+        // Only a listed version: one the index does not list is not told by whom it would be.
+        expect(catalogStatusIn(context, 'baeume', '1.0.0', ID)).toEqual({ state: 'none' })
+    })
+
     it('counts only proposals that name this package, and judges nothing without an index', () => {
         // The branch names no publisher: another publisher's "baeume" is not this one.
         const foreign = { openRequests: [], index: indexOf([]), merged: [merged(5, '1.0.2', 'urn:andere:usecase:baeume')] }

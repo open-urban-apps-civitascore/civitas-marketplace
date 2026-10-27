@@ -323,7 +323,7 @@ describe('openMergeRequest and a proposal the catalogue team turned down (R5)', 
             status: 0,
             held: { iid: 32 },
             message:
-                'Vorschlag !32 wurde geschlossen, ohne angenommen zu werden. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.',
+                'Vorschlag !32 wurde nicht angenommen. Er bleibt bei GitLab, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - von hier wird er nicht noch einmal vorgeschlagen. Lade die Seite neu, dort steht, wie es weitergeht.',
         })
         expect(gl.calls.filter((c) => c.method !== 'GET')).toEqual([])
     })
@@ -348,6 +348,31 @@ describe('openMergeRequest and a proposal the catalogue team turned down (R5)', 
             expect(outcome.status).toBe('created')
             expect(gl.calls.some((c) => c.method === 'DELETE')).toBe(true)
         }
+    })
+
+    it('replaces it where the version started over since: a "no" to a change of an acceptance a removal undid (bodenfeuchte)', async () => {
+        // !19 merged, the change !21 turned down on the same branch, then the removal merged: „Erneut einreichen“ after
+        // „Entfernt“ proposes 1.0.0 once more, as R1 lets it (`presentRequests`), and its branch is no longer held.
+        const accepted = closed({ iid: 19, state: 'merged', created_at: '2026-10-01T10:00:00Z' })
+        const change = closed({ iid: 21, created_at: '2026-10-10T10:00:00Z', closed_at: '2026-10-12T10:00:00Z' })
+        const removal = closed({ iid: 30, state: 'merged', source_branch: 'remove/x-1.0.0', created_at: '2026-10-20T10:00:00Z', merged_at: '2026-10-21T10:00:00Z' })
+        const byBranch = (requests: MergeRequestRef[], removals: MergeRequestRef[]) => {
+            const gl = fakeGitLab(routes(requests))
+            const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+                const url = new URL(String(input))
+                if (url.pathname.endsWith('/projects/10/merge_requests') && url.searchParams.get('source_branch') === 'remove/x-1.0.0') return new Response(JSON.stringify(removals))
+                return gl.fetchImpl(input, init)
+            }) as typeof fetch
+            return { gl, client: clientFor('https://gitlab.example/group/catalog', 'token', fetchImpl) }
+        }
+        const released = byBranch([change, accepted], [removal])
+        const outcome = await openMergeRequest(released.client, { ...input, restartedBy: 'remove/x-1.0.0' })
+        expect(outcome.status).toBe('created')
+        expect(released.gl.calls.some((c) => c.method === 'DELETE')).toBe(true)
+        // A "no" after the removal still holds it, and without the removal's branch named nothing changes.
+        const later = closed({ iid: 33, created_at: '2026-10-22T09:59:35Z' })
+        await expect(openMergeRequest(byBranch([later, change, accepted], [removal]).client, { ...input, restartedBy: 'remove/x-1.0.0' })).rejects.toBeInstanceOf(HeldBranchError)
+        await expect(openMergeRequest(byBranch([change, accepted], [removal]).client, input)).rejects.toBeInstanceOf(HeldBranchError)
     })
 
     it('asks for the account only where a closed request could hold the branch', async () => {

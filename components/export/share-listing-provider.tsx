@@ -84,6 +84,8 @@ export function useShareView(enabled: boolean) {
         tabs,
         /** This instance as the listing names it, to tell its shares from other instances'. */
         instance: listing.instance,
+        /** Where GitLab keeps proposals older than the listing read, for „Ältere in GitLab ansehen“. */
+        older: enabled ? listing.older : undefined,
         drafts,
         draftsReady,
         discardDraft,

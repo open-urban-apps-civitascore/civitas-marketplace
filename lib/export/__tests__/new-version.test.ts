@@ -13,6 +13,7 @@ import {
     CHANGE_NOTE_MAX,
     changeNoteProblem,
     datasetStage,
+    declineIsNews,
     entryUsedUpRefusal,
     filledNotice,
     fillVersionOf,
@@ -24,6 +25,7 @@ import {
     nameTakenIn,
     openSharesOf,
     parseFollows,
+    proposedHere,
     proposedVersionsIn,
     sameVersionAgain,
     sharedPackageOf,
@@ -220,7 +222,7 @@ describe('the "no" a new version follows (R7)', () => {
         )
         expect(whatChangedLead(followed!)).toBe(
             'Die neue Version folgt auf Vorschlag !32: Der Katalog-Eintrag für Version 1.1.4 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). ' +
-                'Schreib kurz, was sie anders macht - das Katalog-Team liest es im neuen Vorschlag.',
+                'Schreib kurz, was die neue Version anders macht.',
         )
     })
 
@@ -241,6 +243,16 @@ describe('the "no" a new version follows (R7)', () => {
         // One that names no instance counts as this one's (U1 is about In Arbeit, not about what a new version answers).
         const unnamed = { ...turnedDown('1.0.1', 14, { source: { kind: 'dataset', id: 'ds-baeume' } }), source: { kind: 'dataset' as const, id: 'ds-baeume' } }
         expect(followedDecline(pkgOf([unnamed]), HERE)).toMatchObject({ version: '1.0.1' })
+    })
+
+    it('looks past another instance’s newer version for this one’s last decision: it answers nothing here (demo, dev and local)', () => {
+        // Demo's 1.1.4 entry turned down (!32), then a local test share of 1.1.5 in review: demo's next version follows !32.
+        const local = inReview('1.1.5', 40, { ...sourced(THERE), proposals: [proposal('bundle', 40, 'opened', sourced(THERE))] })
+        const rows = [local, entryTurnedDown('1.1.4', 6), listed('1.1.3', 2)]
+        expect(followedDecline(pkgOf(rows), HERE)).toMatchObject({ version: '1.1.4', kind: 'entry', decline: { iid: 32 } })
+        expect(datasetStage(DATASET, facts(rows))).toMatchObject({ kind: 'declined', followed: { version: '1.1.4' } })
+        // Its version counts for the one to take all the same (R6).
+        expect(suggestedVersion(pkgOf(rows))).toBe('1.1.6')
     })
 
     it('is none once a higher version was accepted, nor where the "no" may be a withdrawal whose comments could not be read (U4)', () => {
@@ -306,7 +318,7 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         expect(stage.kind).toBe('busy')
         expect(stageHint(stage)).toBe('In Arbeit (1.1.0) - nicht wählbar')
         expect(stageNotice(stage, DATASET.name)).toEqual({
-            text: 'Für „Baumkataster Mitte“ läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung). Weiter geht es unter „In Arbeit“.',
+            text: 'Für „Baumkataster Mitte“ läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung).',
             link: { label: 'Zu „In Arbeit“', href: inProgressHref(rows[1]) },
         })
         expect(inProgressHref(rows[1])).toMatch(/^\/export#in-arbeit-baeume-1\.1\.0-[a-z0-9]+$/)
@@ -319,12 +331,21 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         const stage = datasetStage(DATASET, facts(rows))
         expect(stage.kind).toBe('busy')
         expect(stageNotice(stage, DATASET.name)?.text).toBe(
-            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Weiter geht es unter „In Arbeit“ - dort schlägst du den Katalog-Eintrag vor oder teilst eine neue Version.',
+            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Unter „In Arbeit“ schlägst du den Katalog-Eintrag vor oder teilst eine neue Version.',
         )
         // Where the row has another next step - the folder changed since the review, say - it says so there.
         const changed = version('1.1.0', 2, 'merged', { bundle: { ...onBase, verification: { state: 'changed-after-merge' } }, catalog: { state: 'none' } })
         expect(stageNotice(datasetStage(DATASET, facts([changed])), DATASET.name)?.text).toBe(
-            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Weiter geht es unter „In Arbeit“ - dort steht, was als Nächstes geht.',
+            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Unter „In Arbeit“ steht, was als Nächstes geht.',
+        )
+        // A removal turned down keeps it greyed out; the notice says what its row offers - the entry only where it can follow.
+        const removalNo = removalTurnedDown('1.1.0', 2)
+        expect(stageNotice(datasetStage(DATASET, facts([removalNo])), DATASET.name)?.text).toBe(
+            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Unter „In Arbeit“ schlägst du den Katalog-Eintrag vor oder teilst eine neue Version.',
+        )
+        const noCatalogue = { ...removalNo, catalog: { state: 'unconfigured' as const } }
+        expect(stageNotice(datasetStage(DATASET, facts([noCatalogue])), DATASET.name)?.text).toBe(
+            'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Unter „In Arbeit“ teilst du eine neue Version.',
         )
         // „Neue Version teilen“ on its row names it; a link naming the same number of another package does not.
         expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0', slug: 'baeume' } }).kind).toBe('none')
@@ -332,6 +353,21 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0', slug: 'anderes' } }).kind).toBe('busy')
         expect(datasetStage(DATASET, facts(rows), { started: true }).kind).toBe('none')
         expect(blockingRows(undefined)).toEqual([])
+    })
+
+    it('frees one accepted without an entry for „Neue Version teilen“ on a higher version of its package turned down since', () => {
+        // The plan's way to fix a version (18.10., decision 4): 1.1.0 accepted, 1.1.1 shared from its row and turned down.
+        // Its row links to from=1.1.1: nothing is open, the server takes 1.1.2 - the dataset is a choice, after a "no".
+        const rows = [turnedDown('1.1.1', 5), accepted('1.1.0', 2)]
+        const opening = { from: { version: '1.1.1', slug: 'baeume' } }
+        expect(blockingRows(facts(rows).busy.get(DATASET.id), opening)).toEqual([])
+        const start = wizardStart(DATASET, facts(rows), opening, ['t'])
+        expect(start.stage).toMatchObject({ kind: 'declined', followed: { version: '1.1.1', kind: 'package' } })
+        expect(start.suggested).toBe('1.1.2')
+        // A link from a lower version, or another package, still finds it busy; and so does any link while a proposal is open.
+        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.0.0', slug: 'baeume' } }).kind).toBe('busy')
+        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.1', slug: 'anderes' } }).kind).toBe('busy')
+        expect(datasetStage(DATASET, facts([inReview('1.1.0', 2)]), opening).kind).toBe('busy')
     })
 
     it('greys out one whose removal was turned down, like any accepted version (S8)', () => {
@@ -362,16 +398,16 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         const stage = datasetStage(DATASET, facts([takenOut('1.0.0', 1)]))
         expect(stage).toEqual({ kind: 'taken-out', takenOut: { version: '1.0.0', reason: 'Veraltet.' }, whole: false })
         expect(stageHint(stage)).toBe('Version 1.0.0 aus dem Katalog genommen - du teilst eine neue Version')
-        expect(stageNotice(stage, DATASET.name)?.text).toBe('Das Katalog-Team hat Version 1.0.0 aus dem Katalog genommen. Grund: Veraltet. Frag dort nach, bevor du eine neue Version teilst.')
+        expect(stageNotice(stage, DATASET.name)?.text).toBe('Das Katalog-Team hat Version 1.0.0 aus dem Katalog genommen. Grund: Veraltet. Frag beim Katalog-Team nach, bevor du eine neue Version teilst.')
     })
 
     it('says where the whole entry was taken out that no version gets in until the catalogue team lets it in again (S9)', () => {
         const stage = datasetStage(DATASET, facts([takenOut('1.0.0', 1), version('1.1.0', 2, 'merged', { bundle: onBase, catalog: { state: 'withdrawn', takenOut: { version: '1.0.0', reason: 'Veraltet' } } })]))
         expect(stage).toEqual({ kind: 'taken-out', takenOut: { version: '1.0.0', reason: 'Veraltet' }, whole: true })
-        expect(stageHint(stage)).toBe('Ganzer Eintrag aus dem Katalog genommen - frag beim Katalog-Team nach')
+        expect(stageHint(stage)).toBe('Ganzer Eintrag aus dem Katalog genommen - nur das Katalog-Team kann ihn wieder freigeben')
         expect(stageNotice(stage, DATASET.name)?.text).toBe(
             'Das Katalog-Team hat den ganzen Eintrag aus dem Katalog genommen (zuletzt Version 1.0.0). Grund: Veraltet. ' +
-                'Auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team ihn wieder freigibt - frag dort nach, bevor du eine neue Version teilst.',
+                'Auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team den Eintrag wieder freigibt.',
         )
     })
 
@@ -489,9 +525,11 @@ describe('the Steckbrief a new version starts with', () => {
         expect(filledNotice({ from: '1.0.1', full: true })).toBe('Die Angaben sind aus Version 1.0.1 übernommen.')
         expect(filledNotice({ from: '1.0.1', full: false })).toBe(
             'Die Angaben sind aus Version 1.0.1 übernommen - bis auf Umsetzung, Kontakt, Kosten, Wirkungslogik, Kooperation und Bilder. ' +
-                'Diese Abschnitte beschreiben die Umsetzung bei der Instanz, die Version 1.0.1 geteilt hat, und welche das war, ist nicht zu erkennen. Ergänze sie für deine Instanz, soweit du sie kennst.',
+                'Diese Abschnitte gehören zu der Instanz, die Version 1.0.1 geteilt hat - welche das war, ist nicht bekannt. Ergänze sie für deine Instanz, soweit du sie kennst.',
         )
-        expect(filledNotice({ from: '1.0.1', full: false, elsewhere: true })).toContain('die Version 1.0.1 geteilt hat, und das war eine andere. Ergänze sie')
+        expect(filledNotice({ from: '1.0.1', full: false, elsewhere: true })).toContain(
+            'Diese Abschnitte gehören zu der Instanz, die Version 1.0.1 geteilt hat, und das ist eine andere als deine. Ergänze sie',
+        )
         expect(unfilledNotice('1.0.1', 'GitLab antwortet nicht')).toBe(
             'Die Angaben aus Version 1.0.1 ließen sich nicht übernehmen: GitLab antwortet nicht. Die Felder sind vorbelegt wie bei einem neuen Paket.',
         )
@@ -525,7 +563,7 @@ describe('how the wizard starts a new version (`wizardStart`)', () => {
             version: '1.2.0',
             fill: { targetKey: 't', slug: 'baeume', version: '1.2.0' },
         })
-        // With several places and no listing, nothing to ask: `prepareNewVersion` takes only the exact one.
+        // With several places and no listing, nothing to ask: `readNewVersionFill` takes only the exact one.
         expect(wizardStart(DATASET, undefined, { from: { version: '1.2.0', slug: 'baeume' } }, ['t', 'u']).fill).toBeUndefined()
     })
 
@@ -547,7 +585,7 @@ describe('a busy dataset at the Steckbrief and the preview (a link or a race)', 
         const tabbed = facts([inReview('1.1.0', 2), inReview('1.2.0', 3), accepted('1.0.0', 1)]).busy.get('ds-baeume') ?? []
         expect(busyBeside(tabbed, { targetKey: 't', slug: 'Baeume', version: '1.2.0' }).map((row) => row.row.version)).toEqual(['1.1.0'])
         expect(busyBeside(tabbed, { targetKey: 'anderswo', slug: 'baeume', version: '1.2.0' }).map((row) => row.row.version)).toEqual(['1.1.0', '1.2.0'])
-        expect(BUSY_BLOCKER).toBe('Für diesen Datensatz läuft schon ein Vorschlag - weiter geht es unter „In Arbeit“.')
+        expect(BUSY_BLOCKER).toBe('Einreichen geht erst, wenn über den anderen Vorschlag entschieden ist.')
     })
 })
 
@@ -607,7 +645,7 @@ describe('the server’s side', () => {
             { kind: 'removal', slug: 'baeume', version: '0.9.0', iid: 3, url: `${WEB}/3` },
         ])
         expect(busyRefusal(openSharesOf(requests, 'ds-baeume', BOT, HERE)[1])).toBe(
-            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.0.0, Eintrags-Prüfung, Vorschlag !2). Eine neue Version geht erst, wenn er entschieden oder zurückgezogen ist - weiter geht es unter „In Arbeit“.',
+            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.0.0, Eintrags-Prüfung, Vorschlag !2). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
         )
     })
 
@@ -622,5 +660,49 @@ describe('the server’s side', () => {
             request(7, 'catalog/baeume-4.0.0'),
         ]
         expect(proposedVersionsIn(requests, 'baeume', BOT)).toEqual(['1.0.0', '1.0.1', '1.0.3'])
+    })
+
+    it('counts a version removed again as free, as the page does, unless its entry was decided (R6, `usedVersions`)', () => {
+        // 1.0.0 turned down, 1.0.1 accepted and then removed: typing 1.0.0 is refused „zum Beispiel 1.0.1“ on both sides.
+        const removedAgain = [
+            request(3, 'remove/baeume-1.0.1', { state: 'merged', created_at: '2026-10-12T10:00:00Z', merged_at: '2026-10-13T10:00:00Z' }),
+            request(2, 'export/baeume-1.0.1', { state: 'merged', created_at: '2026-10-05T10:00:00Z' }),
+            request(1, 'export/baeume-1.0.0', { state: 'closed', created_at: '2026-10-01T10:00:00Z', closed_at: '2026-10-02T10:00:00Z' }),
+        ]
+        expect(proposedVersionsIn(removedAgain, 'baeume', BOT)).toEqual(['1.0.0'])
+        expect(suggestedVersion(pkgOf([removed('1.0.1', 2), turnedDown('1.0.0', 1)]))).toBe('1.0.1')
+        // Shared again after the removal, it is used up again; and so is one whose entry was in the catalogue or turned down.
+        const sharedAgain = [request(4, 'export/baeume-1.0.1', { created_at: '2026-10-20T10:00:00Z' }), ...removedAgain]
+        expect(proposedVersionsIn(sharedAgain, 'baeume', BOT)).toEqual(['1.0.1', '1.0.0'])
+        for (const entry of [request(5, 'catalog/baeume-1.0.1', { state: 'merged' }), request(5, 'catalog/baeume-1.0.1', { state: 'closed', closed_at: '2026-10-08T10:00:00Z' })]) {
+            expect(proposedVersionsIn([entry, ...removedAgain], 'baeume', BOT)).toEqual(['1.0.1', '1.0.0'])
+        }
+    })
+
+    it('reads only this instance’s versions, or those of one that names none, for the "no" a new version follows (R7)', () => {
+        const there = shareSourceLine({ kind: 'dataset', id: 'ds-baeume', instance: THERE })
+        const requests = [
+            request(40, 'export/baeume-1.1.5', { created_at: '2026-10-23T08:00:00Z', description: there }),
+            request(6, 'export/baeume-1.1.4', { state: 'merged', created_at: '2026-10-10T10:00:00Z' }),
+            request(2, 'export/baeume-1.1.3', { state: 'merged', created_at: '2026-10-01T10:00:00Z', description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.' }),
+        ]
+        expect(proposedHere(requests, 'baeume', BOT, HERE)).toEqual(['1.1.4', '1.1.3'])
+        expect(versionBelow(proposedHere(requests, 'baeume', BOT, HERE), '1.1.6')).toBe('1.1.4')
+        // For the version to take, every instance's counts.
+        expect(proposedVersionsIn(requests, 'baeume', BOT)).toEqual(['1.1.5', '1.1.4', '1.1.3'])
+    })
+})
+
+describe('whether an answer tells of a "no" the listing does not know (the page reads it again only then)', () => {
+    it('is news before the listing was read, and for a "no" none of its rows has; not for one it lists already', () => {
+        const rows = [turnedDown('1.0.0', 14)]
+        const told = { mrUrl: `${WEB}/14` }
+        expect(declineIsNews(undefined, { bundle: { declined: told } })).toBe(true)
+        expect(declineIsNews(rows, { bundle: { declined: told } })).toBe(false)
+        expect(declineIsNews(rows, { bundle: { declined: { mrUrl: `${WEB}/15` } } })).toBe(true)
+        expect(declineIsNews(rows, { catalog: { state: 'declined', declined: { mrUrl: `${WEB}/32` } } })).toBe(true)
+        expect(declineIsNews([entryTurnedDown('1.1.4', 6)], { catalog: { state: 'declined', declined: { mrUrl: `${WEB}/32` } }, follows: { decline: { mrUrl: `${WEB}/32` } } })).toBe(false)
+        // An answer with no "no" reads nothing again.
+        expect(declineIsNews(undefined, { catalog: { state: 'listed' } })).toBe(false)
     })
 })

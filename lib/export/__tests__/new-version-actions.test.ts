@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/session', () => ({ requireSession: vi.fn(async () => ({ user: { name: 'Test' } })), getAccessToken: vi.fn(async () => 'test-token') }))
+vi.mock('@/lib/session', () => ({
+    requireSession: vi.fn(async () => ({ user: { name: 'Test' } })),
+    getAccessToken: vi.fn(async () => 'test-token'),
+    // For the route the wizard asks the fill from.
+    currentSession: vi.fn(async () => ({ user: { name: 'Test' } })),
+    accessTokenOrUndefined: vi.fn(async () => 'keycloak-token'),
+}))
 vi.mock('@/lib/export/share-permission', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@/lib/export/share-permission')>()),
     fetchShareRight: vi.fn(async () => 'allowed'),
@@ -20,20 +26,26 @@ vi.mock('@/lib/export/gitlab', async (importOriginal) => ({
 // The package's own check has tests of its own; here it only has to let a package through.
 vi.mock('@/lib/export/package-check', () => ({ checkPackage: vi.fn(() => []) }))
 
-import { exportAction, prepareNewVersion } from '@/lib/export-actions'
+import * as fillRoute from '@/app/api/shares/fill/route'
+import { exportAction } from '@/lib/export-actions'
+import { newVersionFillUrl, requestNewVersionFill } from '@/lib/export/fill-request'
 import { openMergeRequest } from '@/lib/export/gitlab'
 import { proposerOf, shareSourceLine, shareSourceOf, withdrawalMark } from '@/lib/export/merge-request-text'
 import { followsLine } from '@/lib/export/new-version'
+import { readNewVersionFill } from '@/lib/export/new-version-fill'
 import { readUseCase } from '@/lib/export/portal-reader'
-import { fetchShareRight } from '@/lib/export/share-permission'
+import { SHARE_READS } from '@/lib/export/share-cache'
+import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
 import { readBundleStatus } from '@/lib/export/status'
+import { accessTokenOrUndefined, currentSession } from '@/lib/session'
 
 /**
  * „Auswählen“ knows the stage, and the update path (rc.7, plan slice 7), on
  * the server: a dataset with another proposal open is refused, a new version
  * after a "no" says what changed (R7) and is refused with a version that is
  * free (R6), and a new version's Steckbrief is filled from a shared one
- * (`prepareNewVersion`, plan of 2026-10-18, section 10.6).
+ * (`readNewVersionFill` behind `/api/shares/fill`, plan of 2026-10-18,
+ * section 10.6).
  */
 
 const TARGET = 'https://gitlab.example/group/catalog'
@@ -125,6 +137,8 @@ beforeEach(() => {
     vi.mocked(readUseCase).mockResolvedValue(EMPTY_SNAPSHOT)
     vi.mocked(readBundleStatus).mockResolvedValue({ state: 'none', reason: 'no-package' })
     vi.mocked(openMergeRequest).mockResolvedValue({ status: 'created', url: `${WEB}/50`, iid: 50 })
+    // The actions keep what cannot change for the server's life (`shareClient`); each test is a server of its own.
+    SHARE_READS.clear()
 })
 afterEach(() => {
     vi.unstubAllEnvs()
@@ -138,7 +152,7 @@ describe('a dataset with another proposal open (plan of 2026-10-18, section 10.7
         const result = await exportAction(null, bundleForm('1.2.0'))
         expect(result).toMatchObject({ intent: 'bundle', status: 'invalid', busy: true, mrUrl: `${WEB}/31` })
         expect(result.detail).toBe(
-            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung, Vorschlag !31). Eine neue Version geht erst, wenn er entschieden oder zurückgezogen ist - weiter geht es unter „In Arbeit“.',
+            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung, Vorschlag !31). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
         )
         expect(readUseCase).not.toHaveBeenCalled()
         expect(openMergeRequest).not.toHaveBeenCalled()
@@ -310,7 +324,7 @@ describe('the version a refusal names (R6 of 2026-10-22)', () => {
     })
 })
 
-describe('the Steckbrief of a new version, from a shared one (prepareNewVersion, plan of 2026-10-18, section 10.6)', () => {
+describe('the Steckbrief of a new version, from a shared one (readNewVersionFill, plan of 2026-10-18, section 10.6)', () => {
     const manifest = JSON.stringify({
         id: 'urn:stadt:usecase:baeume',
         displayName: 'Bäume',
@@ -333,21 +347,29 @@ describe('the Steckbrief of a new version, from a shared one (prepareNewVersion,
         })
     const atSha = { [`${DIR}/core-ir/manifest.json@${SHA}`]: manifest }
 
-    it('is not read without the right to share, nor for a place, short name or version that is no such thing', async () => {
+    it('is not read for a place, short name or version that is no such thing', async () => {
         const gitlab = fakeGitLab({ requests: [shared()], files: atSha })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
-        vi.mocked(fetchShareRight).mockResolvedValueOnce('refused')
-        expect((await prepareNewVersion(TARGET, 'baeume', '1.1.0')).status).toBe('forbidden')
-        expect(await prepareNewVersion('https://gitlab.example/anders', 'baeume', '1.1.0')).toMatchObject({ status: 'unconfigured' })
-        expect(await prepareNewVersion(TARGET, 'Bäume', '1.1.0')).toMatchObject({ status: 'invalid', detail: 'Ungültiger Kurzname oder ungültige Version.' })
-        expect(await prepareNewVersion(TARGET, 'baeume', '1.1')).toMatchObject({ status: 'invalid' })
+        expect(await readNewVersionFill('https://gitlab.example/anders', 'baeume', '1.1.0')).toMatchObject({ status: 'unconfigured' })
+        expect(await readNewVersionFill(TARGET, 'Bäume', '1.1.0')).toMatchObject({ status: 'invalid', detail: 'Ungültiger Kurzname oder ungültige Version.' })
+        expect(await readNewVersionFill(TARGET, 'baeume', '1.1')).toMatchObject({ status: 'invalid' })
         expect(gitlab.calls).toEqual([])
+    })
+
+    it('asks GitLab only for the two lists of proposals when it is asked again for the same version (plan, 10.9)', async () => {
+        const gitlab = fakeGitLab({ requests: [shared()], files: atSha })
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        await readNewVersionFill(TARGET, 'baeume', '1.1.0')
+        const first = gitlab.calls.length
+        expect((await readNewVersionFill(TARGET, 'baeume', '1.1.0')).status).toBe('ok')
+        // The project, the account and the manifest at its commit are kept; the proposals are read fresh.
+        expect(gitlab.calls.slice(first).map((call) => call.split('?')[0])).toEqual(['/projects/7/merge_requests', '/projects/7/merge_requests'])
     })
 
     it('copies every field from a share of this instance, read at its proposal’s last commit, also where it was withdrawn or turned down', async () => {
         const gitlab = fakeGitLab({ requests: [shared()], files: atSha })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
-        const answer = await prepareNewVersion(TARGET, 'baeume', '1.1.0')
+        const answer = await readNewVersionFill(TARGET, 'baeume', '1.1.0')
         expect(answer).toEqual({
             status: 'ok',
             steckbrief: {
@@ -373,7 +395,7 @@ describe('the Steckbrief of a new version, from a shared one (prepareNewVersion,
     it('copies only the package’s own fields from a share of another instance, or of one that names none (D12)', async () => {
         for (const [source, elsewhere] of [[shareSourceLine({ kind: 'dataset', id: 'local', instance: THERE }), true], [shareSourceLine({ kind: 'dataset', id: 'local' }), undefined]] as const) {
             vi.stubGlobal('fetch', fakeGitLab({ requests: [shared({}, source)], files: atSha }).fetchImpl)
-            const answer = await prepareNewVersion(TARGET, 'baeume', '1.1.0')
+            const answer = await readNewVersionFill(TARGET, 'baeume', '1.1.0')
             expect(answer.steckbrief).toMatchObject({ displayName: 'Bäume', maintainer: 'Stadt', full: false })
             expect(answer.steckbrief?.metadata).toEqual({ themes: ['umwelt-klima'] })
             // The notice over the form says another instance only where the share names one.
@@ -387,15 +409,17 @@ describe('the Steckbrief of a new version, from a shared one (prepareNewVersion,
         const again = shared({ iid: 12, state: 'closed', sha: 'c'.repeat(40), created_at: '2026-10-10T10:00:00Z' })
         const gitlab = fakeGitLab({ requests: [again, removal, before], files: { [`${DIR}/core-ir/manifest.json@${'c'.repeat(40)}`]: manifest } })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
-        expect((await prepareNewVersion(TARGET, 'baeume', '1.1.0')).status).toBe('ok')
+        expect((await readNewVersionFill(TARGET, 'baeume', '1.1.0')).status).toBe('ok')
         expect(gitlab.calls.some((call) => call.endsWith(`ref=${'b'.repeat(40)}`))).toBe(false)
     })
 
     it('asks the README at that commit for older shares without a source line', async () => {
         const readme = (instance?: string) => `# Bäume\n\nShared from a running instance\n(dataset \`Bäume\`, id \`local\`${instance ? `, instance ${instance}` : ''}).\n`
         for (const [instance, full] of [[HERE, true], [undefined, false]] as const) {
+            // Two READMEs at one commit: two repositories, as far as the server's memory goes.
+            SHARE_READS.clear()
             vi.stubGlobal('fetch', fakeGitLab({ requests: [shared({}, null)], files: { ...atSha, [`${DIR}/README.md@${SHA}`]: readme(instance) } }).fetchImpl)
-            expect((await prepareNewVersion(TARGET, 'baeume', '1.1.0')).steckbrief?.full).toBe(full)
+            expect((await readNewVersionFill(TARGET, 'baeume', '1.1.0')).steckbrief?.full).toBe(full)
         }
     })
 
@@ -404,17 +428,65 @@ describe('the Steckbrief of a new version, from a shared one (prepareNewVersion,
         const later = shared({ iid: 21, state: 'closed', sha: 'c'.repeat(40), created_at: '2026-10-15T10:00:00Z' })
         const gitlab = fakeGitLab({ requests: [later, accepted], files: { [`${DIR}/core-ir/manifest.json@${'b'.repeat(40)}`]: manifest } })
         vi.stubGlobal('fetch', gitlab.fetchImpl)
-        expect((await prepareNewVersion(TARGET, 'baeume', '1.1.0')).status).toBe('ok')
+        expect((await readNewVersionFill(TARGET, 'baeume', '1.1.0')).status).toBe('ok')
         expect(gitlab.calls.some((call) => call.endsWith(`ref=${'c'.repeat(40)}`))).toBe(false)
     })
 
     it('says so where this marketplace shared no such version, or its package is not at that commit, or GitLab fails', async () => {
         const notShared = 'Version 1.1.0 von „baeume“ ist nicht über diesen Marktplatz geteilt.'
         vi.stubGlobal('fetch', fakeGitLab({ requests: [shared({ author: { id: 7 } })], files: atSha }).fetchImpl)
-        expect(await prepareNewVersion(TARGET, 'baeume', '1.1.0')).toEqual({ status: 'missing', detail: notShared })
+        expect(await readNewVersionFill(TARGET, 'baeume', '1.1.0')).toEqual({ status: 'missing', detail: notShared })
         vi.stubGlobal('fetch', fakeGitLab({ requests: [shared()] }).fetchImpl)
-        expect(await prepareNewVersion(TARGET, 'baeume', '1.1.0')).toEqual({ status: 'missing', detail: notShared })
+        expect(await readNewVersionFill(TARGET, 'baeume', '1.1.0')).toEqual({ status: 'missing', detail: notShared })
         vi.stubGlobal('fetch', (async () => new Response(JSON.stringify({ message: 'boom' }), { status: 500 })) as typeof fetch)
-        expect((await prepareNewVersion(TARGET, 'baeume', '1.1.0')).status).toBe('error')
+        expect((await readNewVersionFill(TARGET, 'baeume', '1.1.0')).status).toBe('error')
+    })
+})
+
+describe('the route the wizard asks the fill from (GET /api/shares/fill)', () => {
+    const askRoute = async (query = new URLSearchParams({ target: TARGET, slug: 'baeume', version: '1.1.0' })) => {
+        const response = await fillRoute.GET(new Request(`https://marktplatz.example/api/shares/fill?${query}`))
+        return { response, body: await response.json() }
+    }
+
+    it('answers the fill to someone signed in who may share, kept by no browser or proxy', async () => {
+        const manifest = JSON.stringify({ id: 'urn:stadt:usecase:baeume', displayName: 'Bäume', description: 'd', version: '1.1.0', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: [], members: {} })
+        const shared = request(31, 'export/baeume-1.1.0', { state: 'merged', sha: SHA })
+        vi.stubGlobal('fetch', fakeGitLab({ requests: [shared], files: { [`${DIR}/core-ir/manifest.json@${SHA}`]: manifest } }).fetchImpl)
+        const { response, body } = await askRoute()
+        expect(response.status).toBe(200)
+        expect(response.headers.get('cache-control')).toContain('no-store')
+        expect(response.headers.get('cache-control')).toContain('private')
+        expect(body).toMatchObject({ status: 'ok', steckbrief: { from: '1.1.0', displayName: 'Bäume' } })
+        expect(fetchShareRight).toHaveBeenCalledWith('keycloak-token')
+    })
+
+    it('answers in JSON without a session or the right to share, never a redirect, and reads nothing', async () => {
+        const gitlab = fakeGitLab({})
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        vi.mocked(currentSession).mockResolvedValueOnce(undefined)
+        expect(await askRoute()).toMatchObject({ response: { status: 401 }, body: { status: 'forbidden' } })
+        vi.mocked(accessTokenOrUndefined).mockResolvedValueOnce(undefined)
+        expect((await askRoute()).response.status).toBe(401)
+        vi.mocked(fetchShareRight).mockResolvedValueOnce('refused')
+        expect(await askRoute()).toMatchObject({ response: { status: 403 }, body: { status: 'forbidden', detail: shareRefusal('refused') } })
+        vi.mocked(fetchShareRight).mockResolvedValueOnce('unknown')
+        expect(await askRoute()).toMatchObject({ response: { status: 503 }, body: { status: 'forbidden', detail: shareRefusal('unknown') } })
+        expect(gitlab.calls).toEqual([])
+    })
+
+    it('is asked by the wizard at the address it names, and anything else it answers is a failed request', async () => {
+        expect(newVersionFillUrl(TARGET, 'baeume', '1.1.0')).toBe(`/api/shares/fill?target=${encodeURIComponent(TARGET)}&slug=baeume&version=1.1.0`)
+        const answered = vi.fn(async () => Response.json({ status: 'missing', detail: 'x' }, { status: 200 }))
+        expect(await requestNewVersionFill({ targetKey: TARGET, slug: 'baeume', version: '1.1.0' }, undefined, answered as unknown as typeof fetch)).toEqual({ status: 'missing', detail: 'x' })
+        const broken = vi.fn(async () => new Response('<html>', { status: 502 }))
+        expect(await requestNewVersionFill({ targetKey: TARGET, slug: 'baeume', version: '1.1.0' }, undefined, broken as unknown as typeof fetch)).toEqual({
+            status: 'error',
+            detail: 'Die Anfrage an den Server ist fehlgeschlagen.',
+        })
+        // A choice of another dataset cancels it: the request rejects, and the wizard drops it.
+        const request = new AbortController()
+        request.abort()
+        await expect(requestNewVersionFill({ targetKey: TARGET, slug: 'baeume', version: '1.1.0' }, request.signal)).rejects.toThrow()
     })
 })

@@ -1,4 +1,4 @@
-import { useCaseSlugPattern } from '@/lib/catalog/schema'
+import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 
 /**
  * Where the wizard of "Teilen" stands, as an address (plan of 2026-10-18,

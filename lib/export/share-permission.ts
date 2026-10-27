@@ -41,6 +41,9 @@ export function shareRefusal(right: ShareRight): string | undefined {
     return undefined
 }
 
+/** The share routes' answer where the session is gone or its token cannot be renewed. */
+export const SIGNED_OUT = 'Deine Anmeldung ist abgelaufen - bitte lade die Seite neu und melde dich wieder an.'
+
 /**
  * Why what was submitted stays hidden from this person, in the words of the
  * pages that list it (and of `GET /api/shares`). The share page's refusal

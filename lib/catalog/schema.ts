@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { NAME_PATTERN, PUBLISHER_PATTERN } from '@/lib/catalog/use-case-id'
 import {
     costBandSchema,
     curationTierSchema,
@@ -34,12 +35,8 @@ const COMMIT_SHA = /^[0-9a-f]{40}$/i
  * platform (`urn:core:standard:…`), they have no detail route, and redefining
  * their identity is not ours to do.
  */
-const PUBLISHER_PATTERN = '[a-z0-9]{2,40}'
-
-const NAME_PATTERN = '[a-z0-9][a-z0-9-]{0,58}[a-z0-9]'
-
-/** The `<name>` part on its own — the export validates its slug field with this. */
-export const useCaseSlugPattern = new RegExp(`^${NAME_PATTERN}$`)
+// Kept apart from the schema library (`use-case-id.ts`), so the share pages need not load it.
+export { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 
 const USE_CASE_ID = new RegExp(`^urn:${PUBLISHER_PATTERN}:usecase:${NAME_PATTERN}$`)
 

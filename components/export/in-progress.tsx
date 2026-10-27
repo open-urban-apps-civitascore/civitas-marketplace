@@ -8,7 +8,7 @@ import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog
 import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete-share-dialog'
 import { useShareView } from '@/components/export/share-listing-provider'
 import { ShareRow, StatusLine } from '@/components/export/share-row'
-import { EmptyTab } from '@/components/export/share-tab-states'
+import { elsewhereLine, EmptyTab } from '@/components/export/share-tab-states'
 import { Button, buttonClass, ExternalAnchor } from '@/components/ui/button'
 import { Notice, Pending } from '@/components/ui/notice'
 import {
@@ -39,11 +39,6 @@ function itemTitle(item: InProgressItem): string {
 
 /** Datasets that could not be read count as there: a portal that did not answer is no reason to stop anyone going on. */
 const ANY_DATASET: DatasetsHere = { has: () => true }
-
-/** „2 weitere Einträge stammen von anderen Instanzen.“ */
-export function elsewhereLine(count: number): string {
-    return count === 1 ? '1 weiterer Eintrag stammt von einer anderen Instanz.' : `${count} weitere Einträge stammen von anderen Instanzen.`
-}
 
 /**
  * The tab „In Arbeit“ on its page (/export), fed from the share pages' one

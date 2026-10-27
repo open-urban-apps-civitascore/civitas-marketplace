@@ -10,11 +10,11 @@ import type { Tone } from '@/lib/ui/tones'
 
 /**
  * One shared version, or one started share, as a card (E3) in the lists of
- * "Teilen" (plan of 2026-10-18, section 4): the icon tile in the colour of
- * what it becomes, the name and „Version x“, where it came from, the progress
- * line with its status sentence, the catalogue team's words to a "no",
- * earlier versions, and the actions on the right. Results of an action come
- * in as `children`, inside the card they are about.
+ * "Teilen": the icon tile in the colour of what it becomes, the name and
+ * „Version x“, where it came from, the progress line with its status sentence,
+ * the catalogue team's words to a "no", earlier versions, and the actions on
+ * the right. Results of an action come in as `children`, inside the card they
+ * are about.
  *
  * The actions follow the sentence and the team's words in the page, so a
  * screen reader hears where a share stands, and why, before what can be done
@@ -44,8 +44,8 @@ export function ShareRow({
     /** „aus Datensatz „X“ · eingereicht am 12.10. von Ewa“ */
     origin?: string
     track?: TrackStep[]
-    /** The status sentence, or something in its place (the row is read again). */
-    status: ReactNode
+    /** The status sentence, or something in its place (the row is read again); a row of „Veröffentlicht“ has none. */
+    status?: ReactNode
     /** The catalogue team's words to a "no". */
     reasons?: ReasonLine[]
     /** „Frühere Versionen: …“ */
@@ -56,6 +56,8 @@ export function ShareRow({
     titleAs?: 'h3' | 'h4'
     children?: ReactNode
 }) {
+    // Left out with nothing in it: an empty cell would add a gap at phone width, and the actions would span an empty row.
+    const middle = Boolean(track || status || reasons?.length || earlier)
     return (
         // Focusable, so a link to the row (`rowAnchor`) moves the focus there, not back to the top of the page.
         <li
@@ -63,7 +65,8 @@ export function ShareRow({
             tabIndex={id ? -1 : undefined}
             className="flex flex-col gap-3 rounded-lg border bg-card p-5 scroll-mt-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-6">
+            {/* The actions take at most half the card and wrap there: as wide as one line of them, they would leave the name a sliver. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_fit-content(50%)] sm:gap-x-6">
                 <div className="flex min-w-0 items-start gap-3">
                     <IconTile icon={kind.icon} tone={kind.tone} />
                     <div className="flex min-w-0 flex-col gap-0.5">
@@ -74,14 +77,21 @@ export function ShareRow({
                         {origin && <p className="break-words text-xs text-muted-foreground">{origin}</p>}
                     </div>
                 </div>
-                <div className="flex min-w-0 flex-col gap-2 sm:pl-10">
-                    {track && <ShareTrack steps={track} />}
-                    {status}
-                    {reasons?.map((reason) => <ReasonText key={reason.text} reason={reason} />)}
-                    {earlier && <p className="text-xs text-muted-foreground">{earlier}</p>}
-                </div>
+                {middle && (
+                    <div className="flex min-w-0 flex-col gap-2 sm:pl-10">
+                        {track && <ShareTrack steps={track} />}
+                        {status}
+                        {reasons?.map((reason) => <ReasonText key={reason.text} reason={reason} />)}
+                        {earlier && <p className="text-xs text-muted-foreground">{earlier}</p>}
+                    </div>
+                )}
                 {actions && (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:justify-end sm:self-start">
+                    <div
+                        className={cn(
+                            'flex flex-wrap items-center gap-x-4 gap-y-2 sm:col-start-2 sm:row-start-1 sm:justify-end sm:self-start',
+                            middle && 'sm:row-span-2',
+                        )}
+                    >
                         {actions}
                     </div>
                 )}

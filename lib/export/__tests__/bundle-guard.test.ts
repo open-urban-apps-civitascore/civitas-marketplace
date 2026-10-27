@@ -24,6 +24,7 @@ import { exportAction } from '@/lib/export-actions'
 import { openMergeRequest } from '@/lib/export/gitlab'
 import { proposerOf, readmeSourceOf, shareSourceOf, withdrawalMark } from '@/lib/export/merge-request-text'
 import { readUseCase } from '@/lib/export/portal-reader'
+import { SHARE_READS } from '@/lib/export/share-cache'
 import { readBundleStatus } from '@/lib/export/status'
 
 const TARGET = 'https://gitlab.example/group/catalog'
@@ -99,6 +100,8 @@ beforeEach(() => {
     vi.stubEnv('CATALOG_REPO_URL', '')
     vi.mocked(readUseCase).mockResolvedValue(EMPTY_SNAPSHOT)
     vi.mocked(openMergeRequest).mockResolvedValue({ status: 'created', url: `${TARGET}/-/merge_requests/31`, iid: 31 })
+    // The actions keep what cannot change for the server's life (`shareClient`); each test is a server of its own.
+    SHARE_READS.clear()
 })
 afterEach(() => {
     vi.unstubAllEnvs()
@@ -305,6 +308,8 @@ describe('a "no" read from GitLab itself, for the same version (R1, R8)', () => 
         const changeTurnedDown = closedAgain({ created_at: '2026-10-05T10:00:00Z', closed_at: '2026-10-06T10:00:00Z' })
         vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [removed, changeTurnedDown, accepted], folder: [] }).fetchImpl)
         expect((await exportAction(null, bundleForm('1.1.0'))).status).toBe('ok')
+        // The proposal starts over at the removal for R5 too: the "no" before it holds no branch (`openMergeRequest`).
+        expect(vi.mocked(openMergeRequest).mock.calls[0][1]).toMatchObject({ branch: 'export/baeume-1.1.0', restartedBy: 'remove/baeume-1.1.0' })
     })
 
     it('fails rather than refuses where a close by the account cannot be told from a withdrawal, as its comments cannot be read', async () => {

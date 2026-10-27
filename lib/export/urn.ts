@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 
+import { compactName } from '@/lib/export/names'
+
 /**
  * CORE URN helpers for the export: parsing, the catalogue's derived identity,
  * and the name normalisation the catalogue packages use.
@@ -85,29 +87,8 @@ export function isCatalogAuthored(urn: string): boolean {
     return parseCoreUrn(urn)?.scope === 'standard'
 }
 
-const UMLAUTS: Record<string, string> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' }
-
-/**
- * The URN name segment the catalogue packages use: lowercase, umlauts
- * transliterated, everything that is not a letter or digit dropped
- * ("Kiez-Baum" → "kiezbaum", "Baumkataster-DB" → "baumkatasterdb"). It is
- * also the second half of the derivation key, so it must be stable: the same
- * title always yields the same identity.
- */
-export function compactName(title: string): string {
-    const lowered = title.trim().toLowerCase().replace(/[äöüß]/g, (c) => UMLAUTS[c] ?? c)
-    const stripped = lowered.normalize('NFD').replace(/[̀-ͯ]/g, '')
-    const compact = stripped.replace(/[^a-z0-9]/g, '')
-    return compact || 'unnamed'
-}
-
-/** A file-name-safe slug: lowercase, umlauts transliterated, runs of other characters become one dash. */
-export function slugify(title: string): string {
-    const lowered = title.trim().toLowerCase().replace(/[äöüß]/g, (c) => UMLAUTS[c] ?? c)
-    const stripped = lowered.normalize('NFD').replace(/[̀-ͯ]/g, '')
-    const slug = stripped.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-    return slug || 'unnamed'
-}
+// Apart from the hash (`names.ts`), so the share pages can make a short name in the browser.
+export { compactName, slugify } from '@/lib/export/names'
 
 /** A URN segment must not carry the separator or whitespace; the publisher and domain come from a form. */
 export function urnSegment(value: string, fallback: string): string {

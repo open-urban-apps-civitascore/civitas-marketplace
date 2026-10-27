@@ -16,9 +16,9 @@ import { WIZARD_PATH } from '@/lib/export/wizard-address'
 export const TAB_LEADS: Record<ShareTab, string> = {
     'in-progress':
         'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist. ' +
-        `Was das Katalog-Team nicht angenommen hat, steht hier ${DECLINE_DAYS} Tage, danach unter „Beendet“.`,
+        `Was das Katalog-Team nicht angenommen hat, bleibt hier ${DECLINE_DAYS} Tage lang und steht von Anfang an auch unter „Beendet“.`,
     published: 'Was aus dieser Instanz im Katalog steht - beide Prüfungen sind durch. Herausnehmen kann einen Eintrag nur das Katalog-Team.',
-    ended: 'Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.',
+    ended: 'Was zurückgezogen, nicht angenommen, entfernt oder aus dem Katalog genommen wurde, mit Datum und Namen. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.',
 }
 
 /** The tab names, for the heading screen readers find on each tab's page. */
@@ -36,6 +36,11 @@ const EMPTY: Record<ShareTab, { title: string; body?: string; toWizard: boolean 
         toWizard: true,
     },
     ended: { title: 'Noch nichts beendet.', toWizard: false },
+}
+
+/** What other instances shared through the same account: counted, not listed (demo, dev and local share one). */
+export function elsewhereLine(count: number): string {
+    return count === 1 ? '1 weiterer Eintrag stammt von einer anderen Instanz.' : `${count} weitere Einträge stammen von anderen Instanzen.`
 }
 
 /**
