@@ -46,26 +46,28 @@ describe('the tab bar of „Teilen“', () => {
         expect(link(html, 'In Arbeit')).toContain('border-transparent')
     })
 
-    it('counts what is in progress, with what waits for the person, and says it in words', () => {
-        const html = bar('in-progress', { inProgress: 3, mine: 1, published: 2 })
-        expect(text(link(html, 'In Arbeit'))).toBe('In Arbeit In Arbeit 3 · 1 bei dir , 3 Einträge, bei 1 bist du dran')
-        // The visible count is not read out twice: screen readers hear the sentence.
-        expect(link(html, 'In Arbeit')).toContain('<span aria-hidden="true">3 · 1 bei dir</span>')
-        expect(text(link(html, 'Veröffentlicht'))).toContain('2 , 2 Einträge')
+    it('shows one count per list tab, says it in words, and none on „Beendet“', () => {
+        const html = bar('in-progress', { inProgress: 6, published: 3 })
+        expect(text(link(html, 'In Arbeit'))).toBe('In Arbeit In Arbeit 6 , 6 Einträge')
+        // The visible count is not read out twice: screen readers hear the words.
+        expect(link(html, 'In Arbeit')).toContain('<span aria-hidden="true">6</span>')
+        expect(text(link(html, 'Veröffentlicht'))).toBe('Veröffentlicht Veröffentlicht 3 , 3 Einträge')
         expect(text(link(html, 'Beendet'))).toBe('Beendet Beendet')
+        expect(text(bar('in-progress', { inProgress: 1, published: 0 }))).toContain('1 , 1 Eintrag')
     })
 
-    it('says nothing about the person’s turn when nothing waits for them', () => {
-        const html = bar('in-progress', { inProgress: 1, mine: 0, published: 0 })
-        expect(text(link(html, 'In Arbeit'))).toContain('1 , 1 Eintrag')
+    it('says nothing about whose move it is: „In Arbeit“ says that in its groups', () => {
+        const html = bar('in-progress', { inProgress: 3, published: 0 })
         expect(html).not.toContain('bei dir')
-        expect(text(link(html, 'Veröffentlicht'))).toContain('0 , 0 Einträge')
+        expect(html).not.toContain('dran')
     })
 
-    it('keeps room for the counts before they arrive, so the bar does not move', () => {
+    it('keeps room for two digits before the counts arrive, so the bar does not move, and no more', () => {
         const html = bar('in-progress')
-        expect(link(html, 'In Arbeit')).toContain('min-w-[4.5rem]')
-        expect(link(html, 'Veröffentlicht')).toContain('min-w-[1.5rem]')
+        expect(link(html, 'In Arbeit')).toContain('min-w-[2ch]')
+        expect(link(html, 'Veröffentlicht')).toContain('min-w-[2ch]')
+        // The room „3 · 1 bei dir“ needed is gone with it.
+        expect(html).not.toContain('min-w-[4.5rem]')
         expect(text(html)).not.toMatch(/\d/)
         // The bold form's width is held by an invisible copy of each label.
         expect(html.match(/class="invisible col-start-1 row-start-1 font-semibold"/g)).toHaveLength(3)
@@ -92,8 +94,8 @@ describe('the counts in the tab bar', () => {
     const counts = { inProgress: 4, mine: 2, published: 3 }
     const base = { enabled: true, draftsReady: true, drafts: 1, rows: [], counts }
 
-    it('shows what the tab rules count once everything is read', () => {
-        expect(tabCounts(base)).toEqual(counts)
+    it('shows what the tab rules count once everything is read, without the person’s own moves', () => {
+        expect(tabCounts(base)).toEqual({ inProgress: 4, published: 3 })
     })
 
     it('shows none while the browser or GitLab is still read, or when GitLab could not be read', () => {
@@ -103,7 +105,7 @@ describe('the counts in the tab bar', () => {
     })
 
     it('counts only the started shares for a person who may not see what was submitted', () => {
-        expect(tabCounts({ ...base, enabled: false, rows: [] })).toEqual({ inProgress: 1, mine: 1 })
+        expect(tabCounts({ ...base, enabled: false, rows: [] })).toEqual({ inProgress: 1 })
     })
 })
 

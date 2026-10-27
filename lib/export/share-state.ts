@@ -1,4 +1,6 @@
 import type { ExportActionResult } from '@/lib/export-actions'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
+import { isNewerVersion } from '@/lib/export/share-stages'
 import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
 
 /**
@@ -64,6 +66,43 @@ export function takenOutOf(states: ShareStates, key: string): CatalogStatus['tak
     // The version is the key's last part, and has no colon of its own.
     const samePackage = key.slice(0, key.lastIndexOf(':') + 1)
     return Object.entries(states).find(([other, known]) => other.startsWith(samePackage) && known.catalog?.takenOut)?.[1].catalog?.takenOut
+}
+
+/** A version the catalogue team changed while reviewing it, and where their change is to see. */
+export interface ReviewChange {
+    version: string
+    /** The commits of the proposal they merged („Änderung ansehen“). */
+    changeUrl: string
+}
+
+/**
+ * The version on the base branch that the catalogue team changed in review
+ * (`changedInReview`), when `share` is newer and would write over their
+ * change. Undefined while the listing is not read.
+ */
+export function reviewChangeBelow(
+    rows: readonly SharedPackageRow[] | null,
+    share: { targetKey: string; slug: string; version: string },
+): ReviewChange | undefined {
+    const slug = share.slug.trim().toLowerCase()
+    const version = share.version.trim()
+    const changed = rows?.find(
+        (row) =>
+            row.targetKey === share.targetKey &&
+            row.slug === slug &&
+            row.bundle?.state === 'on-base' &&
+            row.bundle.verification?.state === 'verified' &&
+            row.bundle.verification.changedInReview &&
+            isNewerVersion(version, row.version),
+    )
+    if (!changed) return undefined
+    const merged = changed.bundle?.verification?.mergedMrUrl ?? changed.bundleMr.url
+    return { version: changed.version, changeUrl: reviewChangeUrl(merged) }
+}
+
+/** Where the catalogue team's change in review is to see: the commits of the proposal they merged. */
+export function reviewChangeUrl(mergedMrUrl: string): string {
+    return `${mergedMrUrl.replace(/\/+$/, '')}/commits`
 }
 
 /** `states` with one result folded into the entry for `key`; the other versions stay as they were. */

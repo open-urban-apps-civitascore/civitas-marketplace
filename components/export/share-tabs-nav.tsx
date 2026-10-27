@@ -14,9 +14,10 @@ import { cn } from '@/lib/utils'
  * heading. Links, not ARIA tabs: each tab has its own address, and browser
  * back moves between them as between any pages.
  *
- * The active tab has two cues, underline and bold, and `aria-current`. Each
- * label reserves the width of its bold form, and each count the width of a
- * typical count, so the bar does not move when the page changes or the
+ * The active tab has two cues, underline and bold, and `aria-current`. „In
+ * Arbeit“ and „Veröffentlicht“ show a count; „Beendet“, a log that only grows,
+ * none. Each label reserves the width of its bold form, and each count the
+ * width of two digits, so the bar does not move when the page changes or the
  * counts arrive a second or two later. Too wide for a phone, it scrolls
  * sideways inside itself, never the page.
  */
@@ -37,8 +38,6 @@ export function activeShareTab(pathname: string): ShareTab | undefined {
 export interface TabCounts {
     /** Entries in „In Arbeit“, started shares included. */
     inProgress?: number
-    /** Of those, the person's own moves: „1 bei dir“. */
-    mine?: number
     published?: number
 }
 
@@ -57,30 +56,17 @@ export function tabCounts(view: {
     counts: ShareTabs['counts']
 }): TabCounts | undefined {
     if (!view.draftsReady) return undefined
-    if (!view.enabled) return { inProgress: view.drafts, mine: view.drafts }
+    if (!view.enabled) return { inProgress: view.drafts }
     if (view.rows === null || view.error) return undefined
-    return view.counts
+    return { inProgress: view.counts.inProgress, published: view.counts.published }
 }
 
 const entries = (count: number) => `${count} ${count === 1 ? 'Eintrag' : 'Einträge'}`
 
-/** „3 · 1 bei dir“ to see, „3 Einträge, bei 1 bist du dran“ to hear. */
-function InProgressCount({ total, mine }: { total?: number; mine?: number }) {
+/** „6“ to see, „6 Einträge“ to hear; the room for two digits kept while it is not known yet. */
+function Count({ total }: { total?: number }) {
     return (
-        <span className="inline-block min-w-[4.5rem] text-left text-xs font-normal tabular-nums text-muted-foreground">
-            {total !== undefined && (
-                <>
-                    <span aria-hidden>{mine ? `${total} · ${mine} bei dir` : total}</span>
-                    <span className="sr-only">{`, ${entries(total)}${mine ? `, bei ${mine} bist du dran` : ''}`}</span>
-                </>
-            )}
-        </span>
-    )
-}
-
-function PlainCount({ total }: { total?: number }) {
-    return (
-        <span className="inline-block min-w-[1.5rem] text-left text-xs font-normal tabular-nums text-muted-foreground">
+        <span className="inline-block min-w-[2ch] text-left text-xs font-normal tabular-nums text-muted-foreground">
             {total !== undefined && (
                 <>
                     <span aria-hidden>{total}</span>
@@ -125,8 +111,8 @@ export function ShareTabsNav({ active, counts }: { active?: ShareTab; counts?: T
                                 )}
                             >
                                 <Label text={link.label} />
-                                {link.tab === 'in-progress' && <InProgressCount total={counts?.inProgress} mine={counts?.mine} />}
-                                {link.tab === 'published' && <PlainCount total={counts?.published} />}
+                                {link.tab === 'in-progress' && <Count total={counts?.inProgress} />}
+                                {link.tab === 'published' && <Count total={counts?.published} />}
                             </Link>
                         </li>
                     )

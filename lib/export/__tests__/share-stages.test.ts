@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isNewerVersion, nextPatch, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
+import { declinedStage, isNewerVersion, nextPatch, removalDeclinedNotice, reviewChangeNotice, shareProgress, takenOutNotice, turnLabel } from '@/lib/export/share-stages'
 
 const verified = { state: 'verified' as const, mergedMrUrl: 'https://gitlab.example/mr/1' }
 
@@ -208,5 +208,39 @@ describe('nextPatch', () => {
         expect(nextPatch('1.0.2')).toBe('1.0.3')
         expect(nextPatch('1.1.9')).toBe('1.1.10')
         expect(nextPatch('beta')).toBe('1.0.0')
+    })
+})
+
+describe('the wizard’s words for a "no" (2026-10-22, 3.3)', () => {
+    const no = { iid: 14, mrUrl: 'https://gitlab.example/-/merge_requests/14', closedAt: '2026-10-21T10:00:00Z', closedBy: 'spaudanjo', reason: { kind: 'given' as const, text: 'Bitte mit Lizenz.' } }
+
+    it('says at the package review who said no and when, their words, and the higher version to take (S1)', () => {
+        expect(declinedStage('review', no, '1.0.0')).toEqual({
+            who: 'Das Katalog-Team - nicht angenommen am 21.10.',
+            reason: 'Grund (spaudanjo): „Bitte mit Lizenz.“',
+            next: 'Für die überarbeitete Fassung nimm eine höhere Version, zum Beispiel 1.0.1.',
+        })
+    })
+
+    it('says at the entry review that a different entry is a new version, and tells a close through the account as one (S5, S10)', () => {
+        expect(declinedStage('listing', { ...no, viaMarketplace: true, reason: { kind: 'none' } }, '1.1.4')).toEqual({
+            who: 'Über das Marktplatz-Konto geschlossen am 21.10. - gilt als nicht angenommen',
+            reason: 'Ohne Begründung.',
+            next: 'Der Eintrag entsteht aus dem angenommenen Paket. Für einen anderen Eintrag teilst du eine neue Version, die wieder geprüft wird.',
+        })
+    })
+
+    it('says that a removal turned down leaves the package accepted (S8)', () => {
+        // In the note's words (3.3, S8): who decided first.
+        expect(removalDeclinedNotice(no)).toBe('Das Katalog-Team hat das Entfernen am 21.10. nicht angenommen - das Paket bleibt angenommen. Grund (spaudanjo): „Bitte mit Lizenz.“')
+        expect(removalDeclinedNotice({ ...no, viaMarketplace: true, reason: { kind: 'none' } })).toBe(
+            'Das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen) - das Paket bleibt angenommen. Ohne Begründung.',
+        )
+    })
+
+    it('warns that a new version from the dataset writes over what the team changed in review (S3)', () => {
+        expect(reviewChangeNotice('1.1.4')).toBe(
+            'Bei der Prüfung von 1.1.4 hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf der Instanz.',
+        )
     })
 })

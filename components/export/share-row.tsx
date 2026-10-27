@@ -4,7 +4,7 @@ import { CircleX, Info, LayoutGrid, Undo2, type LucideIcon } from 'lucide-react'
 import { ShareTrack } from '@/components/export/share-track'
 import { ExternalAnchor } from '@/components/ui/button'
 import { IconTile } from '@/components/ui/icon-tile'
-import type { RowStatus, TrackStep } from '@/lib/export/in-progress-items'
+import type { ReasonLine, RowStatus, TrackStep } from '@/lib/export/in-progress-items'
 import { cn } from '@/lib/utils'
 import type { Tone } from '@/lib/ui/tones'
 
@@ -12,13 +12,14 @@ import type { Tone } from '@/lib/ui/tones'
  * One shared version, or one started share, as a card (E3) in the lists of
  * "Teilen" (plan of 2026-10-18, section 4): the icon tile in the colour of
  * what it becomes, the name and „Version x“, where it came from, the progress
- * line with its status sentence, earlier versions, and the actions on the
- * right. Results of an action come in as `children`, inside the card they
- * are about.
+ * line with its status sentence, the catalogue team's words to a "no",
+ * earlier versions, and the actions on the right. Results of an action come
+ * in as `children`, inside the card they are about.
  *
- * The actions follow the sentence in the page, so a screen reader hears
- * where a share stands before what can be done about it; from tablet width
- * on they stand on the right.
+ * The actions follow the sentence and the team's words in the page, so a
+ * screen reader hears where a share stands, and why, before what can be done
+ * about it; from tablet width on they stand on the right. `titleAs`: one
+ * heading level below the heading of the group the card is in.
  *
  * Server-safe: no hooks; the list passes its buttons in.
  */
@@ -28,9 +29,11 @@ export function ShareRow({
     origin,
     track,
     status,
+    reasons,
     earlier,
     actions,
     kind = { icon: LayoutGrid, tone: 'usecase' },
+    titleAs: Title = 'h3',
     children,
 }: {
     title: string
@@ -40,11 +43,14 @@ export function ShareRow({
     track?: TrackStep[]
     /** The status sentence, or something in its place (the row is read again). */
     status: ReactNode
+    /** The catalogue team's words to a "no". */
+    reasons?: ReasonLine[]
     /** „Frühere Versionen: …“ */
     earlier?: string
     actions?: ReactNode
     /** What it becomes in the catalogue: a dataset becomes an Anwendungsfall (green), a data structure stays one (blue). */
     kind?: { icon: LucideIcon; tone: Tone }
+    titleAs?: 'h3' | 'h4'
     children?: ReactNode
 }) {
     return (
@@ -53,16 +59,17 @@ export function ShareRow({
                 <div className="flex min-w-0 items-start gap-3">
                     <IconTile icon={kind.icon} tone={kind.tone} />
                     <div className="flex min-w-0 flex-col gap-0.5">
-                        <h3 className="hyphens-auto break-words text-sm font-semibold text-foreground">
+                        <Title className="hyphens-auto break-words text-sm font-semibold text-foreground">
                             {title}
                             {version && <span className="font-normal text-muted-foreground"> Version {version}</span>}
-                        </h3>
+                        </Title>
                         {origin && <p className="break-words text-xs text-muted-foreground">{origin}</p>}
                     </div>
                 </div>
                 <div className="flex min-w-0 flex-col gap-2 sm:pl-10">
                     {track && <ShareTrack steps={track} />}
                     {status}
+                    {reasons?.map((reason) => <ReasonText key={reason.text} reason={reason} />)}
                     {earlier && <p className="text-xs text-muted-foreground">{earlier}</p>}
                 </div>
                 {actions && (
@@ -80,6 +87,24 @@ const STATUS_MARK: Partial<Record<RowStatus['tone'], { icon: LucideIcon; classNa
     neutral: { icon: Info, className: 'text-muted-foreground' },
     error: { icon: CircleX, className: 'text-error' },
     removal: { icon: Undo2, className: 'text-muted-foreground' },
+}
+
+/** The catalogue team's words to a "no", with a link to the proposal where the rest of them is. */
+function ReasonText({ reason }: { reason: ReasonLine }) {
+    return (
+        <p className="break-words text-sm leading-relaxed text-foreground">
+            {reason.text}
+            {reason.link && (
+                <>
+                    {' '}
+                    <ExternalAnchor href={reason.link.href}>
+                        {reason.link.label}
+                        {reason.link.heard && <span className="sr-only">{reason.link.heard}</span>}
+                    </ExternalAnchor>
+                </>
+            )}
+        </p>
+    )
 }
 
 /** The one sentence that says where a share stands; on a row without a progress line, with the icon of its kind. */

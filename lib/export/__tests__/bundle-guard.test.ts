@@ -223,7 +223,7 @@ describe('a version whose package the catalogue team turned down (R1, 2026-10-22
         vi.mocked(readBundleStatus).mockResolvedValue({ state: 'none', reason: 'no-package', declined: { ...declined, closedBy: 'walkable.cities.2021', viaMarketplace: true } })
         vi.stubGlobal('fetch', fakeGitLab({ index: indexOf(), requests: [], folder: [] }).fetchImpl)
         expect((await exportAction(null, bundleForm('1.1.0'))).detail).toBe(
-            'Nicht eingereicht: Version 1.1.0 wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen. Nimm eine höhere Version, zum Beispiel 1.1.1.',
+            'Nicht eingereicht: Version 1.1.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Nimm eine höhere Version, zum Beispiel 1.1.1.',
         )
     })
 

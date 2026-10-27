@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+    declinedBy,
     declinedChange,
     declinedOn,
     declinedProposal,
@@ -10,12 +11,16 @@ import {
     mayBeWithdrawn,
     packageRefusal,
     presentProposals,
+    reasonLine,
+    reasonWords,
+    removalDeclineShown,
     removalRefusal,
     type Decline,
 } from '@/lib/export/declines'
 import { clientFor, readClosing, type MergeRequestNote, type MergeRequestRef } from '@/lib/export/gitlab'
 import { withdrawalMark } from '@/lib/export/merge-request-text'
 import type { ShareProposal } from '@/lib/export/share-listing'
+import { rowOutcome } from '@/lib/export/share-tabs'
 import { inspectBundle, inspectCatalog, presentRequests, readDecline } from '@/lib/export/status'
 
 const WEB = 'https://gitlab.example/group/catalog'
@@ -114,19 +119,19 @@ describe('which proposal is a "no"', () => {
         const account: Decline = { ...team, iid: 32, closedBy: 'walkable.cities.2021', viaMarketplace: true }
         expect(packageRefusal('1.0.0', team, '1.0.1')).toBe('Nicht eingereicht: Version 1.0.0 hat das Katalog-Team am 22.10. nicht angenommen. Nimm eine höhere Version, zum Beispiel 1.0.1.')
         expect(packageRefusal('1.0.0', account, '1.0.1')).toBe(
-            'Nicht eingereicht: Version 1.0.0 wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen. Nimm eine höhere Version, zum Beispiel 1.0.1.',
+            'Nicht eingereicht: Version 1.0.0 wurde am 22.10. nicht angenommen (über das Marktplatz-Konto geschlossen). Nimm eine höhere Version, zum Beispiel 1.0.1.',
         )
         expect(entryRefusal('1.1.4', team)).toBe(
             'Kein Katalog-Eintrag: Das Katalog-Team hat den Eintrag für Version 1.1.4 am 22.10. nicht angenommen (Vorschlag !31). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
         )
         expect(entryRefusal('1.1.4', account)).toBe(
-            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.4 wurde am 22.10. über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !32). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
+            'Kein Katalog-Eintrag: Der Eintrag für Version 1.1.4 wurde am 22.10. nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Für diese Version schlägt der Marktplatz ihn nicht noch einmal vor - teile eine neue Version.',
         )
         expect(removalRefusal(team)).toBe(
             'Das Katalog-Team hat das Entfernen dieser Version am 22.10. nicht angenommen (Vorschlag !31). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
         )
         expect(removalRefusal({ ...account, closedAt: undefined })).toBe(
-            'Das Entfernen dieser Version wurde über das Marktplatz-Konto geschlossen und gilt als nicht angenommen (Vorschlag !32). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
+            'Das Entfernen dieser Version wurde nicht angenommen (Vorschlag !32, über das Marktplatz-Konto geschlossen). Noch einmal vorschlagen geht von hier nicht - frag beim Katalog-Team nach.',
         )
     })
 
@@ -327,5 +332,69 @@ describe('the reading of one version, for the wizard and the refusals', () => {
         expect((await inspectCatalog(fakeGitLab({ branches: reopened, files: index([]) }).client, catalogue, 'baeume', '1.1.0', 'urn:stadt:usecase:baeume')).status).toMatchObject({
             state: 'mr-open',
         })
+    })
+})
+
+describe('how a "no" is told (2026-10-22, 3.3)', () => {
+    const no = (extra: Partial<Decline> = {}): Decline => ({ iid: 14, mrUrl: `${WEB}/-/merge_requests/14`, closedAt: '2026-10-21T10:00:00Z', closedBy: 'spaudanjo', reason: { kind: 'none' }, ...extra })
+    const given = { kind: 'given' as const, text: 'Die Datenquelle ist nicht öffentlich.' }
+
+    it('gives the team’s words with the reviewer’s name, or that there were none, or that they could not be read (U4)', () => {
+        expect(reasonWords(no({ reason: given }))).toBe('Grund (spaudanjo): „Die Datenquelle ist nicht öffentlich.“')
+        expect(reasonWords(no({ reason: given, closedBy: undefined }))).toBe('Grund: „Die Datenquelle ist nicht öffentlich.“')
+        expect(reasonWords(no())).toBe('Ohne Begründung.')
+        expect(reasonWords(no({ reason: { kind: 'unreadable' } }))).toBe('Der Grund ließ sich gerade nicht lesen.')
+    })
+
+    it('says of a close through the marketplace’s account that it was one, naming nobody (S10: !31 and !32)', () => {
+        const via = (reason: Decline['reason']) => no({ viaMarketplace: true, closedBy: 'walkable.cities.2021', reason })
+        expect(reasonLine(via({ kind: 'none' }))).toBe('Über das Marktplatz-Konto geschlossen, ohne Begründung.')
+        expect(reasonLine(via(given))).toBe('Über das Marktplatz-Konto geschlossen. Grund: „Die Datenquelle ist nicht öffentlich.“')
+        expect(reasonLine(via({ kind: 'unreadable' }))).toBe('Über das Marktplatz-Konto geschlossen. Der Grund ließ sich gerade nicht lesen.')
+        // A reviewer's close is told as the team's.
+        expect(reasonLine(no({ reason: given }))).toBe('Grund (spaudanjo): „Die Datenquelle ist nicht öffentlich.“')
+    })
+
+    it('ends a sentence about what was turned down with who and when, never the team for the account', () => {
+        expect(`Das Entfernen ${declinedBy(no())}`).toBe('Das Entfernen hat das Katalog-Team am 21.10. nicht angenommen')
+        // What was closed is the proposal, never what it proposed: the account is named apart.
+        expect(`Das Entfernen ${declinedBy(no({ viaMarketplace: true }))}`).toBe('Das Entfernen wurde am 21.10. nicht angenommen (über das Marktplatz-Konto geschlossen)')
+        expect(declinedBy(no({ closedAt: undefined }))).toBe('hat das Katalog-Team nicht angenommen')
+    })
+
+    it('tells a "no" to the removal while it is the news: not once the version is listed, taken out, or has its entry proposed (S8)', () => {
+        const removal = { state: 'closed', mrUrl: `${WEB}/-/merge_requests/40`, declined: no({ iid: 40 }) }
+        const bundle = { state: 'on-base' as const, removal }
+        expect(removalDeclineShown(bundle, { state: 'none' })?.iid).toBe(40)
+        expect(removalDeclineShown(bundle, { state: 'declined' })?.iid).toBe(40)
+        expect(removalDeclineShown(bundle, undefined)?.iid).toBe(40)
+        for (const state of ['listed', 'mr-open', 'withdrawn'] as const) expect(removalDeclineShown(bundle, { state }), state).toBeUndefined()
+        expect(removalDeclineShown({ state: 'none', removal }, { state: 'none' })).toBeUndefined()
+        expect(removalDeclineShown(undefined, undefined)).toBeUndefined()
+    })
+
+    it('tells of two "no"s - to the entry and to the removal - only the later one, as the tabs do (S5 and S8)', () => {
+        const removal = { state: 'closed', mrUrl: `${WEB}/-/merge_requests/40`, declined: no({ iid: 40, closedAt: '2026-10-10T10:00:00Z' }) }
+        const bundle = { state: 'on-base' as const, verification: { state: 'verified' as const }, removal }
+        const entry = (closedAt: string) => ({ state: 'declined' as const, mrUrl: `${WEB}/-/merge_requests/8`, declined: no({ iid: 8, closedAt }) })
+        // The removal turned down on 10.10., then the entry proposed from that row and turned down on 22.10.: the entry is the news.
+        expect(removalDeclineShown(bundle, entry('2026-10-22T10:00:00Z'))).toBeUndefined()
+        // The other way round, the removal.
+        expect(removalDeclineShown(bundle, entry('2026-10-01T10:00:00Z'))?.iid).toBe(40)
+        // One rule with the row's outcome in „In Arbeit“.
+        const outcomeOf = (catalog: ReturnType<typeof entry>) =>
+            rowOutcome({
+                key: 'k',
+                targetKey: 't',
+                targetLabel: 'Ablage',
+                slug: 'a',
+                version: '1.1.0',
+                displayName: 'a',
+                bundleMr: { url: `${WEB}/-/merge_requests/30`, state: 'merged' },
+                bundle,
+                catalog,
+            })
+        expect(outcomeOf(entry('2026-10-22T10:00:00Z'))).toBe('entry-declined')
+        expect(outcomeOf(entry('2026-10-01T10:00:00Z'))).toBe('removal-declined')
     })
 })

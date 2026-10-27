@@ -28,9 +28,10 @@ const ShareListingContext = createContext<ShareListingContextValue | null>(null)
  * once per visit, again on „Aktualisieren“ and after each write.
  *
  * It reads only once something on the page asks (`useShareView` with the
- * right to see it): the wizard alone shows nothing of it, and a person
- * without the right would only be refused. Who may see it is each page's own
- * check - layouts do not run again on navigation.
+ * right to see it): a person without the right would only be refused. The
+ * wizard asks too, where the person may submit, to know what became of the
+ * package's other versions. Who may see it is each page's own check - layouts
+ * do not run again on navigation.
  */
 export function ShareListingProvider({
     person,
@@ -57,7 +58,7 @@ function useShareListingContext(): ShareListingContextValue {
 }
 
 /**
- * The listing as a list, the tab bar or „So läuft Teilen ab“ uses it, with
+ * The listing as a list, the tab bar, „So läuft Teilen ab“ or the wizard uses it, with
  * the person's started shares and the tab rules applied (`share-tabs.ts`).
  * `enabled`: this person may see what was submitted here; without it the
  * rows are empty and only the started shares count.

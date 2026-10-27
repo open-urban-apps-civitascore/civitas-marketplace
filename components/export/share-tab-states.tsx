@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { EmptyState } from '@/components/ui/layout'
+import { DECLINE_DAYS } from '@/lib/export/declines'
 import type { ShareTab } from '@/lib/export/share-tabs'
 import { WIZARD_PATH } from '@/lib/export/wizard-address'
 
@@ -11,9 +12,11 @@ import { WIZARD_PATH } from '@/lib/export/wizard-address'
  * Why a list stays hidden is told by the pages (`share-tab-frame.tsx`).
  */
 
-/** What each tab holds, in one or two sentences under the tab bar. */
+/** What each tab holds, in a few sentences under the tab bar. */
 export const TAB_LEADS: Record<ShareTab, string> = {
-    'in-progress': 'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist.',
+    'in-progress':
+        'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist. ' +
+        `Was das Katalog-Team nicht angenommen hat, steht hier ${DECLINE_DAYS} Tage, danach unter „Beendet“.`,
     published: 'Was aus dieser Instanz im Katalog steht - beide Prüfungen sind durch. Herausnehmen kann einen Eintrag nur das Katalog-Team.',
     ended: 'Was zurückgezogen, nicht angenommen oder entfernt wurde - mit wann und wer. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.',
 }

@@ -7,8 +7,9 @@ import type { ExportReadiness, ExportTarget } from '@/lib/export/config'
 import type { ExportSource } from '@/lib/export/sources'
 import { draftStart, draftStartedOn, draftStepAt, draftTime, type ShareDraft } from '@/lib/export/share-drafts'
 import { sourceOptions } from '@/lib/export/source-options'
-import { shareProgress, takenOutNotice } from '@/lib/export/share-stages'
-import { mergeRequestRef, rememberShareResult, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
+import { removalDeclineShown } from '@/lib/export/declines'
+import { reviewChangeNotice, shareProgress, takenOutNotice } from '@/lib/export/share-stages'
+import { mergeRequestRef, rememberShareResult, reviewChangeBelow, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
 import { draftMetadata, metadataDraft, METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { slugify } from '@/lib/export/urn'
 import { reachableStep, type WizardStep } from '@/lib/export/wizard-address'
@@ -19,7 +20,7 @@ import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { MetadataForm } from '@/components/export/metadata-form'
 import { PackageContents } from '@/components/export/package-contents'
 import { ShareSteps } from '@/components/export/share-steps'
-import { useShareListingReload } from '@/components/export/share-listing-provider'
+import { useShareListingReload, useShareView } from '@/components/export/share-listing-provider'
 import { useShareDraftActions, useShareDrafts } from '@/components/export/use-share-drafts'
 import { useWizardAddress } from '@/components/export/use-wizard-address'
 import { Button, ExternalAnchor } from '@/components/ui/button'
@@ -326,6 +327,15 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     // The catalogue team took this version or an earlier one out, as a GitLab reading of any version said: before anyone proposes more.
     const takenOutVersion = takenOutOf(shareStates, currentShareKey)
     const takenOut = takenOutVersion ? <Notice tone="neutral">{takenOutNotice(takenOutVersion)}</Notice> : undefined
+    // The catalogue team changed the version this one follows during review: sharing from the dataset would write over
+    // their change, so warn first.
+    const listing = useShareView(forgeReady)
+    const changed = reviewChangeBelow(listing.rows, { targetKey, slug: basics.slug, version: basics.version })
+    const reviewChange = changed ? (
+        <Notice tone="warn" action={<ExternalAnchor href={changed.changeUrl}>Änderung ansehen</ExternalAnchor>}>
+            {reviewChangeNotice(changed.version)}
+        </Notice>
+    ) : undefined
     useEffect(() => {
         let cancelled = false
         inspectExportSource(source.id).then((value) => { if (!cancelled) setInventory(value) })
@@ -533,6 +543,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     {known.bundle?.state === 'mr-open' && <Notice tone="neutral">Für Version {basics.version} ist schon ein Vorschlag in Prüfung{mergeRequestRef(known.bundle.mrUrl) ? ` (${mergeRequestRef(known.bundle.mrUrl)})` : ''}. Er enthält den vorherigen Stand - Änderungen gehen erst, wenn er angenommen oder zurückgezogen ist, dann mit einer neuen Version.</Notice>}
                     {known.bundle?.state === 'on-base' && <Notice tone="neutral">Version {basics.version} ist schon angenommen. Änderungen am Steckbrief gehen jetzt nur noch mit einer neuen Version.</Notice>}
                     {takenOut}
+                    {reviewChange}
                 </div></div>
             <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
@@ -578,6 +589,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             {/* The same heading while the preview is made again, so focus stays on it when the preview arrives. */}
             {!preview ? <Pending>Vorschau wird erstellt …</Pending> : <>
                 {takenOut}
+                {reviewChange}
                 {/* The one action first, not under all the previews (Ewa's point 8). */}
                 <ShareSteps
                     progress={shareProgress({ version: basics.version, bundle: known.bundle, catalog: known.catalog })}
@@ -589,6 +601,9 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     bundleMrUrl={known.bundle?.mrUrl}
                     catalogMrUrl={known.catalog?.mrUrl}
                     removalMrUrl={known.bundle?.removal?.mrUrl}
+                    version={basics.version}
+                    declines={{ review: known.bundle?.declined, listing: known.catalog?.state === 'declined' ? known.catalog.declined : undefined }}
+                    removalDeclined={removalDeclineShown(known.bundle, known.catalog)}
                     onPropose={() => run('bundle')}
                     onCheck={() => run('status')}
                     onCatalog={() => run('catalog')}

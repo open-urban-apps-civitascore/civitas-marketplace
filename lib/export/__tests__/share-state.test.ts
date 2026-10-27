@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ExportActionResult } from '@/lib/export-actions'
-import { listingIsStale, mergeRequestRef, mergeShareResult, rememberShareResult, shareKey, takenOutOf } from '@/lib/export/share-state'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
+import { listingIsStale, mergeRequestRef, mergeShareResult, rememberShareResult, reviewChangeBelow, shareKey, takenOutOf } from '@/lib/export/share-state'
 
 const MR = 'https://gitlab.com/group/repo/-/merge_requests/18'
 const CATALOG_MR = 'https://gitlab.com/group/catalog/-/merge_requests/19'
@@ -93,5 +94,37 @@ describe('listingIsStale', () => {
         expect(listingIsStale(result({ intent: 'catalog', status: 'invalid', catalog: { state: 'declined', mrUrl: CATALOG_MR, declined } }))).toBe(true)
         expect(listingIsStale(result({ intent: 'catalog', status: 'invalid' }))).toBe(false)
         expect(listingIsStale(result({ intent: 'catalog', status: 'error' }))).toBe(false)
+    })
+})
+
+describe('reviewChangeBelow (S3 of 2026-10-22)', () => {
+    const accepted = (version: string, changedInReview: boolean, extra: Partial<SharedPackageRow> = {}): SharedPackageRow => ({
+        key: `t#export/baeume-${version}`,
+        targetKey: 't',
+        targetLabel: 'Ablage',
+        slug: 'baeume',
+        version,
+        displayName: 'Bäume',
+        bundleMr: { url: 'https://gitlab.example/-/merge_requests/30', state: 'merged' },
+        bundle: { state: 'on-base', verification: { state: 'verified', changedInReview } },
+        ...extra,
+    })
+    const share = { targetKey: 't', slug: 'Baeume ', version: '1.1.5' }
+
+    it('names the version on the base branch the team changed in review, when a newer one is being shared', () => {
+        expect(reviewChangeBelow([accepted('1.1.4', true)], share)).toEqual({ version: '1.1.4', changeUrl: 'https://gitlab.example/-/merge_requests/30/commits' })
+        // Their change is on the proposal they merged, where the reading names it.
+        const merged = accepted('1.1.4', true, { bundle: { state: 'on-base', verification: { state: 'verified', changedInReview: true, mergedMrUrl: 'https://gitlab.example/-/merge_requests/29/' } } })
+        expect(reviewChangeBelow([merged], share)?.changeUrl).toBe('https://gitlab.example/-/merge_requests/29/commits')
+    })
+
+    it('says nothing for the same or a lower version, an unchanged one, another package or target, or before the listing came', () => {
+        expect(reviewChangeBelow([accepted('1.1.4', true)], { ...share, version: '1.1.4' })).toBeUndefined()
+        expect(reviewChangeBelow([accepted('1.1.4', false)], share)).toBeUndefined()
+        expect(reviewChangeBelow([accepted('1.1.4', true, { slug: 'regen' })], share)).toBeUndefined()
+        expect(reviewChangeBelow([accepted('1.1.4', true, { targetKey: 'u' })], share)).toBeUndefined()
+        // Replaced on the base branch: what the team changed there is gone already.
+        expect(reviewChangeBelow([accepted('1.1.4', true, { bundle: { state: 'none', reason: 'other-version' } })], share)).toBeUndefined()
+        expect(reviewChangeBelow(null, share)).toBeUndefined()
     })
 })
