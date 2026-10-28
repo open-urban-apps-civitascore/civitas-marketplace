@@ -4,11 +4,21 @@ import { revalidatePath } from 'next/cache'
 
 import { BundleError } from '@/lib/catalog/bundle'
 import { resolveCatalogEntry } from '@/lib/catalog/source'
-import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
+import { isDataStructureEntry, type BundledMasterportal, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
 import { DATAPOOL_NAME_MIN } from '@/lib/datapool-name'
 import { createDatapool, deleteDatapool, type DatapoolOption } from '@/lib/datapools'
-import { applyMasterportalToDir, geoportalConfigDir } from '@/lib/geoportal/files'
+import { applyMasterportalToDir, geoportalConfigDir, removeMasterportalFromDir } from '@/lib/geoportal/files'
 import { readMasterportalMember } from '@/lib/geoportal/merge'
+import { installedDataSet } from '@/lib/installation-dataset'
+import {
+    awaitRelease,
+    releaseUseCase,
+    type PlatformAnswer,
+    type PlatformApi,
+    type ReleaseCounts,
+    type SagaOutcome,
+    type WaitOptions,
+} from '@/lib/release-chain'
 import {
     InstallPayloadError,
     applyDeclaredDsnOverride,
@@ -184,15 +194,17 @@ export async function installEntry(
     }
 
     const receipt = (await res.response.json()) as InstallationReceipt
-    const summary = summarizeInstallation(receipt, entry.manifest.displayName)
+    // The dataset is a line of the journal, not a field of the answer (installedDataSet).
+    const dataSet = installedDataSet(receipt.artifacts)
+    const summary = summarizeInstallation(receipt, dataSet.name ?? entry.manifest.displayName)
     const poolSegment = createdPool ? ` · Datenpool „${createdPool.name}“ neu angelegt` : ''
     // The first follow-up, so the platform provisions while the demo data and
     // the dashboards are still being set up. Like them, a refusal is a remark
     // in the summary, never an install failure.
     const release =
         releaseRequested && !isDataStructureEntry(effectiveEntry)
-            ? await releaseInstalledDataset(receipt.dataSetId)
-            : { started: false, segment: '' }
+            ? await startRelease(receipt, dataSet.id)
+            : undefined
     // Demo activation happens AFTER the install committed, and its failure is a
     // warning in the summary, never an install failure: the simulator is an
     // add-on, and a dead add-on must not make a use case uninstallable.
@@ -209,7 +221,13 @@ export async function installEntry(
     // that fails to import is a remark in the summary, never an install failure.
     const dashboardSegment = isDataStructureEntry(effectiveEntry)
         ? ''
-        : await activateDashboards(effectiveEntry, receipt, release.started)
+        : await activateDashboards(effectiveEntry, receipt.id, dataSet, release?.started === true)
+    // Last: the saga's end, once the rest is set up, and the geoportal entries, which need it.
+    const released = release ? await finishRelease(release) : undefined
+    const geoportalSegment = isDataStructureEntry(effectiveEntry)
+        ? ''
+        : await activateGeoportal(effectiveEntry, dataSet.id, releaseRequested, released?.completed === true)
+    const releaseSegment = released?.segment ?? ''
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -220,19 +238,20 @@ export async function installEntry(
     revalidatePath('/installed')
     return {
         status: 'created',
-        detail: `${summary}${poolSegment}${release.segment}${demoSegment}${dashboardSegment}${installation}`,
+        detail: `${summary}${poolSegment}${releaseSegment}${demoSegment}${dashboardSegment}${geoportalSegment}${installation}`,
         httpStatus: 201,
         installationId: receipt.id,
         outcome: {
-            title: receipt.dataSetName ?? entry.manifest.displayName,
+            title: dataSet.name ?? entry.manifest.displayName,
             version: entry.manifest.version,
             counts: artifactCounts(receipt),
             steps: [
                 ...installSteps(poolSegment, true),
-                // The release says itself whether it started; its text need not be read for that.
-                ...installSteps(release.segment, release.started),
+                // The release step says NICHT where it did not go through, like the others.
+                ...installSteps(releaseSegment),
                 ...installSteps(demoSegment),
                 ...installSteps(dashboardSegment),
+                ...installSteps(geoportalSegment),
             ],
         },
     }
@@ -245,58 +264,97 @@ async function discardCreatedPool(pool: DatapoolOption): Promise<string> {
         : ` · Der dafür angelegte Datenpool „${pool.name}“ ist leer stehen geblieben und lässt sich im Portal löschen`
 }
 
+/** The platform's API with the user's token, for the release chain. */
+function platformApi(accessToken: string): PlatformApi {
+    const call = async (method: 'GET' | 'POST', path: string): Promise<PlatformAnswer> => {
+        const response = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}${path}`, {
+            method,
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: 'no-store',
+        })
+        return { status: response.status, statusText: response.statusText, text: await response.text().catch(() => '') }
+    }
+    return { get: (path) => call('GET', path), post: (path) => call('POST', path) }
+}
+
 /**
- * Releases the dataset an install just created, in the two steps the portal
- * takes as well: stage (DRAFT to READY, checked at once), then release (READY
- * to AVAILABLE). The platform then provisions sinks, routes and the pipeline
- * in a saga, and the data flows once that is done.
- *
- * A refused step ends here and says which one it was: a refused stage leaves
- * the draft, a refused release a staged dataset, and the portal can release
- * either. Nothing is rolled back, because nothing is wrong with the install.
+ * How long the install waits for the platform to provision a released dataset. Locally a first
+ * release after a stack start takes longest (FROST builds its database layer on the first request).
  */
-async function releaseInstalledDataset(
-    dataSetId: string | undefined,
-): Promise<{ started: boolean; segment: string }> {
+const RELEASE_WAIT: WaitOptions = {
+    timeoutMs: 120_000,
+    intervalMs: 2_000,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now(),
+}
+
+const reasonOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+type ReleaseRun =
+    | { started: true; dataSetId: string; released: ReleaseCounts }
+    | { started: false; segment: string }
+
+/**
+ * Releases what the install made, as the platform demands it (lib/release-chain.ts): each
+ * structure version, each structure, each source, then stage and release of the dataset. That
+ * starts the saga; finishRelease waits for its end.
+ *
+ * A refused step ends here and says which one it was. Nothing is rolled back, because nothing is
+ * wrong with the install, and the portal can go on from there.
+ */
+async function startRelease(receipt: InstallationReceipt, dataSetId: string | undefined): Promise<ReleaseRun> {
     if (!dataSetId) {
         return { started: false, segment: ' · Freigabe NICHT gestartet: Antwort trägt keine Datensatz-ID' }
     }
     // Outside the try block: a missing session ends in a redirect, which
     // travels as an exception and must not read as an unreachable backend.
     const accessToken = await getAccessToken()
-
-    for (const step of ['stage', 'release'] as const) {
-        let response: Response
-        try {
-            response = await fetch(
-                `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/datasets/${encodeURIComponent(dataSetId)}/${step}`,
-                {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                    cache: 'no-store',
-                },
-            )
-        } catch (error) {
-            return {
-                started: false,
-                segment: ` · Freigabe NICHT gestartet: Portal-Backend nicht erreichbar (${error instanceof Error ? error.message : String(error)})`,
-            }
+    const idsOf = (artifactType: string) =>
+        (receipt.artifacts ?? []).flatMap((line) => (line.artifactType === artifactType && line.shellId ? [line.shellId] : []))
+    try {
+        const start = await releaseUseCase(platformApi(accessToken), {
+            dataSetId,
+            structureIds: idsOf('DATA_STRUCTURE'),
+            sourceIds: idsOf('DATA_SOURCE'),
+        })
+        if (start.state === 'refused') {
+            const { status, statusText, text } = start.answer
+            return { started: false, segment: describeReleaseFailure(start.step, status, statusText, text) }
         }
-        if (!response.ok) {
-            return {
-                started: false,
-                segment: describeReleaseFailure(
-                    step,
-                    response.status,
-                    response.statusText,
-                    await response.text().catch(() => ''),
-                ),
-            }
-        }
+        return { started: true, dataSetId, released: start.released }
+    } catch (error) {
+        return { started: false, segment: ` · Freigabe NICHT gestartet: Portal-Backend nicht erreichbar (${reasonOf(error)})` }
     }
-    return {
-        started: true,
-        segment: ' · Freigabe gestartet: Die Plattform richtet Speicher und Pipeline ein, danach fließen die Daten',
+}
+
+/**
+ * Waits for the end of the saga a started release set off, and says how it ended: provisioned,
+ * reverted by the platform, or still running at the time limit.
+ */
+async function finishRelease(run: ReleaseRun): Promise<{ completed: boolean; segment: string }> {
+    if (!run.started) return { completed: false, segment: run.segment }
+    const accessToken = await getAccessToken()
+    let outcome: SagaOutcome
+    try {
+        outcome = await awaitRelease(platformApi(accessToken), run.dataSetId, RELEASE_WAIT)
+    } catch (error) {
+        return { completed: false, segment: ` · Freigabe gestartet, ihr Ende ließ sich NICHT abfragen (${reasonOf(error)})` }
+    }
+    const { versions, structures, sources } = run.released
+    const released = `${versions} Strukturversion(en), ${structures} Struktur(en), ${sources} Quelle(n) und den Datensatz freigegeben`
+    switch (outcome) {
+        case 'completed':
+            return { completed: true, segment: ` · Freigabe abgeschlossen: ${released}, die Plattform hat Speicher, Pipelines und APIs eingerichtet` }
+        case 'failed':
+            return {
+                completed: false,
+                segment: ` · Freigabe NICHT abgeschlossen: ${released}, aber die Plattform hat das Einrichten abgebrochen und den Datensatz zurückgesetzt (bereit zur Freigabe). Die Ursache steht im Log des Portal-Backends („Saga CREATE failed“)`,
+            }
+        case 'pending':
+            return {
+                completed: false,
+                segment: ` · Freigabe gestartet: ${released}. Nach ${RELEASE_WAIT.timeoutMs / 1000} s richtet die Plattform Speicher und Pipelines noch ein`,
+            }
     }
 }
 
@@ -387,7 +445,8 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
  */
 async function activateDashboards(
     entry: UseCaseEntry,
-    receipt: InstallationReceipt,
+    installationId: string | undefined,
+    dataSet: { id?: string; name?: string },
     releaseStarted: boolean,
 ): Promise<string> {
     if ((entry.bundle.dashboards ?? []).length === 0) return ''
@@ -395,13 +454,12 @@ async function activateDashboards(
     if (!config) {
         return ` · Dashboard NICHT eingespielt: ${missingSupersetSettings().join(', ')} nicht konfiguriert`
     }
-    const { id: installationId, dataSetId } = receipt
-    if (!installationId || !dataSetId) {
+    if (!installationId || !dataSet.id) {
         return ' · Dashboard NICHT eingespielt: Antwort trägt keine Installations- oder Datensatz-ID'
     }
     const outcomes = await importDashboards(
         entry,
-        { installationId, dataSetId, dataSetName: receipt.dataSetName ?? entry.manifest.displayName },
+        { installationId, dataSetId: dataSet.id, dataSetName: dataSet.name ?? entry.manifest.displayName },
         config,
     )
     // Until its dataset is released, a dashboard's table does not exist. After a
@@ -410,6 +468,50 @@ async function activateDashboards(
         ? ' (zeigt Daten, sobald die Freigabe abgeschlossen ist)'
         : ' (zeigt Daten nach der Freigabe im Portal)'
     return outcomes.map(({ ok, text }) => ` · ${text}${ok ? hint : ''}`).join('')
+}
+
+/**
+ * Writes the use case's Masterportal entries once its release has completed: the step the button
+ * „Im Geoportal eintragen“ takes by hand. Not before, because a layer shows nothing but errors
+ * until the dataset's APIs serve. Every outcome is a summary segment, like the dashboards'.
+ */
+async function activateGeoportal(
+    entry: UseCaseEntry,
+    dataSetId: string | undefined,
+    releaseRequested: boolean,
+    releaseCompleted: boolean,
+): Promise<string> {
+    const member = entry.bundle.masterportal?.[0]
+    if (!member) return ''
+    if (!geoportalConfigDir()) {
+        return ' · Geoportal nicht angebunden: Die Einträge des Pakets bleiben ungenutzt (GEOPORTAL_CONFIG_DIR)'
+    }
+    if (!releaseRequested) {
+        return ' · Geoportal: Die Einträge folgen nach der Freigabe, mit „Im Geoportal eintragen“'
+    }
+    if (!releaseCompleted || !dataSetId) {
+        return ' · Geoportal NICHT eingetragen: Die Freigabe ist nicht abgeschlossen. Danach mit „Im Geoportal eintragen“ auf der Seite des Anwendungsfalls'
+    }
+    const written = await writeGeoportalEntries(member, dataSetId)
+    return written.ok ? ` · Geoportal: ${written.text}` : ` · ${written.text}`
+}
+
+/** The member applied to the geoportal's files for one dataset; the sentence says what happened. */
+async function writeGeoportalEntries(member: BundledMasterportal, dataSetId: string): Promise<{ ok: boolean; text: string }> {
+    const dir = geoportalConfigDir()
+    if (!dir) return { ok: false, text: 'Geoportal NICHT aktualisiert: GEOPORTAL_CONFIG_DIR ist nicht konfiguriert' }
+    try {
+        const portal = readMasterportalMember(member.document, member.file)
+        const { stylesChanged } = await applyMasterportalToDir(dir, portal, dataSetId)
+        const layers = portal.layers.length === 1 ? '1 Ebene' : `${portal.layers.length} Ebenen`
+        const restart = stylesChanged ? ' Neue Stile zeigt das Geoportal erst nach einem Neustart des Portals.' : ''
+        return {
+            ok: true,
+            text: `${layers} im Ordner „${portal.folder}“ eingetragen, sichtbar nach dem Neuladen des Geoportals.${restart}`,
+        }
+    } catch (error) {
+        return { ok: false, text: `Geoportal NICHT aktualisiert: ${reasonOf(error)}` }
+    }
 }
 
 interface DashboardTarget {
@@ -511,10 +613,11 @@ export interface GeoportalResult {
 
 /**
  * Writes the use case's Masterportal entries into the geoportal's config files, bound to this
- * installation's dataset (see lib/geoportal). Safe to repeat: it replaces what it wrote before
- * and keeps every other entry. The geoportal backend reads its config per request, so the
- * layers show on the next page load; the portal copies its styles at start only, so a new style
- * needs a restart of the portal.
+ * installation's dataset (see lib/geoportal). The install does this itself once its release has
+ * completed; the button is for a release done in the portal, or entries someone removed by hand.
+ * Safe to repeat: it replaces what it wrote before and keeps every other entry. The geoportal
+ * backend reads its config per request, so the layers show on the next page load; the portal
+ * copies its styles at start only, so a new style needs a restart of the portal.
  *
  * Like the dashboard re-import it reads the package's CURRENT catalogue entry, not the installed
  * version. The entries name the dataset's APIs by slug only, so a newer package version that
@@ -555,22 +658,29 @@ export async function applyGeoportalConfig(
         return { status: 'error', detail: 'Das Paket bringt keine Einträge für das Masterportal mit.' }
     }
 
+    const written = await writeGeoportalEntries(member, installation.dataSetId)
+    return { status: written.ok ? 'applied' : 'error', detail: written.text }
+}
+
+/**
+ * Takes the installation's entries out of the geoportal: its layers, the folder that held only
+ * them, the styles no other entry names (see removeMasterportal). After the uninstall committed,
+ * like the other sweeps; every entry of anyone else stays as it was.
+ */
+async function removeGeoportalEntries(installation: InstallationFacts | null): Promise<string> {
+    const dir = geoportalConfigDir()
+    if (!dir || !installation?.dataSetId) return ''
     try {
-        const portal = readMasterportalMember(member.document, member.file)
-        const { stylesChanged } = await applyMasterportalToDir(dir, portal, installation.dataSetId)
-        const layers = portal.layers.length === 1 ? '1 Ebene' : `${portal.layers.length} Ebenen`
-        const restart = stylesChanged
-            ? ' Neue Stile zeigt das Geoportal erst nach einem Neustart des Portals.'
-            : ''
-        return {
-            status: 'applied',
-            detail: `${layers} im Ordner „${portal.folder}“ eingetragen, sichtbar nach dem Neuladen des Geoportals.${restart}`,
-        }
+        const removed = await removeMasterportalFromDir(dir, installation.dataSetId)
+        if (removed.services.length === 0 && removed.folders === 0) return ''
+        const parts = [
+            removed.services.length === 1 ? '1 Ebene' : `${removed.services.length} Ebenen`,
+            ...(removed.folders ? [removed.folders === 1 ? 'ihr Ordner' : `${removed.folders} Ordner`] : []),
+            ...(removed.styles.length ? [`Stil ${removed.styles.join(', ')}`] : []),
+        ]
+        return ` · Geoportal: ${parts.join(', ')} entfernt`
     } catch (error) {
-        return {
-            status: 'error',
-            detail: `Geoportal NICHT aktualisiert: ${error instanceof Error ? error.message : String(error)}`,
-        }
+        return ` · Geoportal-Aufräumen fehlgeschlagen: ${reasonOf(error)}`
     }
 }
 
@@ -694,11 +804,16 @@ export async function uninstallInstallation(
     if (response.status === 204) {
         const cleanup = await removeDemoStreams(installationId)
         const supersetCleanup = await removeSupersetObjects(installationId, installation)
+        const geoportalCleanup = await removeGeoportalEntries(installation)
         revalidatePath('/installed')
         revalidatePath('/datastructures')
         revalidatePath('/use-cases')
         revalidatePath('/(authenticated)/use-cases/[publisher]/[slug]', 'page')
-        return { status: 'uninstalled', detail: `Deinstalliert${cleanup}${supersetCleanup}`, httpStatus: 204 }
+        return {
+            status: 'uninstalled',
+            detail: `Deinstalliert${cleanup}${supersetCleanup}${geoportalCleanup}`,
+            httpStatus: 204,
+        }
     }
 
     const failure = describeUninstallFailure(
