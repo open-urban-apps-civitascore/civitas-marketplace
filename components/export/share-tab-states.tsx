@@ -5,14 +5,8 @@ import { DECLINE_DAYS } from '@/lib/export/declines'
 import type { ShareTab } from '@/lib/export/share-tabs'
 import { WIZARD_PATH } from '@/lib/export/wizard-address'
 
-/**
- * What every tab of "Teilen" says of itself: its lead and its empty state
- * (plan of 2026-10-18, sections 4-6). No hooks and no server code, so the
- * pages and the lists render them alike and the tests read them as text.
- * Why a list stays hidden is told by the pages (`share-tab-frame.tsx`).
- */
+// No hooks and no server code: pages, lists and tests render these alike.
 
-/** What each tab holds, in a few sentences under the tab bar. */
 export const TAB_LEADS: Record<ShareTab, string> = {
     'in-progress':
         'Was angefangen oder eingereicht ist und noch nicht im Katalog steht. Bei jedem Eintrag steht, wer gerade dran ist. ' +
@@ -21,7 +15,6 @@ export const TAB_LEADS: Record<ShareTab, string> = {
     ended: 'Was zurückgezogen, nicht angenommen, entfernt oder aus dem Katalog genommen wurde, mit Datum und Namen. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.',
 }
 
-/** The tab names, for the heading screen readers find on each tab's page. */
 export const TAB_TITLES: Record<ShareTab, string> = { 'in-progress': 'In Arbeit', published: 'Veröffentlicht', ended: 'Beendet' }
 
 const EMPTY: Record<ShareTab, { title: string; body?: string; toWizard: boolean }> = {
@@ -38,16 +31,11 @@ const EMPTY: Record<ShareTab, { title: string; body?: string; toWizard: boolean 
     ended: { title: 'Noch nichts beendet.', toWizard: false },
 }
 
-/** What other instances shared through the same account: counted, not listed (demo, dev and local share one). */
+/** Shares from other instances through the same account (demo, dev and local share one). */
 export function elsewhereLine(count: number): string {
     return count === 1 ? '1 weiterer Eintrag stammt von einer anderen Instanz.' : `${count} weitere Einträge stammen von anderen Instanzen.`
 }
 
-/**
- * A tab with nothing in it. The way on is a link in the words of the page's
- * one primary button, „Neues Paket teilen“, and looks like text: the button
- * next to the heading stays the only primary (decision of 18.10.).
- */
 export function EmptyTab({ tab }: { tab: ShareTab }) {
     const { title, body, toWizard } = EMPTY[tab]
     return (

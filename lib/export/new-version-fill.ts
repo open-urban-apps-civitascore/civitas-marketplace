@@ -7,21 +7,7 @@ import { SHARE_READS } from '@/lib/export/share-cache'
 import { instanceMatch } from '@/lib/export/share-tabs'
 import { presentRequests } from '@/lib/export/status'
 
-/**
- * The Steckbrief of a new version, from one shared before: for „Neue Version
- * teilen“, an update of a catalogue entry, and the way on after a "no". The
- * wizard asks for it through `/api/shares/fill`, which checks the session and
- * the right to share first.
- */
-
-/** What the fill answers: the Steckbrief of a shared version, or why there is none. */
 export interface NewVersionFill {
-    /**
-     * - `ok`: `steckbrief` holds it
-     * - `missing`: this marketplace did not share that version, or its package cannot be found at its last commit
-     * - `invalid`: the address names no version, or its package's Steckbrief is broken
-     * - `forbidden`, `unconfigured`, `error`: as for the actions
-     */
     status: 'ok' | 'missing' | 'invalid' | 'forbidden' | 'unconfigured' | 'error'
     detail?: string
     steckbrief?: FilledSteckbrief
@@ -29,12 +15,7 @@ export interface NewVersionFill {
 
 const VERSION = /^\d+\.\d+\.\d+$/
 
-/**
- * Checked again here, as the route answers any caller. Read at the proposal's
- * last commit, which GitLab keeps after its branch is gone, so a withdrawn or
- * turned-down version fills too. Every field is copied only where the share
- * came from this instance, else only the package's own (`steckbriefFromManifest`).
- */
+/** Reads at the proposal's last commit, kept after its branch is gone, so a withdrawn version fills too. */
 export async function readNewVersionFill(targetKey: string, slug: string, version: string): Promise<NewVersionFill> {
     const config = exportConfig()
     // Exactly as named, no fallback to the only target: the listing names every package's.

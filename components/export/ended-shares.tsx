@@ -12,7 +12,6 @@ import { Notice, Pending } from '@/components/ui/notice'
 import { ENDED_PAGE, endedLine, endedRowId, endedWhat, type EndedAction, type EndedLine } from '@/lib/export/ended-lines'
 import { inProgressLinkText } from '@/lib/export/in-progress-items'
 
-/** „Beendet“ from the share pages' one listing; a row's action depends on the package's other versions and on „In Arbeit“. */
 export function EndedShares() {
     const view = useShareView(true)
     if (view.rows === null) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
@@ -21,11 +20,7 @@ export function EndedShares() {
     return <Ended lines={lines} elsewhere={view.tabs.elsewhere.ended} error={view.error} older={view.older} />
 }
 
-/**
- * „Beendet“: one card per ended proposal or version taken out, newest first,
- * {@link ENDED_PAGE} at a time. „Ältere in GitLab ansehen“ only where the listing
- * stopped before the account's oldest proposal (`older`); else nothing older exists.
- */
+/** `older` is set only where the listing stopped before the account's oldest proposal. */
 export function Ended({
     lines,
     elsewhere = 0,
@@ -38,7 +33,6 @@ export function Ended({
     older?: string
 }) {
     const [pages, setPages] = useState(1)
-    // The first row „Ältere anzeigen“ added takes the focus, so the keyboard goes on where the list does.
     const focusNext = useRef<string | null>(null)
     useEffect(() => {
         if (!focusNext.current) return
@@ -89,7 +83,6 @@ export function Ended({
     )
 }
 
-/** One ended proposal as a card; `id` takes the focus after „Ältere anzeigen“. */
 export function EndedRow({ id, line }: { id?: string; line: EndedLine }) {
     return (
         <ShareRow
@@ -121,7 +114,6 @@ const ACTION_LABELS: Record<Exclude<EndedAction['kind'], 'in-progress'>, string>
     'new-version': 'Neue Version teilen',
 }
 
-/** The row's one action: a button into the wizard, or the link to the version's row in „In Arbeit“. */
 function EndedActionLink({ action }: { action: EndedAction }) {
     if (action.kind === 'in-progress') {
         return (

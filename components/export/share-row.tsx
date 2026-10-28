@@ -8,21 +8,7 @@ import type { ReasonLine, RowStatus, TrackStep } from '@/lib/export/in-progress-
 import { cn } from '@/lib/utils'
 import type { Tone } from '@/lib/ui/tones'
 
-/**
- * One shared version, or one started share, as a card (E3) in the lists of
- * "Teilen": the icon tile in the colour of what it becomes, the name and
- * „Version x“, where it came from, the progress line with its status sentence,
- * the catalogue team's words to a "no", earlier versions, and the actions on
- * the right. Results of an action come in as `children`, inside the card they
- * are about.
- *
- * The actions follow the sentence and the team's words in the page, so a
- * screen reader hears where a share stands, and why, before what can be done
- * about it; from tablet width on they stand on the right. `titleAs`: one
- * heading level below the heading of the group the card is in.
- *
- * Server-safe: no hooks; the list passes its buttons in.
- */
+/** Server-safe, no hooks. Actions follow the status in the DOM, so screen readers hear the state first. */
 export function ShareRow({
     id,
     title,
@@ -37,35 +23,29 @@ export function ShareRow({
     titleAs: Title = 'h3',
     children,
 }: {
-    /** The card's id, for a link to it (`rowAnchor`). */
     id?: string
     title: string
     version?: string
-    /** „aus Datensatz „X“ · eingereicht am 12.10. von Ewa“ */
     origin?: string
     track?: TrackStep[]
-    /** The status sentence, or something in its place (the row is read again); a row of „Veröffentlicht“ has none. */
     status?: ReactNode
-    /** The catalogue team's words to a "no". */
     reasons?: ReasonLine[]
-    /** „Frühere Versionen: …“ */
     earlier?: string
     actions?: ReactNode
-    /** What it becomes in the catalogue: a dataset becomes an Anwendungsfall (green), a data structure stays one (blue). */
     kind?: { icon: LucideIcon; tone: Tone }
     titleAs?: 'h3' | 'h4'
     children?: ReactNode
 }) {
-    // Left out with nothing in it: an empty cell would add a gap at phone width, and the actions would span an empty row.
+    // Left out when empty: an empty cell adds a gap at phone width.
     const middle = Boolean(track || status || reasons?.length || earlier)
     return (
-        // Focusable, so a link to the row (`rowAnchor`) moves the focus there, not back to the top of the page.
+        // Focusable, so a link to the row moves the focus there, not to the top of the page.
         <li
             id={id}
             tabIndex={id ? -1 : undefined}
             className="flex flex-col gap-3 rounded-lg border bg-card p-5 scroll-mt-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
-            {/* The actions take at most half the card and wrap there: as wide as one line of them, they would leave the name a sliver. */}
+            {/* Actions take at most half the card, so the name keeps room. */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_fit-content(50%)] sm:gap-x-6">
                 <div className="flex min-w-0 items-start gap-3">
                     <IconTile icon={kind.icon} tone={kind.tone} />
@@ -107,7 +87,6 @@ const STATUS_MARK: Partial<Record<RowStatus['tone'], { icon: LucideIcon; classNa
     removal: { icon: Undo2, className: 'text-muted-foreground' },
 }
 
-/** The catalogue team's words to a "no", with a link to the proposal where the rest of them is. */
 function ReasonText({ reason }: { reason: ReasonLine }) {
     return (
         <p className="break-words text-sm leading-relaxed text-foreground">
@@ -125,7 +104,6 @@ function ReasonText({ reason }: { reason: ReasonLine }) {
     )
 }
 
-/** The one sentence that says where a share stands; on a row without a progress line, with the icon of its kind. */
 export function StatusLine({ status }: { status: RowStatus }) {
     const mark = STATUS_MARK[status.tone]
     const Icon = mark?.icon

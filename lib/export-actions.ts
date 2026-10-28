@@ -93,24 +93,21 @@ export interface PreviewSummary {
     stripped: ExportedPackage['stripped']
     parameters: ExportedPackage['parameters']
     warnings: string[]
-    /** Rules of the package validator the export would fail — a merge request is refused while any exist. */
+    /** Package validator failures; a merge request is refused while any exist. */
     errors: string[]
-    /** Demo data in the package: scenarios (one per source) and the streams they run. */
     demo: { scenarios: number; streams: number }
 }
 
 export interface ExportActionResult {
     intent: ExportIntent
-    /** `declined`: „Stand prüfen“ found a "no", told in the neutral tone rather than as good news. */
     status: 'ok' | 'error' | 'invalid' | 'unconfigured' | 'forbidden' | 'already-open' | 'not-merged' | 'unchanged' | 'declined'
     detail: string
     preview?: PreviewSummary
     mrUrl?: string
     bundle?: BundleStatus
     catalog?: CatalogStatus
-    /** Refused as another proposal of the dataset is open: the page reads its listing again, so „Auswählen“ shows it busy. */
+    /** Refused beside another open proposal; the page then reads its listing again. */
     busy?: boolean
-    /** The "no" a refusal found the version follows, so the Steckbrief asks „Was hast du geändert?“ even where the listing did not know it. */
     follows?: FollowedDecline
 }
 
@@ -118,18 +115,12 @@ interface ExportForm {
     intent: ExportIntent
     datasetId: string
     targetKey: string
-    /** Simulator ids chosen as demo data; checked again against the dataset on the server. */
     demoStreams: string[]
     options: Omit<ExportOptions, 'provenance' | 'simulations'>
-    /** The "no" a new version follows, with what the person changed since, in their words. */
     follows?: FollowsRef & { note: string }
 }
 
-/**
- * A GitLab client with the share pages' memory (`SHARE_READS`), as a submit
- * checks many rules that each ask for the same project, account and commits.
- * Lists of proposals and anything read at a branch stay fresh.
- */
+/** Cached reads (`SHARE_READS`); lists of proposals and reads at a branch stay fresh. */
 function shareClient(url: string, token: string): GitLabClient {
     return { ...clientFor(url, token), cache: SHARE_READS }
 }
@@ -143,7 +134,6 @@ function field(formData: FormData, name: string): string {
     return typeof value === 'string' ? value.trim() : ''
 }
 
-/** Validates the form into typed input, or names the first field that is wrong, by the label the Steckbrief shows. */
 function parseForm(formData: FormData): ExportForm | string {
     const intentRaw = field(formData, 'intent')
     const intent: ExportIntent =
@@ -174,7 +164,7 @@ function parseForm(formData: FormData): ExportForm | string {
     if (metadata.error) return metadata.error
     const demoStreams = parseDemoStreams(field(formData, 'demoStreams'))
     if (!demoStreams) return 'Demo-Daten: ungültige Auswahl.'
-    // A new version after a "no" says what changed: checked from the preview on, so the Steckbrief asks, not the last step.
+    // Checked from the preview on, so the Steckbrief asks for the change note, not the last step.
     const follows = parseFollows(field(formData, 'follows'))
     if (follows === null) return 'Die Angabe zum nicht angenommenen Vorschlag ist ungültig - bitte die Seite neu laden.'
     const changeNote = field(formData, 'changeNote')
@@ -190,7 +180,6 @@ function parseForm(formData: FormData): ExportForm | string {
     }
 }
 
-/** A JSON list of simulator ids, or undefined when it is not one. Empty input means no demo data. */
 function parseDemoStreams(raw: string): string[] | undefined {
     if (!raw) return []
     try {
@@ -202,11 +191,7 @@ function parseDemoStreams(raw: string): string[] | undefined {
     }
 }
 
-/**
- * Every simulation of the simulator with the configuration it was built from.
- * The list carries no scenarios, so each is read once; the simulator caps its
- * registrations (50), which bounds the reads.
- */
+/** The list carries no scenarios, so each is read; the simulator caps registrations at 50. */
 async function readSimulations(): Promise<{ details: SimulationDetail[]; problem?: string }> {
     if (!isSimulatorConfigured()) return { details: [], problem: 'Der Simulator ist an diese Instanz nicht angebunden.' }
     try {
@@ -237,13 +222,11 @@ async function buildPackage(
         provenance: {
             datasetId: snapshot.dataset.id,
             datasetName: snapshot.dataset.name,
-            // The same name the proposal's source line gives this instance (see `thisInstance`).
             instance: thisInstance(),
             exportedBy,
             exportedAt: new Date().toISOString().slice(0, 10),
         },
     })
-    // A chosen stream that could not be read is named, never silently dropped.
     const problems = demo.problem ? [`Demo-Daten fehlen im Paket: ${demo.problem}`] : []
     return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings] }
 }
@@ -277,7 +260,6 @@ function mergeRequestBody(
     form: ExportForm,
     requestedBy: string,
     catalogConfigured: boolean,
-    /** Files of the previous version below `core-ir/` that this one no longer has, removed with it. */
     removed: string[],
 ): string {
     const identityRows = preview.identities
@@ -338,16 +320,11 @@ function mergeRequestBody(
         `Branch \`${preview.branch}\` · exported via the marketplace export`,
         `Publisher \`${form.options.publisher}\`, domain \`${form.options.domain}\``,
         '',
-        // Hidden on GitLab; the share pages read it back to tell which dataset and instance this came from.
+        // Hidden on GitLab; the share pages read it back.
         shareSourceLine({ kind: 'dataset', id: form.datasetId, instance: thisInstance() }),
     ].join('\n')
 }
 
-/**
- * One action, four intents, so a single form can preview, propose the bundle,
- * propose the catalogue entry and re-read the status without four copies of
- * the same field handling. The intent comes from the submit button's name.
- */
 async function addressAlreadyTaken(id: string): Promise<string[]> {
     const { publisher, slug } = catalogEntryPath(id)
     try {
@@ -396,7 +373,6 @@ export async function exportAction(
             }
         }
 
-        // Everything below talks to GitLab; opening a merge request needs the right to share.
         if (form.intent === 'bundle' || form.intent === 'catalog') {
             const refusal = shareRefusal(await fetchShareRight())
             if (refusal) return { intent: form.intent, status: 'forbidden', detail: refusal }
@@ -430,10 +406,7 @@ export async function exportAction(
         }
 
         if (form.intent === 'bundle') {
-            // A version that is already proposed or merged is not proposed again: a second merge
-            // request would carry the same version with other content, or the same content twice.
-            // Asked before the package is built, which is the expensive part.
-            // A "no" whose comments cannot be read fails here rather than refusing on a guess.
+            // Before the expensive build. An unreadable "no" throws rather than refusing on a guess.
             const current = await readBundleStatus(client, target, form.options.slug, form.options.version, id, { unreadable: 'throw' })
             if (current.state === 'on-base') {
                 return {
@@ -454,15 +427,13 @@ export async function exportAction(
             }
             const folderRefusal = folderRefusalOf(current, id, form.options.slug, form.options.version)
             if (folderRefusal) return { intent: 'bundle', status: 'invalid', detail: folderRefusal, bundle: current }
-            // What reached the catalogue is used up as well, also after it was taken out again.
             const catalogue = config.catalog
                 ? await inspectCatalog(shareClient(config.catalog.url, token), config.catalog, form.options.slug, form.options.version, id)
                 : undefined
             const usedUp = catalogue && catalogRefusalOf(form.options.version, catalogue)
             if (usedUp) return { intent: 'bundle', status: 'invalid', detail: usedUp, bundle: current, catalog: catalogue.status }
-            // A version turned down, as a package or as an entry, is used up. Asked after the checks above, so the version
-            // the refusal suggests is above everything accepted and listed. An entry's "no" counts whoever proposed it:
-            // the same number accepted again as a package would never get an entry.
+            // After the checks above, so the suggested version is above everything accepted and listed.
+            // An entry's "no" counts whoever proposed it: that number accepted again would never get an entry.
             const entryNo = followedHere(form.options.version, 'entry', catalogue?.status.state === 'declined' ? catalogue.status.declined : undefined, undefined, undefined)
             const usedUpBy = current.declined ?? entryNo?.decline
             if (usedUpBy) {
@@ -477,7 +448,6 @@ export async function exportAction(
                     ...(catalogue ? { catalog: catalogue.status } : {}),
                 }
             }
-            // The "no" named must be a proposal of this place or of the catalogue.
             if (form.follows && !proposalOfHere(form.follows.url, [target.url, ...(config.catalog ? [config.catalog.url] : [])])) {
                 return { intent: 'bundle', status: 'invalid', detail: 'Die Angabe zum nicht angenommenen Vorschlag ist ungültig - bitte die Seite neu laden.' }
             }
@@ -485,11 +455,10 @@ export async function exportAction(
             const project = await getProject(client, parseProjectUrl(target.url).projectPath)
             const open = await openShareOf(config, token, form.datasetId)
             if (open) return { intent: 'bundle', status: 'invalid', detail: busyRefusal(open), mrUrl: open.url, busy: true, bundle: current }
-            // A new version after a "no" says what changed. Where the page's listing did not know the "no", the refusal
-            // carries it, so the Steckbrief asks.
+            // The refusal carries a "no" the page did not know, so the Steckbrief asks what changed.
             const followed = await followedOnServer(client, project, config, token, form.options.slug, form.options.version, id, catalogue)
             if (followed && !form.follows) return { intent: 'bundle', status: 'invalid', detail: whatChangedRefusal(followed), follows: followed, bundle: current }
-            // The line names the "no" as GitLab tells it, where found here; else the page's, checked above.
+            // The "no" as GitLab tells it, where found here; else the page's, checked above.
             const proposing: ExportForm = followed && form.follows ? { ...form, follows: { ...followsRefOf(followed), note: form.follows.note } } : form
             const accessToken = await getAccessToken()
             const pkg = await buildPackage(accessToken, form, requestedBy)
@@ -507,9 +476,8 @@ export async function exportAction(
             const files = Object.fromEntries(
                 Object.entries(pkg.files).map(([path, content]) => [`${dir}/${path}`, content]),
             )
-            // A new version replaces the package's own files. What it no longer contains would stay behind and
-            // fail the repository's check, so it goes - but only below core-ir/, which the export writes in full:
-            // the README, the check script and anything a reviewer put next to them stay.
+            // Leftover files would fail the repository's check; only core-ir/ goes, as the export writes it in full
+            // and the README, check script or a reviewer's files next to it stay.
             const stale = [...existing].filter((path) => path.startsWith(`${dir}/core-ir/`) && !Object.hasOwn(files, path)).sort()
             const outcome = await openMergeRequest(client, {
                 upstream: project,
@@ -538,12 +506,10 @@ export async function exportAction(
                 detail: `Zur Prüfung eingereicht (Vorschlag !${outcome.iid}). Sobald das Katalog-Team das Paket angenommen hat, schlägst du unter „In Arbeit“ den Katalog-Eintrag vor.`,
                 mrUrl: outcome.url,
                 preview,
-                // Read for the guard anyway; the page shows from it whether the catalogue team took a version out.
                 ...(catalogue ? { catalog: catalogue.status } : {}),
             }
         }
 
-        // intent === 'catalog'
         return await proposeCatalog(config, target, token, form.options.slug, form.options.version, id, requestedBy, form.datasetId)
     } catch (error) {
         if (error instanceof PortalReadError) {
@@ -556,7 +522,7 @@ export async function exportAction(
     }
 }
 
-/** The account's versions of a package that refusals count as used up; none where GitLab cannot be read, as the refusal still names one above its own. */
+/** None where GitLab cannot be read: the refusal still names a version above its own. */
 async function proposedVersionsOf(client: GitLabClient, target: ExportTarget, slug: string): Promise<string[]> {
     try {
         const [project, bot] = await Promise.all([getProject(client, parseProjectUrl(target.url).projectPath), currentUser(client)])
@@ -569,15 +535,11 @@ async function proposedVersionsOf(client: GitLabClient, target: ExportTarget, sl
 
 const withoutSlash = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
-/** Whether a proposal's address is one of these projects' merge requests. */
 function proposalOfHere(url: string, projects: string[]): boolean {
     return projects.some((project) => url.toLowerCase().startsWith(`${withoutSlash(project)}/-/merge_requests/`))
 }
 
-/**
- * The first open proposal of the dataset in any package place or the catalogue.
- * The account is asked per GitLab, as a token is someone else on another host.
- */
+/** Asks the account per GitLab, as a token is someone else on another host. */
 async function openShareOf(config: ExportConfig, token: string, datasetId: string): Promise<OpenShare | undefined> {
     const instance = thisInstance()
     const projects = new Map([...config.targets.map((target) => target.url), ...(config.catalog ? [config.catalog.url] : [])].map((url) => [withoutSlash(url), url]))
@@ -592,12 +554,7 @@ async function openShareOf(config: ExportConfig, token: string, datasetId: strin
     return found.flat()[0]
 }
 
-/**
- * The "no" a new version follows, as `followedDecline` reads it on the page: to
- * the highest version below it proposed from this instance (`proposedHere`), as
- * a package or an entry. `inspected` is the catalogue the submit just read, so
- * its index is not read twice.
- */
+/** Server side of `followedDecline`; `inspected` spares reading the catalogue index twice. */
 async function followedOnServer(
     client: GitLabClient,
     project: GitLabProject,
@@ -630,20 +587,12 @@ async function followedOnServer(
     return followedHere(before, 'entry', status.declined, turnedDown?.description, instance)
 }
 
-/** " (!12)" for a proposal's number, or nothing when its address names none. */
 function proposalRef(mrUrl: string | undefined): string {
     const ref = mergeRequestRef(mrUrl)
     return ref ? ` (${ref})` : ''
 }
 
-/**
- * Why a package cannot go into its folder, from what the base branch holds
- * there: another publisher's package, which the proposal would overwrite, or
- * a version as high as this one or higher - versions only go up, so an
- * installation can tell the newer one. The same version again is no reason:
- * it never reached the base branch (`on-base` was refused before), so it may
- * be proposed once more.
- */
+/** The same version again is fine: it never reached the base branch, as `on-base` was refused before. */
 function folderRefusalOf(onBranch: BundleStatus, id: string, slug: string, version: string): string | undefined {
     if (onBranch.reason !== 'other-version' || !onBranch.onBase) return undefined
     if (onBranch.onBase.id !== id) {
@@ -656,29 +605,17 @@ function folderRefusalOf(onBranch: BundleStatus, id: string, slug: string, versi
     return undefined
 }
 
-/**
- * Why a version cannot be proposed, from the catalogue: the version or a
- * higher one is listed there, or was and the catalogue team took it out (see
- * `takenOutIn`). Either way it is used up.
- */
+/** Listed or taken out at this version or higher: either way it is used up. */
 function catalogRefusalOf(version: string, { status, floor }: CatalogInspection): string | undefined {
     if (!floor || isNewerVersion(version, floor)) return undefined
     const higher = `Eine neue Version muss höher sein als ${floor}, zum Beispiel ${nextPatch(floor)}.`
     if (status.state === 'listed') return `Version ${version} steht schon im Katalog. ${higher}`
-    // Who took it out and why is said next to the form already, from the catalogue status sent along.
     if (status.takenOut) return `Version ${floor} war schon im Katalog. ${higher}`
     return `Im Katalog steht schon Version ${floor}. ${higher}`
 }
 
-/**
- * Proposes the catalogue entry for a package on the target's base branch, for
- * the export form and the list of shared packages alike.
- *
- * Built from the MERGED manifest, not from a form: the entry then lists what
- * the bundle review saw, and the step still works days after the export.
- * Refused unless the package directory on the base branch is, by tree id, the
- * one the export's merge request brought.
- */
+// Built from the merged manifest, not a form: the entry lists what the review saw, and works days later.
+// Refused unless the package directory on the base branch has the tree id the export's proposal brought.
 async function proposeCatalog(
     config: ExportConfig,
     target: ExportTarget,
@@ -687,7 +624,6 @@ async function proposeCatalog(
     version: string,
     expectedId: string | undefined,
     requestedBy: string,
-    /** The dataset the form shares, where there is a form; the listing's step has none, and the package's proposal names it. */
     datasetId?: string,
 ): Promise<ExportActionResult> {
     if (!config.catalog) {
@@ -711,7 +647,7 @@ async function proposeCatalog(
             bundle,
         }
     }
-    // A version someone asked to take out again is not listed meanwhile: the reviewers decide on the removal first.
+    // Not listed while its removal is proposed: the reviewers decide on that first.
     if (bundle.removal?.state === 'opened') {
         const removal = mergeRequestRef(bundle.removal.mrUrl)
         return {
@@ -736,10 +672,9 @@ async function proposeCatalog(
     const catalogue = await readVersionCatalog(catalogClient, catalogProject.id, config.catalog, slug, version, false)
     const packageId = bundle.packageId ?? expectedId ?? ''
     const declined = await readCatalogDecline(catalogClient, catalogProject.id, catalogue, packageId, lazyAccount(catalogClient), 'throw')
-    // The catalogue team's decision is not undone from here: neither by a new proposal nor by pointing at an open one.
+    // The catalogue team's "no" is not undone from here, neither by a new proposal nor by an open one.
     const catalog = catalogStatusIn(catalogue, slug, version, packageId, declined)
-    // An entry turned down is not proposed again for this version. The reading goes along, so the page drops its
-    // button at once.
+    // The reading goes along, so the page drops its button at once.
     if (catalog.state === 'declined' && catalog.declined) {
         const used = await proposedVersionsOf(shareClient(target.url, token), target, slug)
         const floor = catalogFloor(catalogue, packageId)
@@ -815,7 +750,7 @@ async function proposeCatalog(
             '',
             'Check: `python3 ci/validate-index.py`',
             '',
-            // The entry belongs to the share of the accepted package: the same dataset as its proposal names, this instance proposing.
+            // The dataset the accepted package's proposal names, so the entry belongs to that share.
             shareSourceLine({ kind: 'dataset', id: shareSourceOf(merged?.description)?.id ?? datasetId, instance: thisInstance() }),
         ].join('\n'),
         files: { 'index.json': edit.content },
@@ -825,8 +760,8 @@ async function proposeCatalog(
     try {
         outcome = await proposing
     } catch (error) {
-        // The catalogue's branch names no publisher, so another package of the same name and version may hold it with
-        // its own "no". This package's own was refused above; one that came in since is told as GitLab's answer.
+        // The catalogue branch names no publisher, so another package of that name and version may hold it.
+        // This package's own "no" was refused above; one that came in since surfaces as GitLab's error.
         const own = error instanceof HeldBranchError && (!error.held.description || error.held.description.includes(`\`${packageId}\``))
         if (!(error instanceof HeldBranchError) || own) throw error
         return { intent: 'catalog', status: 'invalid', detail: heldEntryRefusal(slug, version, error.held.iid), mrUrl: error.held.web_url, bundle, catalog }
@@ -843,7 +778,6 @@ async function proposeCatalog(
     }
 }
 
-/** The catalogue's branch is held by another package's proposal that was turned down: it stays, so the catalogue team can reopen it. */
 function heldEntryRefusal(slug: string, version: string, iid: number): string {
     return `Kein Katalog-Eintrag: Für „${slug}“ in Version ${version} gibt es schon einen geschlossenen Vorschlag eines anderen Pakets (Vorschlag !${iid}). Er bleibt, wie er ist, damit das Katalog-Team ihn wieder öffnen kann - für dein Paket teile eine neue Version.`
 }
@@ -859,11 +793,7 @@ function verificationRefusal(verification: BundleVerification | undefined): stri
     }
 }
 
-/**
- * The catalogue step from the list of shared packages: no form, the merged
- * manifest is the source. Arguments are re-checked here, since a server
- * action answers any caller.
- */
+/** From the shared packages list; arguments are checked again, as a server action answers any caller. */
 export async function proposeSharedCatalogEntry(
     targetKey: string,
     slug: string,
@@ -889,7 +819,7 @@ export async function proposeSharedCatalogEntry(
     }
 }
 
-/** The target a withdrawal acts in, or why there is none. Arguments are checked again: a server action answers any caller. */
+/** Arguments are checked again: a server action answers any caller. */
 function deletionTarget(targetKey: string, slug: string, version: string): { config: ExportConfig; target: ExportTarget; token: string } | DeletionResult {
     const config = exportConfig()
     const target = config.targets.find((candidate) => candidate.key === targetKey)
@@ -900,11 +830,7 @@ function deletionTarget(targetKey: string, slug: string, version: string): { con
     return { config, target, token: config.token as string }
 }
 
-/**
- * What "Zurückziehen" would do to one shared version now, for the dialog to
- * show before anything happens (see `share-deletion.ts`): the plan of the
- * default scope, and where the person has a choice, the other one. Reads only.
- */
+/** What „Zurückziehen“ would do now, for the dialog to show first; reads only. */
 export async function planShareDeletion(
     targetKey: string,
     slug: string,
@@ -922,14 +848,7 @@ export async function planShareDeletion(
     }
 }
 
-/**
- * Withdraws one shared version the way the confirmed plan said: GitLab is
- * read again for the chosen `scope`, and the withdrawal runs only while that
- * reading is still the plan with `fingerprint`. Otherwise the new plan comes
- * back, to be confirmed in turn - also when the choice itself is gone, say
- * because the open proposal was closed meanwhile: the plan of the other
- * reading has another fingerprint.
- */
+/** Runs only while GitLab still reads as the confirmed plan (`fingerprint`); else the new plan comes back. */
 export async function deleteShare(
     targetKey: string,
     slug: string,
@@ -961,16 +880,13 @@ export async function deleteShare(
     }
 }
 
-/** Said where a catalogue step is asked for and the instance has no catalogue: one wording for every place. */
 const CATALOG_NOT_SET_UP = 'Der Katalog ist auf dieser Instanz noch nicht eingerichtet - das richtet der Betrieb ein.'
 
-/** Whether „Stand prüfen“ found a "no" to the package, its entry or its removal, told in the neutral tone. */
 function hasDecline(bundle: BundleStatus, catalog: CatalogStatus): boolean {
     return Boolean(bundle.declined || catalog.state === 'declined' || removalDeclineShown(bundle, catalog))
 }
 
 function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
-    // The "no" to its removal, while it is the news.
     const removal = removalDeclineShown(bundle, catalog)
     const first =
         bundle.state === 'mr-open'
@@ -997,38 +913,26 @@ function statusLine(bundle: BundleStatus, catalog: CatalogStatus): string {
     return `${first} ${second}`
 }
 
-/** A status detail as a sentence of its own: the details end without a full stop, for use inside others. */
+/** Status details end without a full stop, for use inside other sentences. */
 function sentenceOf(text: string): string {
     return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
-/** One row of the inventory: `type` for the code to decide on, `kind` as the page shows it. */
+/** `type` for the code, `kind` as the page shows it. */
 export interface InventoryArtifact {
     type: 'structure' | 'source' | 'mapping' | 'sink' | 'pipeline' | 'api' | 'style' | 'layer'
     kind: string
     name: string
-    /** The map members are shown as one group, see mapArtifacts. */
     group?: 'map'
-    /** Indent inside the group: a layer under the API, a style under its layer. */
     depth?: 1 | 2
-    /** A grey line under the name, e.g. the sink a layer shows. */
     detail?: string
-    /** An API's standard ("OWS"), for naming the map service as a whole. */
     standard?: string
-    /** No name of its own: `name` was made up (or is the portal's default) and travels as such. */
+    /** `name` was made up or is the portal's default. */
     unnamed?: boolean
 }
 
-/** The portal's names for a pipeline nobody named, in each of its languages. */
 const PORTAL_DEFAULT_PIPELINE_NAMES: ReadonlySet<string> = new Set(['Untitled Pipeline', 'Pipeline ohne Namen'])
 
-/**
- * The map members as one group, the way a reader asks about them ("what belongs
- * to the map?"): the API first, each layer under it with the sink it shows, each
- * layer's styles under the layer. The platform keeps all three as objects of the
- * dataset; it is the layer that refers to a sink and to styles, and the API that
- * makes the dataset's layers reachable. A style no layer uses stands on its own.
- */
 function mapArtifacts(snapshot: InstanceSnapshot): InventoryArtifact[] {
     const sinkNames = new Map(snapshot.sinks.map((sink) => [sink.id, sink.name]))
     const styles = new Map((snapshot.styles ?? []).map((style) => [style.id, style]))
@@ -1072,11 +976,9 @@ function mapArtifacts(snapshot: InstanceSnapshot): InventoryArtifact[] {
     return rows
 }
 
-/** Demo data the share can take along: the streams per source, or why none could be read. */
 export interface DemoInventory {
     sources: DemoSource[]
     problem?: string
-    /** Base address of the simulator's own interface, where a stream can be made; absent when unknown. */
     simulatorUi?: string
 }
 
@@ -1091,7 +993,7 @@ export async function inspectExportSource(datasetId: string): Promise<{
             artifacts: [
                 ...snapshot.structures.map((row) => ({ type: 'structure' as const, kind: 'Datenstruktur', name: row.name })),
                 ...snapshot.sources.map((row) => ({ type: 'source' as const, kind: 'Datenquelle', name: row.name })),
-                // Named as the package will name them: a mapping by its title, never by the instance's URN.
+                // Named as the package names them: by title, never by the instance's URN.
                 ...snapshot.mappings.map((row, index) => ({
                     type: 'mapping' as const, kind: 'Mapping', name: mappingTitle(row, index), ...(isUnnamedMapping(row) ? { unnamed: true } : {}),
                 })),

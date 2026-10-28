@@ -6,15 +6,8 @@ import { IN_PROGRESS_PATH } from '@/lib/export/in-progress-items'
 import type { StageNotice } from '@/lib/export/new-version'
 import type { busyOptions, ListingState } from '@/lib/export/source-options'
 
-/**
- * What „Auswählen“ says around its dropdown about where each dataset stands.
- * Server-safe: no hooks; the words come from `lib/export/source-options.ts`
- * and `lib/export/new-version.ts`.
- */
-
 const linkClass = 'font-medium text-primary underline-offset-2 hover:underline'
 
-/** Next to the field while the listing is asked or could not be read; nothing once it is read. */
 export function ListingLine({ listing }: { listing?: ListingState }) {
     if (listing?.state === 'loading') return <Pending>Stand wird abgefragt …</Pending>
     if (listing?.state === 'failed') {
@@ -23,7 +16,7 @@ export function ListingLine({ listing }: { listing?: ListingState }) {
     return null
 }
 
-/** Stands in for the greyed-out entries, which show no tooltip: each name links to its row in „In Arbeit“. */
+/** Says why options are greyed out, as a disabled option shows no tooltip. */
 export function BusySentence({ options }: { options: ReturnType<typeof busyOptions> }) {
     if (!options.length) return null
     return (
@@ -47,7 +40,6 @@ export function BusySentence({ options }: { options: ReturnType<typeof busyOptio
     )
 }
 
-/** „Zu „In Arbeit““, under a refusal that says the dataset is busy. */
 export function InProgressLink() {
     return (
         <Link href={IN_PROGRESS_PATH} className={linkClass}>
@@ -56,7 +48,6 @@ export function InProgressLink() {
     )
 }
 
-/** The chosen dataset's notice (`stageNotice`): a fact, so neutral. */
 export function StageNoticeView({ notice }: { notice: StageNotice }) {
     return (
         <Notice

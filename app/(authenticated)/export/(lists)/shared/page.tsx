@@ -4,11 +4,7 @@ import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { fetchShareRight } from '@/lib/export/share-permission'
 import { requireSession } from '@/lib/session'
 
-/**
- * „Veröffentlicht“ (/export/shared, the address of the former "Geteilte
- * Pakete", so old links keep working): what this instance put into the
- * catalogue through this marketplace (plan of 2026-10-18, section 5).
- */
+// „Veröffentlicht“ keeps the address /export/shared, so old links keep working.
 export default async function PublishedPage() {
     await requireSession()
     const readiness = exportReadiness(exportConfig())

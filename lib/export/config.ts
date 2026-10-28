@@ -1,26 +1,11 @@
-/**
- * Where an export may propose its package, and with which credential.
- *
- * Per-instance operator configuration, like the deployment repository for
- * add-on installs: the credential belongs to the SERVICE (a bot account on
- * GitLab), never to the person clicking export — nobody using the marketplace
- * needs a forge account. One token serves every target and the catalogue.
- *
- * A target the token cannot push to is still usable: the export then goes
- * through the bot's fork and opens the merge request from there — exactly how
- * outsiders contribute to a public repository they have no rights on. The
- * catalogue repository is the usual case: most instances can read it, few may
- * write to it.
- */
+// Operator configuration for sharing: one bot token serves every target and the catalogue.
 
 export interface ExportTarget {
-    /** Stable key for the form (the repository URL). */
     key: string
     label: string
-    /** Project web URL, e.g. https://gitlab.com/civitascore-openurbanapps/civitas-marketplace-catalog */
     url: string
     baseBranch: string
-    /** Folder the package directory is created under; '.' for the repository root. */
+    /** '.' for the repository root. */
     pathPrefix: string
 }
 
@@ -31,7 +16,6 @@ export interface CatalogRepo {
 
 export interface ExportConfig {
     targets: ExportTarget[]
-    /** Why the target list is empty or unusable, for the page to show verbatim. */
     targetsError?: string
     token?: string
     catalog?: CatalogRepo
@@ -39,14 +23,9 @@ export interface ExportConfig {
 
 const RAW_INDEX_URL = /^(https?:\/\/[^/]+\/.+?)\/-\/raw\/([^/]+)\/index\.json$/
 
-/**
- * The catalogue repository is derived from the repo-list URL unless set
- * explicitly: `https://host/group/project/-/raw/<branch>/index.json` names
- * both the project and the branch the entry MR must target.
- */
-/** Loosely typed on purpose: tests hand in plain objects, production hands in process.env. */
 export type EnvLike = Record<string, string | undefined>
 
+/** Unless set explicitly, from `REPO_LIST_URL` (`…/<group>/<project>/-/raw/<branch>/index.json`). */
 export function catalogRepoFromEnv(env: EnvLike = process.env): CatalogRepo | undefined {
     const explicit = env.CATALOG_REPO_URL?.trim()
     if (explicit) {
@@ -63,12 +42,7 @@ function stripGitSuffix(url: string): string {
 
 const SAFE_PREFIX = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-/**
- * Parses EXPORT_TARGET_REPOS, a JSON array of
- * `{ "label", "url", "baseBranch"?, "pathPrefix"? }`. Invalid entries fail the
- * whole list with a message instead of being skipped: a silently dropped
- * target would send someone's package to the wrong repository.
- */
+/** One bad entry fails the list: skipping it could send a package to the wrong repository. */
 export function parseExportTargets(raw: string | undefined): {
     targets: ExportTarget[]
     error?: string
@@ -123,45 +97,30 @@ export function exportConfig(env: EnvLike = process.env): ExportConfig {
     }
 }
 
-/**
- * How this instance names itself in what it shares: the portal's address
- * (`PORTAL_URL`), as the package README has always said it ("instance …").
- * Proposals carry it in their source line, so the share pages can tell this
- * instance's shares from those of the others using the same GitLab account
- * (demo, dev and local share one). Undefined when it is not set: then
- * nothing is claimed, and nothing can be told apart either.
- */
+/** Tells this instance's shares from those of others on the same GitLab account. */
 export function thisInstance(env: EnvLike = process.env): string | undefined {
     return env.PORTAL_URL?.trim().replace(/\/+$/, '') || undefined
 }
 
 export type ExportReadiness = 'ready' | 'missing-targets' | 'missing-token'
 
-/** The share actions' answer where sharing is not ready (`exportReadiness`) or the named target is not configured. */
 export const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
 
-/** Composing and previewing always works; opening merge requests needs targets and a token. */
 export function exportReadiness(config: ExportConfig): ExportReadiness {
     if (config.targets.length === 0) return 'missing-targets'
     if (!config.token) return 'missing-token'
     return 'ready'
 }
 
-/** The package directory inside the target repository: `<pathPrefix>/<slug>`, or `<slug>` at the root. */
 export function packageDir(target: Pick<ExportTarget, 'pathPrefix'>, slug: string): string {
     return target.pathPrefix === '.' ? slug : `${target.pathPrefix}/${slug}`
 }
 
-/** Deterministic, so clicking twice targets the same branch; versioned, so a v2 never collides with an open v1. */
+/** Deterministic, so a second click targets the same branch. */
 export function bundleBranch(slug: string, version: string): string {
     return `export/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }
 
-/**
- * The inverse of {@link bundleBranch}, for listing what was shared: the version
- * is the SemVer at the end, the slug everything before it. Undefined for any
- * branch the export did not name.
- */
 export function parseBundleBranch(branch: string): { slug: string; version: string } | undefined {
     const match = /^export\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
     return match ? { slug: match[1], version: match[2] } : undefined
@@ -171,18 +130,15 @@ export function catalogBranch(slug: string, version: string): string {
     return `catalog/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }
 
-/** The inverse of {@link catalogBranch}, as {@link parseBundleBranch} is of the export branch. */
 export function parseCatalogBranch(branch: string): { slug: string; version: string } | undefined {
     const match = /^catalog\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
     return match ? { slug: match[1], version: match[2] } : undefined
 }
 
-/** Where the proposal to take a merged version out of the repository again lives. */
 export function removalBranch(slug: string, version: string): string {
     return `remove/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }
 
-/** The inverse of {@link removalBranch}, as {@link parseBundleBranch} is of the export branch. */
 export function parseRemovalBranch(branch: string): { slug: string; version: string } | undefined {
     const match = /^remove\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
     return match ? { slug: match[1], version: match[2] } : undefined

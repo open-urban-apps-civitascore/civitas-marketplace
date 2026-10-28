@@ -4,57 +4,30 @@ import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
 import type { ExportSource } from '@/lib/export/sources'
 import { DATASET_STATUS_LABELS } from '@/lib/ui/dataset-status'
 
-/**
- * The choices of „Auswählen“, apart from the dropdown that shows them: pure,
- * so the words are tested without a browser (plan of 2026-10-18, section 3).
- *
- * The closed field shows only the dataset's name; the open list adds the
- * portal status and where the dataset came from, and a second, quieter line
- * for where it stands: a share started in this browser, or what the share
- * listing says (a busy dataset is greyed out).
- */
 export interface SourceOption {
     value: string
-    /** The portal's dataset name: all the closed field shows. */
     label: string
-    /** The rest of the first line, „Freigegeben · hier angelegt“. */
     detail?: string
-    /** The second line, „Angefangen am 12.10.“, „In Arbeit (1.1.0) - nicht wählbar“. */
     hint?: string
-    /** Greyed out: something of it is in „In Arbeit“ (see `blockingRows`). */
     disabled?: boolean
-    /** For a greyed-out one: its versions in progress and a link to the first, for the sentence under the field. */
     busy?: { versions: string; href: string }
 }
 
-/**
- * What the share listing said when the options were made. While `loading` or
- * `failed` nothing is greyed out: the server checks again on submit. Absent
- * where the person may not submit.
- */
+/** While `loading` or `failed` nothing is greyed out: the server checks again on submit. */
 export type ListingState = { state: 'loading' } | { state: 'failed' } | ({ state: 'read' } & ListingFacts)
 
-/** The dataset and shared version the address names (`from=`): continuing that row does not grey the dataset out. */
+/** The address's dataset and version (`from=`): continuing that row does not grey the dataset out. */
 export interface OpenedChoice {
     datasetId?: string
     from?: { version: string; slug?: string }
 }
 
-/**
- * Where a dataset came from, in the words agreed on 13 Oct (never "selbst
- * erstellt"). Nothing when the installations could not be read: a guess would
- * be wrong for every installed dataset at once.
- */
+/** Nothing when the installations could not be read: a guess would be wrong for all of them at once. */
 function originLabel(installed: boolean | undefined): string | undefined {
     if (installed === undefined) return undefined
     return installed ? 'aus dem Katalog installiert' : 'hier angelegt'
 }
 
-/**
- * Sorted by name, as a person looks for one. An open proposal greys a dataset
- * out even with a share started here; otherwise the started share's hint wins
- * over the listing's, as it is the person's own next step.
- */
 export function sourceOptions(sources: ExportSource[], drafts: ShareDraft[], listing?: ListingState, opened: OpenedChoice = {}): SourceOption[] {
     const started = new Map(drafts.map((draft) => [draft.datasetId, draft]))
     return [...sources]
@@ -79,7 +52,6 @@ export function sourceOptions(sources: ExportSource[], drafts: ShareDraft[], lis
         })
 }
 
-/** The greyed-out options, for the sentence under the field (`BusySentence`). */
 export function busyOptions(options: readonly SourceOption[]): (SourceOption & { busy: NonNullable<SourceOption['busy']> })[] {
     return options.filter((option): option is SourceOption & { busy: NonNullable<SourceOption['busy']> } => Boolean(option.disabled && option.busy))
 }

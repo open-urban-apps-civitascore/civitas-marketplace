@@ -7,12 +7,11 @@ import { useSharedListing } from '@/components/export/use-shared-listing'
 import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { shareTabs } from '@/lib/export/share-tabs'
 
-/** The rows of a person who may not see what was submitted: one list, so the tab rules are not worked out anew on every render. */
+/** One stable empty list, so the tab rules are not worked out anew on every render. */
 const NONE: SharedPackageRow[] = []
 
 interface ShareListingContextValue {
     listing: ReturnType<typeof useSharedListing>
-    /** Whether a list or the tab bar asked for the listing during this visit. */
     wanted: boolean
     want: () => void
     person?: string
@@ -22,25 +21,17 @@ interface ShareListingContextValue {
 const ShareListingContext = createContext<ShareListingContextValue | null>(null)
 
 /**
- * The one reading of what was shared, for every page of "Teilen" (plan of
- * 2026-10-18, section 2): it sits in the layout of /export, which stays
- * mounted from tab to tab and into the wizard and back, so GitLab is asked
- * once per visit, again on „Aktualisieren“ and after each write.
- *
- * It reads only once something on the page asks (`useShareView` with the
- * right to see it): a person without the right would only be refused. The
- * wizard asks too, where the person may submit, for what is busy and which
- * versions are used. Who may see it is each page's own check - layouts do not
- * run again on navigation.
+ * Lives in the /export layout, which stays mounted across tabs and the wizard: GitLab is asked once per visit.
+ * Reads only once a page asks; who may see it is each page's own check, as layouts do not rerun on navigation.
  */
 export function ShareListingProvider({
     person,
     draftOwner,
     children,
 }: {
-    /** Who is looking, by the name proposals are made for (`proposerName`). */
+    /** As `proposerName` gives it. */
     person?: string
-    /** Whose drafts these are (`draftOwnerOf`). */
+    /** As `draftOwnerOf` gives it. */
     draftOwner?: string
     children: ReactNode
 }) {
@@ -57,15 +48,7 @@ function useShareListingContext(): ShareListingContextValue {
     return value
 }
 
-/**
- * The listing as a list, the tab bar, „So läuft Teilen ab“ or the wizard uses it, with
- * the person's started shares and the tab rules applied (`share-tabs.ts`).
- * `enabled`: this person may see what was submitted here; without it the
- * rows are empty and only the started shares count.
- *
- * `rows` is null until the first reading came back - "not read yet", never
- * "nothing shared"; `draftsReady` is false until the browser was read.
- */
+/** `rows` is null until the first reading: "not read yet", never "nothing shared". */
 export function useShareView(enabled: boolean) {
     const { listing, wanted, want, person, draftOwner } = useShareListingContext()
     useEffect(() => {
@@ -82,9 +65,7 @@ export function useShareView(enabled: boolean) {
     return {
         rows,
         tabs,
-        /** This instance as the listing names it, to tell its shares from other instances'. */
         instance: listing.instance,
-        /** Where GitLab keeps proposals older than the listing read, for „Ältere in GitLab ansehen“. */
         older: enabled ? listing.older : undefined,
         drafts,
         draftsReady,
@@ -97,7 +78,6 @@ export function useShareView(enabled: boolean) {
     }
 }
 
-/** Reads the listing again after a write, for whoever shows it next; nothing is read while nobody asked for it. */
 export function useShareListingReload(): () => void {
     return useShareListingContext().listing.reload
 }
