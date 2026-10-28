@@ -6,6 +6,7 @@ import {
     mergeFolder,
     portalServices,
     readMasterportalMember,
+    removeMasterportal,
     type GeoportalFiles,
 } from '@/lib/geoportal/merge'
 
@@ -137,6 +138,89 @@ describe('applyMasterportal', () => {
         const applied = applyMasterportal(other, MEMBER, DATASET)
 
         expect(applied.services).toHaveLength(5)
+    })
+
+    it('keeps the folder of another installation that has the same name', () => {
+        // Two installations of packages with one folder name: the second must not take the first one's folder.
+        const other = applyMasterportal(operatorFiles(), MEMBER, 'other-dataset')
+        const applied = applyMasterportal(other, MEMBER, DATASET)
+
+        const elements = (applied.config.layerConfig as { subjectlayer: { elements: { name: string; elements: { id: string }[] }[] } })
+            .subjectlayer.elements
+        expect(elements.map((element) => element.name)).toEqual([
+            'Jungbaumbewässerung Musterbach',
+            'Jungbaumbewässerung Musterbach',
+            'Kommunale Fachdaten',
+        ])
+        expect(elements[0].elements.map((element) => element.id)).toEqual([`${DATASET}-sta`, `${DATASET}-karte`])
+        expect(elements[1].elements.map((element) => element.id)).toEqual(['other-dataset-sta', 'other-dataset-karte'])
+    })
+
+    it('replaces its folder where the operator put it, also inside another folder and under another name', () => {
+        const files = applyMasterportal(operatorFiles(), MEMBER, DATASET)
+        const tree = files.config.layerConfig as { subjectlayer: { elements: Record<string, unknown>[] } }
+        const [own, operator] = tree.subjectlayer.elements
+        tree.subjectlayer.elements = [{ ...operator, elements: [...(operator.elements as unknown[]), { ...own, name: 'Umbenannt' }] }]
+
+        const applied = applyMasterportal(files, MEMBER, DATASET)
+
+        const elements = (applied.config.layerConfig as { subjectlayer: { elements: { name: string; elements: Record<string, unknown>[] }[] } })
+            .subjectlayer.elements
+        expect(elements).toHaveLength(1)
+        expect(elements[0].elements[1]).toMatchObject({ name: 'Jungbaumbewässerung Musterbach', type: 'folder' })
+    })
+})
+
+describe('removeMasterportal', () => {
+    it('takes out the services, the folder and the style of one dataset and keeps everything else', () => {
+        const files = applyMasterportal(operatorFiles(), MEMBER, DATASET)
+
+        const removed = removeMasterportal(files, DATASET)
+
+        const operator = operatorFiles()
+        expect(removed.services).toEqual(operator.services)
+        expect(removed.config).toEqual(operator.config)
+        expect(removed.styles).toEqual(operator.styles)
+        expect(removed.removed).toEqual({
+            services: [`${DATASET}-sta`, `${DATASET}-karte`],
+            folders: 1,
+            styles: ['jungbaeume_bodenfeuchte'],
+        })
+        expect(removed.changed).toBe(true)
+    })
+
+    it('keeps a style that another installation still names', () => {
+        const both = applyMasterportal(applyMasterportal(operatorFiles(), MEMBER, 'other-dataset'), MEMBER, DATASET)
+
+        const removed = removeMasterportal(both, DATASET)
+
+        expect(removed.removed.styles).toEqual([])
+        expect(removed.styles).toEqual(both.styles)
+        expect(removed.services.map((service) => (service as { id: string }).id)).toEqual([
+            '300',
+            'other-dataset-sta',
+            'other-dataset-karte',
+        ])
+    })
+
+    it('keeps a folder that also holds layers of the operator, without the removed ones', () => {
+        const files = applyMasterportal(operatorFiles(), MEMBER, DATASET)
+        const tree = files.config.layerConfig as { subjectlayer: { elements: { elements: unknown[] }[] } }
+        tree.subjectlayer.elements[0].elements.push({ id: '300', visibility: true })
+
+        const removed = removeMasterportal(files, DATASET)
+
+        const elements = (removed.config.layerConfig as { subjectlayer: { elements: { name: string; elements: unknown[] }[] } })
+            .subjectlayer.elements
+        expect(elements[0]).toEqual({ name: 'Jungbaumbewässerung Musterbach', type: 'folder', elements: [{ id: '300', visibility: true }] })
+        expect(removed.removed.folders).toBe(0)
+    })
+
+    it('changes nothing for a dataset without entries', () => {
+        const removed = removeMasterportal(operatorFiles(), DATASET)
+
+        expect(removed.changed).toBe(false)
+        expect(removed.config).toEqual(operatorFiles().config)
     })
 })
 
