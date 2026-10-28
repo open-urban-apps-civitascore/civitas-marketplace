@@ -192,13 +192,16 @@ describe('sharing metadata', () => {
         expect(row.curation).toBeUndefined()
     })
 
+    /** The journal of an install that made dataset `id`: the platform names it in its DATA_SET line. */
+    const made = (id: string) => [{ artifactType: 'DATA_SET', shellId: id }]
+
     it('offers only readable datasets and prefills only an unambiguous active installation', () => {
         const parsed = pinnedRowSchema.parse(entry())
         const row = { ...parsed, deploymentRef: { ...parsed.deploymentRef, releaseTag: parsed.deploymentRef.releaseTag ?? null, path: parsed.deploymentRef.path ?? '.' } }
         const sources = exportSources([{ id: 'local', name: 'Lokale Bäume' }, { id: 'own', name: 'Bäume' }], [
-            { dataSetId: 'local', packageId: row.id },
-            { dataSetId: 'inaccessible', packageId: row.id },
-            { dataSetId: 'own', packageId: row.id, uninstalledAt: '2026-09-20' },
+            { artifacts: made('local'), packageId: row.id },
+            { artifacts: made('inaccessible'), packageId: row.id },
+            { artifacts: made('own'), packageId: row.id, uninstalledAt: '2026-09-20' },
         ], [row])
         expect(sources).toHaveLength(2)
         // Package fields carry over; the previous operator's account of THEIR
@@ -213,16 +216,16 @@ describe('sharing metadata', () => {
         expect(sources[0].catalog).not.toHaveProperty('curation')
         expect(sources[1].catalog).toBeUndefined()
         expect(exportSources([{ id: 'local', name: 'Bäume' }], [
-            { dataSetId: 'local', packageId: row.id }, { dataSetId: 'local', packageId: 'another' },
+            { artifacts: made('local'), packageId: row.id }, { artifacts: made('local'), packageId: 'another' },
         ], [row])[0].catalog).toBeUndefined()
     })
 
     it('tells installed datasets from ones made here, and says nothing when the installations are unknown', () => {
         const datasets = [{ id: 'installed', name: 'A' }, { id: 'removed', name: 'B' }, { id: 'own', name: 'C' }]
         const installations = [
-            { dataSetId: 'installed', packageId: 'urn:x:usecase:a' },
+            { artifacts: made('installed'), packageId: 'urn:x:usecase:a' },
             // Uninstalled: whatever is left of it is no installation any more.
-            { dataSetId: 'removed', packageId: 'urn:x:usecase:b', uninstalledAt: '2026-09-20' },
+            { artifacts: made('removed'), packageId: 'urn:x:usecase:b', uninstalledAt: '2026-09-20' },
         ]
         expect(exportSources(datasets, installations, []).map((source) => source.installed)).toEqual([true, false, false])
         expect(exportSources(datasets, undefined, []).map((source) => source.installed)).toEqual([undefined, undefined, undefined])

@@ -9,6 +9,9 @@
  *
  * Extended 2026-10-11 by the geo members (apis, styles, layers), ahead of the package repos: the
  * package repos receive this version with the next export.
+ *
+ * Extended 2026-10-28 by the masterportal member kind, verbatim from
+ * commune-musterbach-jungbaum-bewaesserung/ci/validate-bundle.py as of v1.1.5 (4999455).
  */
 export const VALIDATE_BUNDLE_SCRIPT = String.raw`#!/usr/bin/env python3
 """CORE-IR package validator (catalogue format v2).
@@ -35,6 +38,10 @@ package hangs together:
     layerName/sinkRef; layer sinkRef -> datasink title, style refs -> style
     names; a layer needs an OWS api, an OWS api a postgis sink, an STA api a
     frost sink (the checks a release would fail on)
+  - masterportal: folder, layers with apiRef and service, styles. A service
+    carries no id, url or groups: the marketplace sets them for the installed
+    dataset. apiRef -> api slug with a matching standard, a WMS layer ->
+    bundled layerName, styleId -> a style of the same member
 """
 import json
 import os
@@ -42,7 +49,9 @@ import re
 import sys
 
 CORE = "core-ir"
-MEMBER_KINDS = ("dataStructures", "dataSources", "mappings", "dataSinks", "pipelines", "simulations", "dashboards", "apis", "styles", "layers")
+MEMBER_KINDS = ("dataStructures", "dataSources", "mappings", "dataSinks", "pipelines", "simulations", "dashboards", "apis", "styles", "layers", "masterportal")
+# The Masterportal layer types a package may declare, and the api standard that serves each.
+MASTERPORTAL_TYPES = {"WMS": "OWS", "WFS": "OWS", "SensorThings": "STA"}
 API_SLUG = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 RESERVED_API_SLUGS = ("apis", "usable-datasources", "api", "v1", "admin")
 API_STANDARDS = ("OWS", "STA", "CUSTOM")
@@ -275,6 +284,50 @@ for (kind, name), document in documents.items():
             if layer_name in layer_names:
                 fail(f"{where}: layerName '{layer_name}' is used twice")
             layer_names.add(layer_name)
+    elif kind == "masterportal":
+        # Identity and address of a portal entry belong to the receiving instance:
+        # the marketplace writes them from the installed dataset's id.
+        if not isinstance(document.get("folder"), str) or not document["folder"].strip():
+            fail(f"{where}: masterportal needs field 'folder'")
+        portal_layers = document.get("layers")
+        if not isinstance(portal_layers, list) or not portal_layers:
+            fail(f"{where}: masterportal needs a non-empty layers array")
+            portal_layers = []
+        for index, layer in enumerate(portal_layers):
+            layer_where = f"{where}: layers[{index}]"
+            if not isinstance(layer, dict):
+                fail(f"{layer_where} is not an object")
+                continue
+            if not isinstance(layer.get("apiRef"), str) or not layer["apiRef"]:
+                fail(f"{layer_where} needs field 'apiRef' (the slug of a bundled api)")
+            if "visibility" in layer and not isinstance(layer["visibility"], bool):
+                fail(f"{layer_where}: visibility must be true or false")
+            service = layer.get("service")
+            if not isinstance(service, dict):
+                fail(f"{layer_where} needs a 'service' object")
+                continue
+            if not isinstance(service.get("name"), str) or not service["name"]:
+                fail(f"{layer_where}: service needs field 'name'")
+            if service.get("typ") not in MASTERPORTAL_TYPES:
+                fail(f"{layer_where}: service typ must be one of {', '.join(MASTERPORTAL_TYPES)}")
+            for field in ("id", "url", "groups"):
+                if field in service:
+                    fail(f"{layer_where}: service must not carry '{field}', the marketplace sets it for the installed dataset")
+        portal_styles = document.get("styles") or []
+        if not isinstance(portal_styles, list):
+            fail(f"{where}: masterportal styles must be a list")
+            portal_styles = []
+        portal_style_ids = set()
+        for index, style in enumerate(portal_styles):
+            style_where = f"{where}: styles[{index}]"
+            if not isinstance(style, dict) or not isinstance(style.get("styleId"), str) or not style["styleId"]:
+                fail(f"{style_where} needs field 'styleId'")
+                continue
+            if style["styleId"] in portal_style_ids:
+                fail(f"{style_where}: styleId '{style['styleId']}' is used twice")
+            portal_style_ids.add(style["styleId"])
+            if not isinstance(style.get("rules"), list) or not style["rules"]:
+                fail(f"{style_where}: style needs a non-empty rules array")
 
 
 def _deref(node, root, where):
@@ -451,6 +504,34 @@ if "STA" in api_standards and "frost" not in sink_types:
     fail("an STA api needs a bundled frost data sink to serve")
 if layer_names and "OWS" not in api_standards:
     fail("layers need an OWS api that serves them")
+
+# Portal entries name their api by slug, and their typ must fit its standard: a
+# WMS layer is served by the OWS api, a SensorThings layer by the STA api.
+api_standard_by_slug = {
+    api.get("slug"): str(api.get("standard", "")).upper()
+    for (kind, name), api in documents.items()
+    if kind == "apis"
+}
+portal_members = [(name, document) for (kind, name), document in documents.items() if kind == "masterportal"]
+if len(portal_members) > 1:
+    fail("a package has at most one masterportal member")
+for name, document in portal_members:
+    where = f"{CORE}/{name}"
+    portal_style_ids = {style.get("styleId") for style in document.get("styles") or [] if isinstance(style, dict)}
+    for index, layer in enumerate(document.get("layers") or []):
+        if not isinstance(layer, dict) or not isinstance(layer.get("service"), dict):
+            continue
+        service, ref, typ = layer["service"], layer.get("apiRef"), layer["service"].get("typ")
+        standard = api_standard_by_slug.get(ref)
+        if standard is None:
+            fail(f"{where}: layers[{index}] apiRef '{ref}' matches no bundled api slug")
+        elif typ in MASTERPORTAL_TYPES and MASTERPORTAL_TYPES[typ] != standard:
+            fail(f"{where}: layers[{index}] typ '{typ}' needs an {MASTERPORTAL_TYPES[typ]} api, but '{ref}' is {standard}")
+        if typ == "WMS" and service.get("layers") not in layer_names:
+            fail(f"{where}: layers[{index}] WMS layers '{service.get('layers')}' matches no bundled layerName")
+        style_id = service.get("styleId")
+        if style_id is not None and style_id not in portal_style_ids:
+            fail(f"{where}: layers[{index}] styleId '{style_id}' matches no style of this member")
 
 # Entry-type invariants.
 structure_members = members.get("dataStructures") or []

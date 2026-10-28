@@ -6,6 +6,7 @@ import {
 } from '@/lib/assistant/store'
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
 import { fetchCatalogEntry } from '@/lib/catalog/bundle'
+import { findLocalSummary, localSummaries, resolveLocalEntry, withLocalRows } from '@/lib/catalog/local'
 import {
     expireRepoListIfOlder,
     findRepoListSummary,
@@ -34,6 +35,9 @@ import { resolveEntryPath } from '@/lib/use-case-catalog/path'
  * bundled fixtures serve as the catalogue — same shapes, same assembly path,
  * zero network. That keeps local dev and demos working with no configuration
  * and provides the offline fallback for demo days.
+ *
+ * In both modes the local shelf (lib/catalog/local.ts, when LOCAL_CATALOG_DIR
+ * is set) comes on top: packages shared locally, without GitLab.
  */
 
 function isMockCatalog(): boolean {
@@ -86,11 +90,13 @@ export function expireCatalogIfOlder(indexJson: string): boolean {
 export async function getCatalogSummaries(
     type: 'usecase' | 'datastructure',
 ): Promise<CatalogSummary[]> {
-    if (isMockCatalog()) return mockSummaries(type)
-    return getRepoListSummaries(type)
+    const rows = isMockCatalog() ? mockSummaries(type) : await getRepoListSummaries(type)
+    return withLocalRows(rows, await localSummaries(type))
 }
 
 export async function getCatalogSummary(id: string): Promise<CatalogSummary | undefined> {
+    const local = await findLocalSummary(id)
+    if (local) return local
     if (isMockCatalog()) {
         const pkg = mockPackages.find((candidate) => candidate.manifest.id === id)
         return pkg && mockSummary(pkg.manifest)
@@ -122,6 +128,9 @@ export async function resolveCatalogEntry(id: string): Promise<CatalogEntry | un
     if (isAssistantEntryId(id)) return loadAssistantEntry(id)
     // After the install they are looked up by their package id, the one the journal records.
     if (isAssistantPackageId(id)) return loadAssistantEntryByPackageId(id)
+    // A package on the local shelf wins over the catalogue's row of the same id, as in the listing.
+    const local = await resolveLocalEntry(id)
+    if (local) return local
     if (isMockCatalog()) {
         const pkg = mockPackages.find((candidate) => candidate.manifest.id === id)
         if (!pkg) return undefined

@@ -46,6 +46,8 @@ interface PanelProps {
     defaults: { publisher: string; maintainer: string }
     /** Whose drafts these are (`draftOwnerTag`); drafts stay in this browser. None: no drafts at all. */
     draftOwner?: string
+    /** Whether this instance has a local catalogue shelf (LOCAL_CATALOG_DIR): then a package can go there instead of GitLab. */
+    localCatalog?: boolean
 }
 function Steps({ current }: { current: number }) {
     return <ol aria-label="Fortschritt" className="grid gap-2 sm:grid-cols-3">
@@ -231,7 +233,7 @@ function stamped(payload: ShareDraft, startedAt: { current: string | undefined }
     startedAt.current ??= at
     return { ...payload, savedAt: at, startedAt: startedAt.current }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, onNavigate, onFallBack, onProposed, onDiscarded }: PanelProps & {
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, localCatalog, draft, step, onNavigate, onFallBack, onProposed, onDiscarded }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
     /** The wizard's step, from the address: „Auswählen“ (1) shows its dropdown above this. */
@@ -593,6 +595,11 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                     onCheck={() => run('status')}
                     onCatalog={() => run('catalog')}
                 />
+                {/* Local work only: the package lands on this instance's shelf, unreviewed, and installs at once. */}
+                {localCatalog && <div className="flex flex-col gap-3 rounded-xl border border-dashed p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-muted-foreground">Ohne GitLab: Das Paket kommt in den lokalen Katalog dieser Instanz, ungeprüft, und lässt sich gleich installieren.</p>
+                    <Button disabled={pending || Boolean(previewBlocker)} pending={pending && pendingIntent === 'local'} onClick={() => run('local')}>Lokal in den Katalog</Button>
+                </div>}
                 {/* The answer to the last action, under the task it answers. */}
                 {result && <Notice tone={resultTone(result.status)} live
                     action={result.mrUrl && result.mrUrl !== known.bundle?.mrUrl && result.mrUrl !== known.catalog?.mrUrl ? <ExternalAnchor href={result.mrUrl}>In GitLab ansehen</ExternalAnchor> : undefined}>

@@ -3,6 +3,7 @@ import type { BundledSimulation, InstallParameter, PackageManifest, PackageMembe
 import type { InstanceSnapshot, SnapshotMapping } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
+import type { MasterportalMember } from '@/lib/geoportal/merge'
 
 /**
  * Turns an instance snapshot into a CORE-IR package — the inverse of the
@@ -22,6 +23,8 @@ import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
  *     instance sets its own through the same install parameters
  *   - maps: a layer's sink and style ids become the sink's title and the
  *     styles' names, the references the install binds again
+ *   - Masterportal entries: they arrive in package form already, without the
+ *     instance's ids and addresses (lib/geoportal/share.ts), and travel as given
  */
 
 export interface ExportOptions {
@@ -39,6 +42,8 @@ export interface ExportOptions {
     domain: string
     /** Demo data chosen for the package, already in package form (lib/export/simulations.ts). */
     simulations?: BundledSimulation[]
+    /** The use case's Masterportal entries, already in package form (lib/geoportal/share.ts). */
+    masterportal?: MasterportalMember
     provenance: {
         datasetId: string
         datasetName: string
@@ -459,6 +464,14 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         layerMembers.push({ file })
     }
 
+    // ── Masterportal entries: one member, named after the use case; its layers name the APIs above by slug ──
+    const masterportalMembers: PackageMember[] = []
+    if (options.masterportal) {
+        const file = nameFile(options.slug, 'masterportal')
+        files[`core-ir/${file}`] = json(options.masterportal)
+        masterportalMembers.push({ file })
+    }
+
     const manifest: PackageManifest = {
         ...exportMetadataSchema.parse(options.metadata ?? {}),
         id: `urn:${publisher}:usecase:${options.slug}`,
@@ -480,6 +493,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...(apiMembers.length ? { apis: apiMembers } : {}),
             ...(styleMembers.length ? { styles: styleMembers } : {}),
             ...(layerMembers.length ? { layers: layerMembers } : {}),
+            ...(masterportalMembers.length ? { masterportal: masterportalMembers } : {}),
         },
         dependencies: [],
     }

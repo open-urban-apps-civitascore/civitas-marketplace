@@ -1,9 +1,11 @@
 import type { CatalogSummary } from '@/lib/catalog/types'
 import type { DatasetListing } from '@/lib/export/portal-reader'
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
+import { installedDataSet, type DataSetLine } from '@/lib/installation-dataset'
 
 export interface ExportInstallation {
-    dataSetId?: string
+    /** One line per artifact the install made; the `DATA_SET` line names the dataset (installedDataSet). */
+    artifacts?: DataSetLine[]
     /** The id of the installed package: the catalogue id of the entry it came from. */
     packageId?: string
     packageVersion?: string
@@ -37,7 +39,7 @@ export interface ExportSource extends DatasetListing {
  */
 export function exportSources(datasets: DatasetListing[], installations: ExportInstallation[] | undefined, catalog: CatalogSummary[]): ExportSource[] {
     return datasets.map((dataset) => {
-        const matches = (installations ?? []).filter((row) => row.dataSetId === dataset.id && !row.uninstalledAt && row.packageId)
+        const matches = (installations ?? []).filter((row) => installedDataSet(row.artifacts).id === dataset.id && !row.uninstalledAt && row.packageId)
         const known = installations ? { installed: matches.length > 0 } : {}
         const ids = new Set(matches.map((row) => row.packageId))
         if (ids.size > 1) return { ...dataset, ...known, notice: 'Mehrere Katalogzuordnungen: bitte die Angaben selbst ergänzen.' }

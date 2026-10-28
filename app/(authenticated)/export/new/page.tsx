@@ -5,6 +5,7 @@ import { ExportPanel } from '@/components/export/export-panel'
 import { Disclosure } from '@/components/ui/disclosure'
 import { PageHeader } from '@/components/ui/layout'
 import { Notice } from '@/components/ui/notice'
+import { localCatalogDir } from '@/lib/catalog/local'
 import { exportConfig, exportReadiness } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
 import { getCatalogSummaries } from '@/lib/catalog/source'
@@ -108,6 +109,7 @@ export default async function NewSharePage() {
                     // A tag, not the address: drafts are filed under it in the browser. Without
                     // e-mail or name there is nothing to keep two people apart, so no drafts.
                     draftOwner={draftOwnerOf(session.user)}
+                    localCatalog={Boolean(localCatalogDir())}
                 />
             )}
         </div>

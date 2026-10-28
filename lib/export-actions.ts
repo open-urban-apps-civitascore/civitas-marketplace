@@ -1,5 +1,6 @@
 'use server'
 
+import { localCatalogDir, saveLocalPackage } from '@/lib/catalog/local'
 import { useCaseSlugPattern } from '@/lib/catalog/schema'
 import { applyCatalogEntry, buildCatalogEntry, catalogInputFromManifest } from '@/lib/export/catalog-entry'
 import {
@@ -49,8 +50,10 @@ import { getSimulation, isSimulatorConfigured, listSimulations, SimulatorError, 
 import { simulatorUiUrl } from '@/lib/simulator/ui-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import { fetchShareRight, proposerName, shareRefusal } from '@/lib/export/share-permission'
+import { masterportalForShare } from '@/lib/geoportal/share'
 
-export type ExportIntent = 'preview' | 'bundle' | 'catalog' | 'status'
+/** `local` puts the package on this instance's local catalogue shelf instead of GitLab (lib/catalog/local.ts). */
+export type ExportIntent = 'preview' | 'bundle' | 'catalog' | 'status' | 'local'
 
 export interface PreviewSummary {
     packageDir: string
@@ -99,7 +102,7 @@ function field(formData: FormData, name: string): string {
 function parseForm(formData: FormData): ExportForm | string {
     const intentRaw = field(formData, 'intent')
     const intent: ExportIntent =
-        intentRaw === 'bundle' || intentRaw === 'catalog' || intentRaw === 'status' ? intentRaw : 'preview'
+        intentRaw === 'bundle' || intentRaw === 'catalog' || intentRaw === 'status' || intentRaw === 'local' ? intentRaw : 'preview'
     const datasetId = field(formData, 'datasetId')
     if (!datasetId) return 'Bitte einen Datensatz auswählen.'
     const targetKey = field(formData, 'targetKey')
@@ -176,9 +179,12 @@ async function buildPackage(
     const snapshot = await readUseCase(accessToken, form.datasetId)
     const demo = form.demoStreams.length ? await readSimulations() : { details: [] }
     const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
+    // The dataset's entries in the geoportal as they are now, or else the ones its package brought.
+    const portal = await masterportalForShare(snapshot.dataset.id, accessToken)
     const pkg = transformSnapshot(snapshot, {
         ...form.options,
         simulations,
+        ...(portal.member ? { masterportal: portal.member } : {}),
         provenance: {
             datasetId: snapshot.dataset.id,
             datasetName: snapshot.dataset.name,
@@ -190,7 +196,7 @@ async function buildPackage(
     })
     // A chosen stream that could not be read is named, never silently dropped.
     const problems = demo.problem ? [`Demo-Daten fehlen im Paket: ${demo.problem}`] : []
-    return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings] }
+    return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings, ...portal.warnings] }
 }
 
 function summarise(pkg: ExportedPackage, target: ExportTarget | undefined, form: ExportForm): PreviewSummary {
@@ -335,6 +341,36 @@ export async function exportAction(
                 detail: preview.errors.length
                     ? `Das Paket würde die Paketprüfung nicht bestehen (${preview.errors.length} Fehler) - siehe unten.`
                     : `${preview.files.length} Dateien, ${preview.identities.length} Kennungen, ${preview.stripped.length} entfernte Zugangsdaten.`,
+                preview,
+            }
+        }
+
+        // On this instance's local shelf instead of GitLab: checked like a proposal, installable at once.
+        if (form.intent === 'local') {
+            if (!localCatalogDir()) {
+                return { intent: 'local', status: 'unconfigured', detail: 'Kein lokaler Katalog eingerichtet (LOCAL_CATALOG_DIR).' }
+            }
+            const accessToken = await getAccessToken()
+            const pkg = await buildPackage(accessToken, form, requestedBy)
+            const preview = summarise(pkg, target, form)
+            if (preview.errors.length) {
+                return {
+                    intent: 'local',
+                    status: 'invalid',
+                    detail: `Nicht abgelegt: das Paket würde die Paketprüfung nicht bestehen (${preview.errors.length} Fehler).`,
+                    preview,
+                }
+            }
+            let dir: string
+            try {
+                dir = await saveLocalPackage(`${form.options.slug}-${form.options.version}`, pkg.files)
+            } catch (error) {
+                return { intent: 'local', status: 'error', detail: `Nicht abgelegt: ${error instanceof Error ? error.message : String(error)}`, preview }
+            }
+            return {
+                intent: 'local',
+                status: 'ok',
+                detail: `Im lokalen Katalog abgelegt (${dir}). Der Anwendungsfall steht unter /use-cases/${form.options.publisher}/${form.options.slug} und lässt sich dort installieren.`,
                 preview,
             }
         }

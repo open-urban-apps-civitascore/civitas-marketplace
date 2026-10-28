@@ -7,6 +7,9 @@
  * Demo data is checked by the install's own assembly instead: its rules (field
  * paths against the message class, topic against the subscription) live there,
  * and a second copy here would drift from what an install actually refuses.
+ *
+ * The masterportal rules come from commune-musterbach-jungbaum-bewaesserung's
+ * script as of v1.1.5 (4999455), with the same messages.
  */
 
 import { assembleCatalogEntry, CatalogIntegrityError, parsePackageManifest } from '@/lib/catalog/assemble'
@@ -23,7 +26,13 @@ const MEMBER_KINDS = [
     'apis',
     'styles',
     'layers',
+    'masterportal',
 ] as const
+
+/** The Masterportal layer types a package may declare, and the api standard that serves each. */
+const MASTERPORTAL_TYPES: Record<string, string> = { WMS: 'OWS', WFS: 'OWS', SensorThings: 'STA' }
+/** What the marketplace sets on a portal entry for the installed dataset, never the package. */
+const MASTERPORTAL_INSTANCE_FIELDS = ['id', 'url', 'groups']
 
 /**
  * The structures the platform publishes for its FROST sink ports, by port. A
@@ -125,6 +134,9 @@ export function checkPackage(files: Record<string, string>): string[] {
     const sinkTitles = new Set<string>()
     const mappingNames = new Set<string>()
     const styleNames = new Set<string>()
+    const layerNames = new Set<string>()
+    const apiStandardBySlug = new Map<string, string>()
+    const portalMembers: { where: string; document: Record<string, unknown> }[] = []
     // Pipelines name their sink by title or id, their mapping by name or URN.
     const sinksByRef = new Map<string, Record<string, unknown>>()
     const mappingsByRef = new Map<string, Record<string, unknown>>()
@@ -208,6 +220,7 @@ export function checkPackage(files: Record<string, string>): string[] {
             for (const field of ['name', 'slug', 'standard']) {
                 if (!nonEmptyString(document[field])) fail(`${where}: api needs field '${field}'`)
             }
+            if (nonEmptyString(document.slug)) apiStandardBySlug.set(document.slug, String(document.standard ?? '').toUpperCase())
         } else if (kind === 'styles') {
             for (const field of ['name', 'sldContent']) {
                 if (!nonEmptyString(document[field])) fail(`${where}: style needs field '${field}'`)
@@ -216,6 +229,51 @@ export function checkPackage(files: Record<string, string>): string[] {
         } else if (kind === 'layers') {
             for (const field of ['layerName', 'sinkRef']) {
                 if (!nonEmptyString(document[field])) fail(`${where}: layer needs field '${field}'`)
+            }
+            if (nonEmptyString(document.layerName)) layerNames.add(document.layerName)
+        } else if (kind === 'masterportal') {
+            // Identity and address of a portal entry belong to the receiving instance: the
+            // marketplace writes them from the installed dataset's id.
+            portalMembers.push({ where, document })
+            if (typeof document.folder !== 'string' || !document.folder.trim()) fail(`${where}: masterportal needs field 'folder'`)
+            const portalLayers = Array.isArray(document.layers) ? document.layers : []
+            if (!portalLayers.length) fail(`${where}: masterportal needs a non-empty layers array`)
+            portalLayers.forEach((layer: unknown, index) => {
+                const layerWhere = `${where}: layers[${index}]`
+                if (!isRecord(layer)) {
+                    fail(`${layerWhere} is not an object`)
+                    return
+                }
+                if (!nonEmptyString(layer.apiRef)) fail(`${layerWhere} needs field 'apiRef' (the slug of a bundled api)`)
+                if ('visibility' in layer && typeof layer.visibility !== 'boolean') fail(`${layerWhere}: visibility must be true or false`)
+                const service = layer.service
+                if (!isRecord(service)) {
+                    fail(`${layerWhere} needs a 'service' object`)
+                    return
+                }
+                if (!nonEmptyString(service.name)) fail(`${layerWhere}: service needs field 'name'`)
+                if (typeof service.typ !== 'string' || !(service.typ in MASTERPORTAL_TYPES)) {
+                    fail(`${layerWhere}: service typ must be one of ${Object.keys(MASTERPORTAL_TYPES).join(', ')}`)
+                }
+                for (const field of MASTERPORTAL_INSTANCE_FIELDS) {
+                    if (field in service) fail(`${layerWhere}: service must not carry '${field}', the marketplace sets it for the installed dataset`)
+                }
+            })
+            const portalStyles = document.styles ?? []
+            if (!Array.isArray(portalStyles)) {
+                fail(`${where}: masterportal styles must be a list`)
+            } else {
+                const styleIds = new Set<string>()
+                portalStyles.forEach((style: unknown, index) => {
+                    const styleWhere = `${where}: styles[${index}]`
+                    if (!isRecord(style) || !nonEmptyString(style.styleId)) {
+                        fail(`${styleWhere} needs field 'styleId'`)
+                        return
+                    }
+                    if (styleIds.has(style.styleId)) fail(`${styleWhere}: styleId '${style.styleId}' is used twice`)
+                    styleIds.add(style.styleId)
+                    if (!Array.isArray(style.rules) || !style.rules.length) fail(`${styleWhere}: style needs a non-empty rules array`)
+                })
             }
         }
     }
@@ -290,6 +348,34 @@ export function checkPackage(files: Record<string, string>): string[] {
                 }
             }
         }
+    }
+
+    // Portal entries name their api by slug, and their typ must fit its standard: a WMS layer is
+    // served by the OWS api, a SensorThings layer by the STA api.
+    if (portalMembers.length > 1) fail('a package has at most one masterportal member')
+    for (const { where, document } of portalMembers) {
+        const portalStyles = Array.isArray(document.styles) ? document.styles : []
+        const styleIds = new Set(portalStyles.flatMap((style: unknown) => (isRecord(style) ? [style.styleId] : [])))
+        const portalLayers = Array.isArray(document.layers) ? document.layers : []
+        portalLayers.forEach((layer: unknown, index) => {
+            if (!isRecord(layer) || !isRecord(layer.service)) return
+            const { service } = layer
+            const ref = layer.apiRef
+            const typ = service.typ
+            const standard = typeof ref === 'string' ? apiStandardBySlug.get(ref) : undefined
+            if (standard === undefined) {
+                fail(`${where}: layers[${index}] apiRef '${String(ref)}' matches no bundled api slug`)
+            } else if (typeof typ === 'string' && typ in MASTERPORTAL_TYPES && MASTERPORTAL_TYPES[typ] !== standard) {
+                fail(`${where}: layers[${index}] typ '${typ}' needs an ${MASTERPORTAL_TYPES[typ]} api, but '${String(ref)}' is ${standard}`)
+            }
+            if (typ === 'WMS' && !(typeof service.layers === 'string' && layerNames.has(service.layers))) {
+                fail(`${where}: layers[${index}] WMS layers '${String(service.layers)}' matches no bundled layerName`)
+            }
+            const styleId = service.styleId
+            if (styleId !== undefined && styleId !== null && !styleIds.has(styleId)) {
+                fail(`${where}: layers[${index}] styleId '${String(styleId)}' matches no style of this member`)
+            }
+        })
     }
 
     const structureMembers = Array.isArray(members.dataStructures) ? members.dataStructures : []
