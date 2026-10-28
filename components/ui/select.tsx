@@ -6,22 +6,15 @@ import { CheckIcon, ChevronDownIcon } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 
-/**
- * A dropdown that looks the same in every browser, unlike a native select whose
- * open list is drawn by the operating system. The same Radix primitive and item
- * styling as the platform portal's `components/ui/select.tsx`, so both apps read
- * alike; the closed field matches this app's own text inputs.
- */
+// Radix, not a native select: the operating system draws a native select's open list.
+// Item styling matches the platform portal's components/ui/select.tsx.
 
 export interface SelectOption {
     value: string
-    /** All the closed field shows, once chosen. */
     label: string
-    /** Only in the open list, after the label on the same line: what tells two choices apart. */
     detail?: string
-    /** Only in the open list, as a quieter second line. */
     hint?: string
-    /** Greyed out and skipped by the arrow keys; it shows no tooltip, so the page must say why elsewhere. */
+    /** Shows no tooltip, so the page must say why elsewhere. */
     disabled?: boolean
 }
 
@@ -32,9 +25,7 @@ interface SelectProps {
     value: string
     onValueChange: (value: string) => void
     options: SelectOption[]
-    /** Shown while nothing is chosen ('' as value). */
     placeholder?: string
-    /** Offers an item that clears the choice back to '' (for example "Keine Angabe"). */
     noneLabel?: string
     disabled?: boolean
     className?: string
@@ -78,8 +69,7 @@ export function Select({ value, onValueChange, options, placeholder, noneLabel, 
 
 function Item({ value, label, detail, hint, disabled }: SelectOption) {
     const id = useId()
-    // Radix names an option by its ItemText alone, which is also what the closed field shows;
-    // detail and hint stay outside it and reach a screen reader as the option's description.
+    // Radix names an option by its ItemText alone; detail and hint reach a screen reader as its description.
     const described = [detail && `${id}-detail`, hint && `${id}-hint`].filter(Boolean).join(' ') || undefined
     return <SelectPrimitive.Item
         value={value}

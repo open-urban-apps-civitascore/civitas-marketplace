@@ -1,6 +1,6 @@
 import type { BundleVerification } from '@/lib/export/status'
 
-/** How the export pages name the states of a share. Pure, for client components. */
+// Imported by client components: keep it free of server code.
 
 export function verificationLabel(verification: BundleVerification): string {
     switch (verification.state) {

@@ -1,17 +1,4 @@
-/**
- * The GitLab side of proposing an export: read what is on the base branch,
- * then write branch + commit + merge request — through the bot's own fork
- * when the token cannot push to the target.
- *
- * Kept behind a narrow surface (project lookup, tree/file reads, branch head,
- * merge-request lookup, `openMergeRequest`) mirroring `deployment-repo/github.ts`,
- * so a third forge would only have to satisfy these functions. GitLab can
- * create a branch with all its files in ONE commits request, which is why
- * this file is shorter than the GitHub one.
- *
- * Everything here only ever PROPOSES, or takes back what the bot itself
- * proposed (`withdrawMergeRequest`). No code path merges.
- */
+// GitLab side of sharing. It only proposes, or withdraws the bot's own proposal: no code path merges.
 
 import { sinceStart, startedOver } from '@/lib/export/declines'
 import { declineReasonOf, withdrawalMarkIn, withdrawalNoteIn, type DeclineReason } from '@/lib/export/merge-request-text'
@@ -26,7 +13,6 @@ export class GitLabError extends Error {
     }
 }
 
-/** The branch is held by an earlier proposal that was turned down: it stays, so the catalogue team can reopen that proposal. */
 export class HeldBranchError extends GitLabError {
     constructor(readonly held: MergeRequestRef) {
         super(
@@ -37,7 +23,6 @@ export class HeldBranchError extends GitLabError {
     }
 }
 
-/** A GitLab failure in the person's words, for every page and action that shows one. */
 export function gitlabMessage(error: GitLabError): string {
     switch (error.status) {
         case 0:
@@ -54,41 +39,21 @@ export function gitlabMessage(error: GitLabError): string {
 }
 
 export interface GitLabClient {
-    /** `https://gitlab.com/api/v4` — derived from the repository URL, so self-hosted instances work. */
+    /** e.g. `https://gitlab.com/api/v4` */
     apiBase: string
     token: string
-    /** Injected for tests; defaults to the global fetch. */
     fetchImpl?: typeof fetch
-    /**
-     * Keeps the answers that cannot change (see {@link GitLabReadCache}), and
-     * the project and the account, which do not for the server's life. Opt-in:
-     * the share pages and their actions set one.
-     */
     cache?: GitLabReadCache
-    /** How long a read may take; {@link READ_TIMEOUT_MS} unless a test shortens it. */
+    /** Reads only; writes never time out. */
     timeoutMs?: number
 }
 
-/**
- * A read that takes longer is given up. Without a limit, one request GitLab
- * never answers held up the whole list of shared packages. Writes have none:
- * giving up on a commit or a merge request would not undo it, only hide
- * whether it happened.
- */
+/** Reads only: giving up on a write would not undo it, only hide whether it happened. */
 export const READ_TIMEOUT_MS = 10_000
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
 
-/**
- * Answers that cannot change, kept in the server's memory: what a repository
- * holds at a commit (a file, a folder listing) and the commits of a merged
- * merge request. A commit is immutable, so these never go stale; anything
- * read at a branch name can, and is never kept.
- *
- * A failed read is not kept, so the next visit asks again. The oldest entries
- * leave first once `limit` is reached; the token is not part of the key,
- * because one deployment has one token.
- */
+/** Only for answers that cannot change. The key leaves out the token: one deployment has one token. */
 export class GitLabReadCache {
     private readonly entries = new Map<string, Promise<unknown>>()
 
@@ -98,7 +63,7 @@ export class GitLabReadCache {
         const known = this.entries.get(key)
         if (known) return known as Promise<T>
         const pending: Promise<T> = load().catch((error: unknown) => {
-            // Only this attempt leaves; a newer one under the same key stays.
+            // A newer attempt under the same key stays.
             if (this.entries.get(key) === pending) this.entries.delete(key)
             throw error
         })
@@ -115,25 +80,21 @@ export class GitLabReadCache {
         return this.entries.size
     }
 
-    /** Forgets everything; for tests. */
     clear(): void {
         this.entries.clear()
     }
 }
 
-/** Through the client's cache when the answer cannot change, straight to GitLab otherwise. */
 export function readOnce<T>(client: GitLabClient, key: string, immutable: boolean, load: () => Promise<T>): Promise<T> {
     return client.cache && immutable ? client.cache.read(`${client.apiBase}|${key}`, load) : load()
 }
 
-/** The signal for a read, or none for a write (see {@link READ_TIMEOUT_MS}). */
 function readSignal(client: GitLabClient, method: string): AbortSignal | undefined {
     return method === 'GET' ? AbortSignal.timeout(client.timeoutMs ?? READ_TIMEOUT_MS) : undefined
 }
 
 const isTimeout = (cause: unknown) => cause instanceof Error && cause.name === 'TimeoutError'
 
-/** The body arrived only in part: a time limit becomes a GitLab error, anything else stays what it was. */
 function bodyFailure(client: GitLabClient, cause: unknown): unknown {
     return isTimeout(cause) ? unreachable(client, cause) : cause
 }
@@ -163,43 +124,37 @@ export interface MergeRequestRef {
     web_url: string
     state: 'opened' | 'merged' | 'closed' | 'locked' | string
     source_branch: string
-    /** Where the source branch lives: the target project itself, or the bot's fork of it. */
     source_project_id?: number
-    /** The head of the source branch; after the merge still reachable in the target project. */
+    /** Head of the source branch; readable in the target project too, also after the merge. */
     sha?: string
     merge_commit_sha?: string | null
     squash_commit_sha?: string | null
     title?: string
     description?: string | null
     author?: { id: number; username?: string } | null
-    /** Who closed it, for a closed one. */
     closed_by?: { id: number; username?: string } | null
-    /** Who merged it; GitLab names it in `merge_user`, older versions only in the deprecated `merged_by`. */
+    /** Older GitLab versions set only the deprecated `merged_by`. */
     merge_user?: { id: number; username?: string } | null
     merged_by?: { id: number; username?: string } | null
     created_at?: string
     closed_at?: string | null
     merged_at?: string | null
     updated_at?: string
-    /** How many comments people wrote on it, GitLab's own notes not counted. */
     user_notes_count?: number
 }
 
-/** One comment on a merge request, as far as the share pages read it. */
 export interface MergeRequestNote {
     body: string
-    /** GitLab's own note ("closed", "reopened"), which nobody wrote. */
+    /** GitLab's own note ("closed", "reopened"). */
     system?: boolean
     author?: { id: number; username?: string } | null
     created_at?: string
 }
 
-/** Newest created first; stable, so entries without a date keep GitLab's order. */
 export function newestFirst<T extends { created_at?: string | null }>(requests: readonly T[]): T[] {
     return [...requests].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
 }
 
-/** Splits a project web URL into API base and `group/project` path. */
 export function parseProjectUrl(url: string): { apiBase: string; projectPath: string } {
     const parsed = new URL(url)
     const projectPath = parsed.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '')
@@ -261,12 +216,12 @@ async function gl<T>(
 
 const encode = (value: string) => encodeURIComponent(value)
 
-/** A project by its path, kept for the server's life: its id and place do not change. Its permissions may; a new process reads them again. */
+/** Cached for the server's life, permissions too: a changed access level shows after a restart. */
 export async function getProject(client: GitLabClient, projectPath: string): Promise<GitLabProject> {
     return readOnce(client, `project|${projectPath}`, true, () => gl<GitLabProject>(client, `/projects/${encode(projectPath)}`))
 }
 
-/** Developer (30) or above may push branches; anything below goes through a fork. */
+/** 30 = Developer, the lowest level that may push branches. */
 export function canPush(project: GitLabProject): boolean {
     const levels = [
         project.permissions?.project_access?.access_level ?? 0,
@@ -275,12 +230,6 @@ export function canPush(project: GitLabProject): boolean {
     return Math.max(...levels) >= 30
 }
 
-/**
- * The bot's fork of a project it cannot push to: reused when it exists,
- * created otherwise. Fork creation is asynchronous on GitLab, so a fresh fork
- * is polled until its import finished — the only wait in the whole flow, and
- * only ever the first time per target.
- */
 export async function ensureFork(client: GitLabClient, upstream: GitLabProject): Promise<GitLabProject> {
     const owned = await gl<GitLabProject[]>(
         client,
@@ -321,7 +270,6 @@ export async function branchHead(
     }
 }
 
-/** Every blob path under `path` at `ref`, following pagination to the end; empty when the path does not exist. */
 export async function listTree(
     client: GitLabClient,
     projectId: number,
@@ -331,12 +279,7 @@ export async function listTree(
     return [...(await listBlobs(client, projectId, path, ref)).keys()]
 }
 
-/**
- * Every file under `path` at `ref` with its blob id, git's hash of its
- * content: equal ids mean equal files, so two states of a folder can be
- * compared without reading a single file. Empty when the path does not
- * exist; kept when `ref` is a commit.
- */
+/** Path to blob id, git's hash of the content: equal ids mean equal files. */
 export function listBlobs(
     client: GitLabClient,
     projectId: number,
@@ -367,7 +310,6 @@ export function listBlobs(
     })
 }
 
-/** The parents of a commit, first parent first. Kept: a commit never changes. */
 export async function commitParents(client: GitLabClient, projectId: number, sha: string): Promise<string[]> {
     const commit = await readOnce(client, `commit|${projectId}|${sha}`, COMMIT_SHA.test(sha), () =>
         gl<{ parent_ids?: string[] }>(client, `/projects/${projectId}/repository/commits/${encode(sha)}`),
@@ -375,19 +317,13 @@ export async function commitParents(client: GitLabClient, projectId: number, sha
     return commit.parent_ids ?? []
 }
 
-/**
- * The base branch as it was just before a merged request landed: the first
- * parent of the commit that brought it - the merge commit, the squashed
- * commit, or for a fast-forward the request's own oldest commit. Undefined
- * when GitLab names none of them.
- */
+/** Base branch just before a merge: first parent of the merge, squash or (fast-forward) oldest commit. */
 export async function commitBefore(client: GitLabClient, projectId: number, merged: MergeRequestRef): Promise<string | undefined> {
     const landed =
         merged.merge_commit_sha ?? merged.squash_commit_sha ?? (await mergeRequestCommits(client, projectId, merged.iid, true)).at(-1)?.id
     return landed ? (await commitParents(client, projectId, landed))[0] : undefined
 }
 
-/** A file's content at `ref`, undefined where it does not exist. Kept when `ref` is a commit. */
 export function readFile(
     client: GitLabClient,
     projectId: number,
@@ -417,12 +353,7 @@ export function readFile(
     })
 }
 
-/**
- * Merge requests into `targetProjectId` from `sourceBranch`, newest created
- * first, any state. By creation, not last change: a late comment on an older
- * proposal must not make it "the newest", which decides whether a version was
- * turned down. Sorted here again, so the first one is always the newest.
- */
+/** Newest created first: a late comment on an older proposal must not make it the newest. */
 export async function findMergeRequests(
     client: GitLabClient,
     targetProjectId: number,
@@ -436,10 +367,6 @@ export async function findMergeRequests(
     )
 }
 
-/**
- * Every open merge request into a project, any author: one request for a
- * whole list, where asking per branch would cost one per package.
- */
 export async function listOpenMergeRequests(client: GitLabClient, projectId: number): Promise<MergeRequestRef[]> {
     const requests: MergeRequestRef[] = []
     for (let page = 1; ; page++) {
@@ -452,25 +379,13 @@ export async function listOpenMergeRequests(client: GitLabClient, projectId: num
     }
 }
 
-/** The account the token belongs to: the bot every export is proposed by. Kept with the client's cache: one deployment has one token. */
 export async function currentUser(client: GitLabClient): Promise<{ id: number; username: string }> {
     return readOnce(client, 'bot', true, () => gl<{ id: number; username: string }>(client, '/user'))
 }
 
-/**
- * How many pages of one author's merge requests are read: 300 proposals, the
- * marketplace's whole record for a long while. The share pages list every
- * one of them (plan of 2026-10-18, section 10), where the first 50 were read
- * until rc.5.
- */
 export const AUTHOR_PAGES = 3
 
-/**
- * Merge requests into `targetProjectId` opened by one author, newest created
- * first, any state, up to {@link AUTHOR_PAGES} pages of 100. Ordered by
- * creation, not by the last change: a comment on an old proposal must not
- * push a newer one off the last page.
- */
+/** By creation: by last change, a comment on an old proposal could push a newer one off the last page. */
 export async function listMergeRequestsBy(
     client: GitLabClient,
     targetProjectId: number,
@@ -488,10 +403,7 @@ export async function listMergeRequestsBy(
     return requests
 }
 
-/**
- * The commits of a merge request, newest first, as GitLab lists them. Kept
- * for a merged one (`merged`): its commits can no longer change.
- */
+/** Newest first. Cached only when `merged`: then its commits can no longer change. */
 export function mergeRequestCommits(
     client: GitLabClient,
     projectId: number,
@@ -503,13 +415,7 @@ export function mergeRequestCommits(
     )
 }
 
-/**
- * The newest comments on a merge request, newest first, GitLab's own
- * ("closed") among them, with who wrote each and when. Kept per `updatedAt`:
- * a new comment, a reopen or any other change moves it, so the key changes
- * with the answer - a closed request that stays closed is read once. Without
- * `updatedAt` nothing is kept.
- */
+/** Newest first. Cached per `updatedAt`, which every new comment or reopen moves. */
 export function mergeRequestNotes(
     client: GitLabClient,
     projectId: number,
@@ -521,33 +427,22 @@ export function mergeRequestNotes(
     )
 }
 
-/** How a closed merge request ended: withdrawn through the marketplace for `withdrawnBy`, else the catalogue team's `reason`. */
 export interface Closing {
     withdrawnBy?: string
     reason?: DeclineReason
 }
 
-/**
- * Reads how a closed request ended: the withdrawal mark in its description
- * first, which needs no call; its comments only where people wrote any, for
- * an old withdrawal note or the team's reason. An unreadable comment list
- * throws, so nothing is claimed about the team.
- */
+/** Throws when the comments cannot be read, so nothing is claimed about the catalogue team. */
 export async function readClosing(client: GitLabClient, projectId: number, mr: MergeRequestRef): Promise<Closing> {
     const marked = withdrawalMarkIn(mr.description, mr.closed_at)
     if (marked) return { withdrawnBy: marked }
-    // No comments: no reason, and no old withdrawal note either - the note is a comment too.
+    // The old withdrawal note is a comment too, so there is none either.
     if (mr.user_notes_count === 0) return { reason: { kind: 'none' } }
     const notes = await mergeRequestNotes(client, projectId, mr.iid, mr.updated_at)
     const noted = withdrawalNoteIn(mr, notes)
     return noted ? { withdrawnBy: noted } : { reason: declineReasonOf(mr, notes) }
 }
 
-/**
- * The directories directly inside `parent` at `ref`, name to tree id; empty
- * when `parent` or `ref` does not exist. One listing serves every package of
- * a folder, and it is kept when `ref` is a commit.
- */
 export function directoryTrees(
     client: GitLabClient,
     projectId: number,
@@ -574,14 +469,7 @@ export function directoryTrees(
     })
 }
 
-/**
- * The tree id of a directory at a ref: git's own hash over everything below
- * it, and nothing else. Equal ids mean equal contents, whatever happened
- * elsewhere in the repository or to the history around it, so a rebase or a
- * squash leaves it alone. The API names a directory's id only in its
- * parent's listing, which is read here; undefined when the directory does not
- * exist at that ref, or the ref does not.
- */
+/** Git's hash over a folder: equal ids mean equal contents, even after a rebase or squash. */
 export async function treeIdOf(
     client: GitLabClient,
     projectId: number,
@@ -595,15 +483,8 @@ export async function treeIdOf(
 }
 
 /**
- * Takes back a merge request the bot opened: the close, then a note on whose
- * behalf, then its branch. Withdrawing one's own proposal needs no review on
- * any forge, which is why this is the one write besides proposing. Closing
- * is what counts and comes first, and it writes `mark` into the description
- * in the same request: a close without it reads as the catalogue team's "no",
- * so a failed close fails the whole withdrawal, and none is claimed that did
- * not happen. The note and the branch are courtesies, whose failure does not
- * fail it - a leftover branch is replaced by the next proposal anyway (see
- * `openMergeRequest`).
+ * Closes with `mark` in one request, else the close reads as the team's "no"; a failed close fails all.
+ * The note and the branch deletion are best effort; the next proposal replaces a leftover branch.
  */
 export async function withdrawMergeRequest(
     client: GitLabClient,
@@ -620,12 +501,8 @@ export async function withdrawMergeRequest(
 }
 
 /**
- * The request whose branch must stay: the newest of the account's own requests
- * from it (of any package), when it was closed without being withdrawn - even
- * after an earlier merge, as the team reopening a later "no" needs its branch.
- * Counted only since the version last started over (`restartedBy`), as the
- * callers' refusals count it: else a version shared again after „Entfernt“
- * would be offered „Erneut einreichen“ that fails each time.
+ * The bot's newest request from this branch, if closed without being withdrawn: a reopen needs the branch.
+ * Counted since `restartedBy`, as the callers' refusals count, or „Erneut einreichen“ would always fail.
  */
 async function heldBy(client: GitLabClient, projectId: number, requests: MergeRequestRef[], restartedBy?: string): Promise<MergeRequestRef | undefined> {
     if (!requests.some((mr) => mr.state === 'closed')) return undefined
@@ -641,16 +518,6 @@ export type MergeRequestOutcome =
     | { status: 'created'; url: string; iid: number }
     | { status: 'already-open'; url: string; iid: number }
 
-/**
- * Opens a merge request that adds or updates `files` (keyed by repository
- * path), and removes `deletedPaths`, on top of the target's base branch.
- *
- * Direct when the token may push to the target; otherwise the branch lives in
- * the bot's fork and the merge request targets the upstream project. The
- * commit starts at the upstream base head when the fork can see that commit
- * (GitLab forks share objects), and falls back to the fork's own base branch
- * otherwise — a stale fork still yields a reviewable merge request.
- */
 export async function openMergeRequest(
     client: GitLabClient,
     input: {
@@ -660,11 +527,9 @@ export async function openMergeRequest(
         title: string
         description: string
         files: Record<string, string>
-        /** Paths that already exist on the base branch — committed as updates, not creates. */
         existingPaths: Set<string>
-        /** Paths on the base branch the merge request removes. */
         deletedPaths?: string[]
-        /** The branch whose merge starts this one's requests over (a version's removal); see `heldBy`. */
+        /** Branch whose merge starts the count over (the version's removal); see `heldBy`. */
         restartedBy?: string
     },
 ): Promise<MergeRequestOutcome> {
@@ -674,12 +539,9 @@ export async function openMergeRequest(
 
     const source = canPush(input.upstream) ? input.upstream : await ensureFork(client, input.upstream)
 
-    // A leftover branch without an open MR (withdrawn, or a previous run failed
-    // after the commit) is replaced, never appended to: the merge request must
-    // show exactly this export, not this export on top of an older attempt.
+    // A leftover branch is replaced, never built on: the merge request must show exactly this export.
     if (await branchHead(client, source.id, input.branch)) {
-        // Never the branch of a turned-down proposal: the catalogue team takes their "no" back by reopening it,
-        // which needs the branch. The callers refuse such a version first.
+        // A turned-down proposal keeps its branch for a reopen; the callers refuse such a version first.
         const held = await heldBy(client, input.upstream.id, requests, input.restartedBy)
         if (held) throw new HeldBranchError(held)
         await gl(client, `/projects/${source.id}/repository/branches/${encode(input.branch)}`, {

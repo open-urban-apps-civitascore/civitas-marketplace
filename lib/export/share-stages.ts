@@ -2,54 +2,18 @@ import { declinedBy, declinedOn, reasonWords, type Decline } from '@/lib/export/
 import { verificationLabel } from '@/lib/export/labels'
 import type { BundleStatus, CatalogStatus } from '@/lib/export/status'
 
-/**
- * Where a shared package version stands, in the four stages of sharing (Ewa's
- * plan of 2026-10-13, point 8): one place that tells it, so the last step of
- * the wizard, "In Arbeit" and "Veröffentlicht" all say the same. Pure, for
- * client components.
- *
- * Two of the stages are the person's own move, two are the catalogue team's:
- * they accept the package, and then the entry. Both proposals go to the same
- * people, so the page names them once, "das Katalog-Team" (plan of
- * 2026-10-18). Saying whose move it is, is the point - a person who left after
- * proposing has to know whether anything waits for them.
- *
- * Withdrawing a share (see `share-deletion.ts`) adds two endings: a proposal
- * closed by the marketplace itself is "Zurückgezogen", and a merged version
- * goes out again only through a merge request of its own, which the
- * catalogue team decides on like the first. The catalogue team adds a
- * third: a version they took out of the catalogue (`CatalogStatus` state
- * `withdrawn`) is finished for good, and is never proposed for it again.
- *
- * "Finished" means nothing is left that the marketplace could move on: that
- * includes a merged version that is no longer, or not as such, in the
- * repository. It keeps its reason (`blockedBy`) for the list of shared
- * packages, but no longer asks anyone in "In Arbeit" for a move nobody can
- * make (Ewa, 2026-10-17).
- *
- * A "no" of the catalogue team never resets a version: the stage they turned
- * down stays `declined`, the version is used up, and the person's move is to
- * read why and share a higher version.
- */
+// The four stages of sharing, in one place so the wizard and the share tabs say the same.
+// A "no" never resets a version: the stage stays `declined` and the version is used up.
 
 export type StageKey = 'propose' | 'review' | 'catalog' | 'listing'
 
-/**
- * - `done`: behind us
- * - `current`: the person's own move, now
- * - `waiting`: someone else's move, now
- * - `blocked`: would be next, but something stops it (see `blockedBy`)
- * - `declined`: the catalogue team turned it down - shown with the problem mark, never as the person's next step
- * - `later`: not yet
- */
+/** `current`: the person's own move now; `waiting`: someone else's; `blocked`: see `blockedBy`. */
 export type StageState = 'done' | 'current' | 'waiting' | 'blocked' | 'declined' | 'later'
 
 export interface Stage {
     key: StageKey
     title: string
-    /** The stage in one or two words, as the progress line of „In Arbeit“ and its status sentence name it. */
     short: string
-    /** Whose move the stage is, as a line starts with them. */
     who: string
     turn: 'you' | 'reviewers'
 }
@@ -61,23 +25,19 @@ export const STAGES: readonly Stage[] = [
     { key: 'listing', title: 'Eintrags-Prüfung', short: 'Eintrags-Prüfung', who: 'Das Katalog-Team', turn: 'reviewers' },
 ]
 
-/** What a stage, a row or a removal says while the catalogue team has the next move. */
 export const WAITING_FOR_TEAM = 'Wartet auf das Katalog-Team'
 
-/** What is known about one package version. Any of it may be missing. */
 export interface ShareFacts {
-    /** The version these facts are about, to tell a newer version on the base branch from an older one. */
     version?: string
-    /** The state of the version's newest merge request, as GitLab names it; absent when none was opened. */
+    /** GitLab's state of the version's newest merge request; absent when none was opened. */
     bundleMrState?: string
-    /** With the version's removal, if one was proposed (`BundleStatus.removal`), and a "no" to its package (`declined`). */
     bundle?: BundleStatus
     catalog?: CatalogStatus
-    /** The version's merge request was closed through the marketplace, with its withdrawal mark or note: taken back. Closed without is a "no". */
+    /** Closed through the marketplace's withdrawal; closed without one is a "no". */
     withdrawn?: boolean
 }
 
-/** True when `candidate` is a higher x.y.z than `version`; false whenever either is no plain version. */
+/** False whenever either is no plain x.y.z. */
 export function isNewerVersion(candidate: string, version: string): boolean {
     const parse = (value: string) => value.match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number)
     const a = parse(candidate)
@@ -87,67 +47,45 @@ export function isNewerVersion(candidate: string, version: string): boolean {
     return false
 }
 
-/** "1.0.3" after "1.0.2": one step up, to suggest instead of a used-up version; whether that one is free, the caller knows. */
+/** "1.0.3" after "1.0.2"; whether that one is free, the caller checks. */
 export function nextPatch(version: string): string {
     const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
     return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : '1.0.0'
 }
 
-/** The version to suggest where all of `versions` are used up: one step above the highest plain x.y.z, „1.0.0“ when there is none. */
 export function aboveAll(versions: readonly string[]): string {
     const plain = versions.filter((version) => /^\d+\.\d+\.\d+$/.test(version))
     const highest = plain.reduce<string | undefined>((best, version) => (!best || isNewerVersion(version, best) ? version : best), undefined)
     return highest ? nextPatch(highest) : '1.0.0'
 }
 
-/** "Grund: …" with exactly one full stop, whether or not the catalogue team ended their reason with one. */
 export function sentence(text: string): string {
     return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
-/** Who took which version out of the catalogue, and why when they said. */
 export function takenOutFact(takenOut: { version: string; reason?: string }): string {
     const reason = takenOut.reason ? ` Grund: ${sentence(takenOut.reason)}` : ''
     return `Das Katalog-Team hat Version ${takenOut.version} aus dem Katalog genommen.${reason}`
 }
 
-/**
- * What the person learns where a version of their package was taken out of
- * the catalogue (decided 2026-10-18): who decided, and that a new version
- * should wait for a word with them. Shown as a neutral notice: nobody on the
- * page can undo it.
- */
 export function takenOutNotice(takenOut: { version: string; reason?: string }): string {
     return `${takenOutFact(takenOut)} Frag beim Katalog-Team nach, bevor du eine neue Version teilst.`
 }
 
-/**
- * Why `version` does not go into the catalogue: it was there itself, or the
- * catalogue team took out the whole entry (`revoked`), which shuts out every
- * version until they let it in again - then "nicht noch einmal" would be
- * wrong for a version that was never there.
- */
+/** Another version taken out means the whole entry is out (`revoked`), which shuts out every version. */
 export function takenOutBlocker(takenOut: { version: string } | undefined, version: string | undefined): string {
     return takenOut && version && takenOut.version !== version
         ? 'Herausgenommen ist der ganze Eintrag: auch eine neue Version kommt erst in den Katalog, wenn das Katalog-Team ihn wieder freigibt.'
         : 'Diese Version kommt nicht noch einmal in den Katalog.'
 }
 
-/** What „So geht es weiter“ says at a stage the catalogue team turned down: who and when, their words, and the way on. */
 export interface DeclinedStage {
-    /** In place of the stage's line of whose move it is: „Das Katalog-Team - nicht angenommen am 22.10.“ */
     who: string
-    /** Their words, or that they gave none, or that they could not be read (`reasonWords`). */
     reason: string
-    /** The way on, which is always a higher version: what was turned down is used up for this one. */
     next: string
 }
 
-/**
- * The package's or the entry's review of `version`, turned down. A close
- * through the marketplace's account is told as such, never as the team's
- * decision. `instead` is the version to suggest.
- */
+/** A close through the marketplace's account is never told as the catalogue team's decision. */
 export function declinedStage(key: 'review' | 'listing', decline: Decline, version: string, instead: string = nextPatch(version)): DeclinedStage {
     const who = decline.viaMarketplace
         ? `Über das Marktplatz-Konto - nicht angenommen${declinedOn(decline)}`
@@ -159,27 +97,20 @@ export function declinedStage(key: 'review' | 'listing', decline: Decline, versi
     return { who, reason: reasonWords(decline), next }
 }
 
-/** Above „So geht es weiter“ once the removal was turned down: the package stays. A close through the account names nobody. */
 export function removalDeclinedNotice(decline: Decline): string {
     const said = decline.viaMarketplace ? `Das Entfernen ${declinedBy(decline)}` : `Das Katalog-Team hat das Entfernen${declinedOn(decline)} nicht angenommen`
     return `${said} - das Paket bleibt angenommen.`
 }
 
-/**
- * A new version from the dataset writes the package anew: a change the catalogue
- * team made in review (`changedInReview`) is lost unless the instance has it too.
- */
 export function reviewChangeNotice(version: string): string {
     return `Bei der Prüfung von Version ${version} hat das Katalog-Team etwas geändert. Eine neue Version aus dem Datensatz überschreibt das - übernimm die Änderung vorher auf deiner Instanz.`
 }
 
-/** "Aus dem Katalog genommen", with the reason when there is one. */
 function takenOutSummary(takenOut: { reason?: string } | undefined): string {
     const reason = takenOut?.reason?.replace(/[.!?]+$/, '')
     return reason ? `Aus dem Katalog genommen - ${reason}` : 'Aus dem Katalog genommen'
 }
 
-/** Why a merged package is not where it should be, in the person's words. */
 function missingFromBase(bundle: BundleStatus, version: string | undefined): string {
     switch (bundle.reason) {
         case 'no-base-branch':
@@ -195,24 +126,14 @@ function missingFromBase(bundle: BundleStatus, version: string | undefined): str
 
 export interface ShareProgress {
     states: Record<StageKey, StageState>
-    /** The stage that needs someone now; absent when nothing is open. */
     active?: StageKey
-    /** Whose move `active` is; absent when only the operator can help (no catalogue set up). */
+    /** Absent when only the operator can help. */
     turn?: 'you' | 'reviewers'
-    /** Why `active` cannot go on, in the person's words. */
     blockedBy?: string
-    /**
-     * Nothing more to do here: in the catalogue, replaced by a newer version,
-     * withdrawn, turned down, removed - or nothing the marketplace can move on
-     * (`blockedBy` says why). A "no" still has `active` and `turn`: the person reads it and shares a higher version.
-     */
+    /** Nothing the marketplace can move on; a "no" still has `active` and `turn`. */
     finished: boolean
-    /**
-     * The version is on its way out of the repository (`pending`, the reviewers
-     * decide) or out (`done`). Outside the four stages: it undoes them.
-     */
+    /** Removal from the repository: outside the four stages, it undoes them. */
     removal?: 'pending' | 'done'
-    /** Where the version stands, in one line. */
     summary: string
 }
 
@@ -235,7 +156,6 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
         }
     }
 
-    // Taking a merged version out again is a merge request too, so the catalogue team decides again.
     const removal = bundle?.removal?.state
     if (removal === 'opened') {
         return { states: states('done', 'done', 'later', 'later'), turn: 'reviewers', removal: 'pending', finished: false, summary: 'Entfernen vorgeschlagen' }
@@ -255,7 +175,6 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
                 summary: takenOutSummary(catalog.takenOut),
             }
         }
-        // Proposed again after it was taken out (!27, !29, !30 on the demo): the person who can withdraw it is asked to.
         if (catalog?.state === 'mr-open' && catalog.bringsBack) {
             return {
                 states: states('done', 'done', 'done', 'blocked'),
@@ -266,7 +185,6 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
                 summary: 'Katalog-Eintrag in Prüfung - bringt einen herausgenommenen Eintrag zurück',
             }
         }
-        // The entry was turned down: the package stays accepted, the entry is used up for this version.
         if (catalog?.state === 'declined') {
             return {
                 states: states('done', 'done', 'done', 'declined'),
@@ -318,14 +236,12 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
     }
 
     if (bundleMrState === 'merged') {
-        // A newer version on the base branch took its place: nothing left to do for this one.
         if (bundle?.reason === 'other-version' && bundle.onBase && version && isNewerVersion(bundle.onBase.version, version)) {
             return { states: states('done', 'done', 'later', 'later'), finished: true, summary: `Durch Version ${bundle.onBase.version} ersetzt` }
         }
-        // Not read (the row says why), so not judged.
+        // Not read, so not judged.
         if (!bundle) return { states: states('done', 'done', 'later', 'later'), finished: false, summary: 'Paket angenommen' }
-        // Merged, yet missing or different on the base branch: the catalogue step cannot follow, and
-        // no button here changes that - sharing again can. Said where it is listed, asked of nobody.
+        // Finished although blocked: no button here can change it, only sharing again.
         return {
             states: states('done', 'done', 'blocked', 'later'),
             blockedBy: missingFromBase(bundle, version),
@@ -333,7 +249,6 @@ export function shareProgress({ version, bundleMrState, bundle, catalog, withdra
             summary: 'Paket angenommen, aber nicht mehr im Ablageort',
         }
     }
-    // The package was turned down: as read for this version alone (`declined`), or as the listing reads it.
     if (bundle?.declined || (bundleMrState === 'closed' && !withdrawn)) {
         return {
             states: states('done', 'declined', 'later', 'later'),

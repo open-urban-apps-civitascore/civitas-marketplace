@@ -7,24 +7,6 @@ import { mergeRequestRef, reviewChangeUrl } from '@/lib/export/share-state'
 import type { ShareOutcome, TabRow, TurnedDown } from '@/lib/export/share-tabs'
 import { newVersionHref, resumeHref } from '@/lib/export/wizard-address'
 
-/**
- * What „In Arbeit“ lists and what each row says and offers, apart from how it
- * shows it (plan of 2026-10-18, section 4). Pure, for the component and its
- * tests: the stage → action table is data here, so a test can read it row by
- * row.
- *
- * Whose move a row waits for decides its group and its words: „du bist dran“
- * only on what the person looking proposed (or what names nobody), „Ewa ist
- * dran“ on a colleague's, „wartet auf das Katalog-Team“ while the reviewers
- * have it - and a move names what to do, in the words of its button: „du bist
- * dran: Katalog-Eintrag vorschlagen“. The group „Du bist dran“ holds the
- * same rows the tab rules count as the person's own (`TabRow.mine`).
- *
- * A "no" of the catalogue team is told at the step it stopped, with the date
- * and the team's words (`reasonLine`). A close through the marketplace's
- * account is told as one, never as the team's decision.
- */
-
 export type InProgressItem =
     | { kind: 'draft'; key: string; draft: ShareDraft; available: boolean }
     | {
@@ -33,33 +15,23 @@ export type InProgressItem =
           row: SharedPackageRow
           progress: ShareProgress
           outcome: ShareOutcome
-          /** The person's own move (`isYourMove` in share-tabs.ts): what the group „Du bist dran“ counts. */
+          /** The person's own move (`isYourMove` in share-tabs.ts). */
           mine: boolean
           /** Versions this one replaced, lowest first. */
           earlier: string[]
-          /** Lower versions the catalogue team turned down, lowest first. */
           declinedEarlier: TabRow['declinedEarlier']
-          /** The "no" the row stands at, and whether it is still the sharing side's move. */
           declined?: TabRow['declined']
-          /** A change to this accepted version that the catalogue team did not take. */
           declinedChange?: TabRow['declinedChange']
       }
 
 export { rowProgress } from '@/lib/export/share-tabs'
 
-/** The datasets this person may read here, by id with their names; `get` is optional where only ids are known. */
 export interface DatasetsHere {
     has(datasetId: string): boolean
     get?(datasetId: string): string | undefined
 }
 
-/**
- * Whose move a row waits for, in the order „In Arbeit“ lists them:
- * - `yours`: the person's own - a started share, or a stage of theirs on what they proposed
- * - `colleague`: a stage of the sharing side on what someone else here proposed
- * - `team`: the catalogue team decides (a review, a removal)
- * - `nobody`: nobody on the page can move it on - the state could not be read, only the operator can help, or a "no" is past its time
- */
+/** `nobody`: an unreadable state, only the operator can help, or a "no" past its time. */
 export type Turn = 'yours' | 'colleague' | 'team' | 'nobody'
 
 const TURN_ORDER: Record<Turn, number> = { yours: 0, colleague: 1, team: 2, nobody: 3 }
@@ -75,12 +47,10 @@ export function turnOf(item: InProgressItem): Turn {
     return progress.turn === 'you' ? 'colleague' : 'nobody'
 }
 
-/** The person's own move: what the group „Du bist dran“ holds. */
 export function isMine(item: InProgressItem): boolean {
     return turnOf(item) === 'yours'
 }
 
-/** When the item last changed, as far as known: a draft's last save, else the newest date of any of its proposals. */
 export function changedAt(item: InProgressItem): number | undefined {
     if (item.kind === 'draft') return timeOf(item.draft.savedAt)
     const times = (item.row.proposals ?? [])
@@ -95,7 +65,6 @@ function timeOf(iso: string | undefined): number | undefined {
     return Number.isNaN(time) ? undefined : time
 }
 
-/** Newest first; what has no date after what has one. */
 function newerFirst(a: number | undefined, b: number | undefined): number {
     if (a === b) return 0
     if (a === undefined) return 1
@@ -103,14 +72,6 @@ function newerFirst(a: number | undefined, b: number | undefined): number {
     return b - a
 }
 
-/**
- * The started shares and the versions the tab rules put in „In Arbeit“
- * (`shareTabs(…).inProgress`), in the order of their groups (`groupOf`):
- * the person's own moves; then a colleague's, what waits on the catalogue
- * team, and what nobody here can move on; then what could not be read.
- * Within each the newest change first; the listing's order among equals.
- * `available`: which datasets are still here.
- */
 export function inProgressItems(drafts: ShareDraft[], available: DatasetsHere, rows: readonly TabRow[]): InProgressItem[] {
     const items: InProgressItem[] = [
         ...drafts.map((draft): InProgressItem => ({ kind: 'draft', key: `draft:${draft.datasetId}`, draft, available: available.has(draft.datasetId) })),
@@ -135,11 +96,7 @@ export function inProgressItems(drafts: ShareDraft[], available: DatasetsHere, r
         .map(({ item }) => item)
 }
 
-/**
- * The order to show while the person is inside the list (plan, section 4:
- * rows are not re-sorted while focus is on one of them): the order they saw,
- * without what is gone, and what is new at the end in its own order.
- */
+/** No re-sorting while focus is in the list: the order seen, gone rows dropped, new rows last. */
 export function keptOrder(seen: readonly string[], next: readonly string[]): string[] {
     const present = new Set(next)
     const kept = seen.filter((key) => present.has(key))
@@ -147,16 +104,13 @@ export function keptOrder(seen: readonly string[], next: readonly string[]): str
     return [...kept, ...next.filter((key) => !known.has(key))]
 }
 
-/** `order` with `key` back at `index` (or last), when it is not in it: where a result stands in for the row it was about. */
+/** Puts a result back where the row it is about stood. */
 export function withSlot(order: readonly string[], key: string, index: number): string[] {
     if (order.includes(key)) return [...order]
     const at = Math.max(0, Math.min(index, order.length))
     return [...order.slice(0, at), key, ...order.slice(at)]
 }
 
-// ── The groups of „In Arbeit“ ───────────────────────────────────────────────
-
-/** The groups of „In Arbeit“: the person's own moves (started shares included), anyone else's, and rows whose state could not be read. */
 export type InProgressGroup = 'yours' | 'others' | 'unreadable'
 
 export const GROUP_ORDER: readonly InProgressGroup[] = ['yours', 'others', 'unreadable']
@@ -167,7 +121,7 @@ export const GROUP_TITLES: Record<InProgressGroup, string> = {
     unreadable: 'Stand nicht lesbar',
 }
 
-/** One sentence under a group's heading; the rows of „Stand nicht lesbar“ say themselves what failed. */
+/** No lead for „Stand nicht lesbar“: its rows say themselves what failed. */
 export const GROUP_LEADS: Partial<Record<InProgressGroup, string>> = {
     yours: 'Hier liegt der nächste Schritt bei dir - in jeder Zeile steht, welcher.',
     // Names the operator too, so the lead is true of every row in the group.
@@ -179,22 +133,16 @@ export function groupOf(item: InProgressItem): InProgressGroup {
     return turnOf(item) === 'yours' ? 'yours' : 'others'
 }
 
-/** Where one row shows: its key and its group. */
 export interface Placed {
     key: string
     group: InProgressGroup
 }
 
-/** Each row with its group, in the order `inProgressItems` gives, which sorts by group first. */
 export function placesOf(items: readonly InProgressItem[]): Placed[] {
     return items.map((item) => ({ key: item.key, group: groupOf(item) }))
 }
 
-/**
- * Where each row shows while the person is inside the list (`keptOrder`): in
- * the group and place they saw it, even if it belongs elsewhere by now; new
- * rows at the end of their group. Once focus leaves, `next` holds again.
- */
+/** As `keptOrder`, and each row also stays in the group it was seen in. */
 export function keptPlaces(seen: readonly Placed[], next: readonly Placed[]): Placed[] {
     const groups = new Map([...next, ...seen].map((place) => [place.key, place.group]))
     const keys = keptOrder(
@@ -205,7 +153,7 @@ export function keptPlaces(seen: readonly Placed[], next: readonly Placed[]): Pl
     return GROUP_ORDER.flatMap((group) => placed.filter((place) => place.group === group))
 }
 
-/** `placed` with `slot` back in its group at `index`, when it is not in it: a result where its row stood. */
+/** As `withSlot`, within the slot's group. */
 export function withPlace(placed: readonly Placed[], slot: Placed, index: number): Placed[] {
     if (placed.some((place) => place.key === slot.key)) return [...placed]
     const keys = withSlot(
@@ -216,36 +164,17 @@ export function withPlace(placed: readonly Placed[], slot: Placed, index: number
     return GROUP_ORDER.flatMap((group) => (group === slot.group ? keys.map((key) => ({ key, group })) : placed.filter((place) => place.group === group)))
 }
 
-/**
- * How much of „In Arbeit“ the page knows, for what its groups may count:
- * - `all`: GitLab answered, and the person may see what was submitted
- * - `own`: the person may not see what was submitted, so the started shares are all there is
- * - `partial`: GitLab is still asked or could not be read - counting only the started shares would be too low
- */
+/** `partial`: GitLab is pending or unreadable, so counts would be too low. */
 export type GroupsKnown = 'all' | 'own' | 'partial'
 
-/**
- * The groups to show, with their rows' keys and whether the heading counts
- * them (not while GitLab is asked or unreadable). Empty groups show only when
- * all is known: „Du bist dran · 0“ would otherwise claim what nobody on the
- * page knows. „Stand nicht lesbar“ only shows with rows.
- */
+/** Empty groups only when all is known: „Du bist dran · 0“ would otherwise claim too much. */
 export function shownGroups(placed: readonly Placed[], known: GroupsKnown): { group: InProgressGroup; keys: string[]; counted: boolean }[] {
     return GROUP_ORDER.map((group) => ({ group, keys: placed.filter((place) => place.group === group).map((place) => place.key), counted: known !== 'partial' })).filter(
         ({ group, keys }) => keys.length > 0 || (known === 'all' && group !== 'unreadable'),
     )
 }
 
-// ── What one row says and offers ────────────────────────────────────────────
-
-/**
- * One step of the progress line:
- * - `done`: filled, with a check
- * - `yours`: the sharing side's move now - a thick ring in the text colour, the label in bold
- * - `waiting`: someone else's move now - a ring with a clock
- * - `problem`: something stops it, or the catalogue team turned it down - the warn triangle, the only colour on the line
- * - `later`: not yet - a thin outline
- */
+/** `yours`: the sharing side's move; `problem` also marks a "no". */
 export type TrackMark = 'done' | 'yours' | 'waiting' | 'problem' | 'later'
 
 export interface TrackStep {
@@ -257,13 +186,8 @@ export type ActionKind = 'resume' | 'propose-entry' | 'withdraw' | 'discard' | '
 
 export interface RowAction {
     kind: ActionKind
-    /**
-     * - `button`: the row's move, a secondary button (several rows can offer one; the page's one primary is „Neues Paket teilen“)
-     * - `link`: a stage that waits for others: where to look, at GitLab
-     * - `quiet`: a way out or a way on beside the move, a ghost action
-     */
+    /** `button`: the row's move; `link`: GitLab while others have it; `quiet`: a ghost action. */
     look: 'button' | 'link' | 'quiet'
-    /** Where a link, or a button that is a link, leads. */
     href?: string
 }
 
@@ -278,41 +202,26 @@ export const ACTION_LABELS: Record<ActionKind, string> = {
 }
 
 export interface RowStatus {
-    /** The one sentence that carries the meaning; the progress line only shows it. */
     text: string
-    /**
-     * - `plain`: under the progress line
-     * - `neutral`: a fact, on a row without a line (the dataset is gone, a removal turned down)
-     * - `error`: the state could not be read
-     * - `removal`: on its way out - no line, which would suggest progress
-     */
     tone: 'plain' | 'neutral' | 'error' | 'removal'
-    /** A link that belongs to the sentence: „Änderung ansehen“, „Vorschlag ansehen“. */
     link?: { label: string; href: string }
 }
 
-/** The catalogue team's words to a "no", under the status sentence, with the proposal where the rest is. */
 export interface ReasonLine {
     text: string
-    /** `heard`: read out after the label only, so two „Vorschlag ansehen“ links in one card are told apart. */
+    /** Screen-reader suffix, so two „Vorschlag ansehen“ in one card differ. */
     link?: { label: string; href: string; heard?: string }
 }
 
 export interface RowView {
     title: string
     version?: string
-    /** „aus Datensatz „X“ · eingereicht am 12.10. von Ewa“, as far as it is known. */
     origin?: string
-    /** Absent where a line would mislead: a removal, an unreadable state, a dataset that is gone. */
     track?: TrackStep[]
     status: RowStatus
-    /** The "no" the row stands at, and one to a change of its accepted version: at most both. */
     reasons?: ReasonLine[]
-    /** The row's move, or where to look while others have it. */
     main?: RowAction
-    /** Quiet actions, shown before the move. */
     quiet: RowAction[]
-    /** „Frühere Versionen: 1.0.0 · 1.0.1 nicht angenommen“ */
     earlier?: string
 }
 
@@ -322,17 +231,11 @@ function trackOf(states: Record<StageKey, StageState>, override: Partial<Record<
     return STAGES.map((stage) => ({ label: stage.short, mark: override[stage.key] ?? MARK_OF[states[stage.key]] }))
 }
 
-/** „Katalog-Eintrag (3 von 4)“ */
 function stepName(key: StageKey): string {
     const index = STAGES.findIndex((stage) => stage.key === key)
     return `${STAGES[index].short} (${index + 1} von ${STAGES.length})`
 }
 
-/**
- * Who has the next move, as the status sentence ends: „du bist dran“, „Ewa ist
- * dran“, „wartet auf das Katalog-Team“. `move` says what to do when it is the
- * sharing side's: „du bist dran: Vorschlag zurückziehen“.
- */
 export function whoseMove(item: InProgressItem, move?: string): string | undefined {
     const what = move ? `: ${move}` : ''
     switch (turnOf(item)) {
@@ -349,25 +252,22 @@ export function whoseMove(item: InProgressItem, move?: string): string | undefin
 
 const DAY = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' })
 
-/** „aus Datensatz „X“ · eingereicht am 12.10. von Ewa“, from what the row and this instance tell; undefined when nothing. */
 function originOf(row: SharedPackageRow, datasets: DatasetsHere): string | undefined {
     const name = row.source?.id ? datasets.get?.(row.source.id) : undefined
-    // The row's own package proposal: the open one, else the accepted one.
     const created = timeOf(row.proposals?.find((proposal) => proposal.kind === 'bundle' && proposal.url === row.bundleMr.url)?.createdAt)
     const submitted = [created !== undefined ? `am ${DAY.format(created)}` : undefined, row.proposedBy ? `von ${row.proposedBy}` : undefined].filter(Boolean)
     const parts = [name ? `aus Datensatz „${name}“` : undefined, submitted.length ? `eingereicht ${submitted.join(' ')}` : undefined].filter(Boolean)
     return parts.length ? parts.join(' · ') : undefined
 }
 
-/** „Neue Version teilen“: the wizard with the dataset chosen where it is still here, and the Steckbrief filled from this version. */
 function newVersionOf(row: SharedPackageRow, datasets: DatasetsHere): string {
     const id = row.source?.id
     return newVersionHref({ ...(id && datasets.has(id) ? { datasetId: id } : {}), slug: row.slug, version: row.version })
 }
 
-/** The id of a shared version's card in „In Arbeit“, stable across readings and valid in an address: the wizard links there. */
+/** Stable and URL-safe; the wizard links to it. */
 export function rowAnchor(row: Pick<SharedPackageRow, 'targetKey' | 'slug' | 'version'>): string {
-    // Two places may hold a package of the same name: a short tag of the place keeps their rows apart.
+    // Same package name in two places: a hash of the place keeps the ids apart.
     let hash = 0x811c9dc5
     for (const char of row.targetKey) {
         hash ^= char.codePointAt(0) ?? 0
@@ -376,19 +276,13 @@ export function rowAnchor(row: Pick<SharedPackageRow, 'targetKey' | 'slug' | 've
     return `in-arbeit-${row.slug}-${row.version}-${hash.toString(36)}`
 }
 
-/** Where „In Arbeit“ is: the first tab of "Teilen", where its menu item leads. */
 export const IN_PROGRESS_PATH = '/export'
 
-/** The page „In Arbeit“, at the row of `row`. */
 export function inProgressHref(row: Pick<SharedPackageRow, 'targetKey' | 'slug' | 'version'>): string {
     return `${IN_PROGRESS_PATH}#${rowAnchor(row)}`
 }
 
-/**
- * The words of the cross-link from „Veröffentlicht“ and „Beendet“ to a
- * version's row in „In Arbeit“. At a "no" it says what was not accepted, as
- * „Auswählen“ says it: read as progress, a "no" would mislead.
- */
+/** At a "no" it says what was not accepted: read as progress, it would mislead. */
 export function inProgressLinkText(version: string, declined?: TurnedDown): string {
     if (declined === 'entry') return `Katalog-Eintrag für ${version} nicht angenommen`
     return declined === 'package' ? `Version ${version} nicht angenommen` : `Version ${version} ist in Arbeit`
@@ -399,31 +293,23 @@ const withRef = (sentence: string, url: string | undefined) => {
     return ref ? `${sentence} · Vorschlag ${ref}` : sentence
 }
 
-/** „Paket-Prüfung (2 von 4) - wartet auf das Katalog-Team“: a stage, then who has it. */
 const dash = (stage: string, who: string | undefined) => (who ? `${stage} - ${who}` : stage)
 
-/** „Paket angenommen, danach aber direkt in GitLab geändert - … · du bist dran: …“: a sentence that has its dash already. */
 const dot = (sentence: string, who: string | undefined) => (who ? `${sentence} · ${who}` : sentence)
 
-/** „Vorschlag ansehen“ for a proposal turned down, heard with its number. */
 const proposalLink = (decline: Decline): NonNullable<ReasonLine['link']> => ({ label: 'Vorschlag ansehen', href: decline.mrUrl, heard: ` (!${decline.iid})` })
 
-/** A "no" in the team's words, with the proposal they turned down. */
 const reasonOf = (decline: Decline): ReasonLine => ({ text: reasonLine(decline), link: proposalLink(decline) })
 
-/** A change the catalogue team did not take: said beside whatever the row says, as the version stays accepted. Also in „Veröffentlicht“. */
 export const changeNoteOf = (version: string, change: Decline): ReasonLine => ({
     text: `Die Änderung an Version ${version} (Vorschlag !${change.iid}) ${declinedBy(change)}. ${reasonWords(change)}`,
     link: proposalLink(change),
 })
 
-/** The move after a "no": reading why, where they said why - with no reason, „Grund lesen“ would be no move at all. */
 const afterNo = (decline: Decline | undefined, then: string) => (decline?.reason.kind === 'none' ? then : `Grund lesen und ${then}`)
 
-/** What a turned-down lower version adds among „Frühere Versionen“; a replaced one shows its number only. */
 const EARLIER_NO: Record<TurnedDown, string> = { package: 'nicht angenommen', entry: 'Katalog-Eintrag nicht angenommen' }
 
-/** „Frühere Versionen: 1.1.3 · 1.1.4 nicht angenommen“, lowest first, or nothing. */
 function earlierLine(replaced: readonly string[], declined: TabRow['declinedEarlier']): string | undefined {
     const versions = [...replaced.map((version) => ({ version, no: undefined })), ...declined.map(({ version, kind }) => ({ version, no: kind }))].sort((a, b) =>
         isNewerVersion(a.version, b.version) ? 1 : isNewerVersion(b.version, a.version) ? -1 : 0,
@@ -431,27 +317,17 @@ function earlierLine(replaced: readonly string[], declined: TabRow['declinedEarl
     return versions.length ? `Frühere Versionen: ${versions.map(({ version, no }) => (no ? `${version} ${EARLIER_NO[no]}` : version)).join(' · ')}` : undefined
 }
 
-/**
- * Proposing the entry from a row that is not at that step: only where the
- * catalogue is set up, the package is the one reviewed, and the entry was not
- * turned down for this version already, which the server would refuse.
- * „Auswählen“ says the same (`stageNotice`).
- */
+/** The server refuses an entry already turned down for this version; `stageNotice` must agree. */
 export function mayProposeEntry(row: SharedPackageRow): boolean {
     const verification = row.bundle?.verification
     return row.catalog?.state !== 'unconfigured' && row.catalog?.state !== 'declined' && (!verification || verification.state === 'verified')
 }
 
-/** „Zurückziehen“ on an accepted package proposes its removal: not where the team turned that down already, as the server refuses it. */
+/** The server refuses a removal the team already turned down. */
 function mayWithdraw(row: SharedPackageRow): boolean {
     return !row.bundle?.removal?.declined
 }
 
-/**
- * What one row of „In Arbeit“ says and offers, by its stage (plan, section 4,
- * „Stage → action“): the person's own moves get a button, a stage that waits
- * for others a link to GitLab, where the reviewers ask their questions.
- */
 export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
     if (item.kind === 'draft') {
         const { draft } = item
@@ -459,7 +335,6 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
         const version = draft.basics.version?.trim() || undefined
         const discard: RowAction = { kind: 'discard', look: 'quiet' }
         if (!item.available) {
-            // Still the person's: the move is the only one there is, in the words of its button.
             return {
                 title,
                 version,
@@ -472,7 +347,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             version,
             origin: `aus Datensatz „${draft.datasetName}“`,
             track: trackOf({ propose: 'current', review: 'later', catalog: 'later', listing: 'later' }),
-            // The day it was started, as „Auswählen“ names it too: the last save would give two dates for one share.
+            // The start date, as „Auswählen“ shows it: the last save would give one share two dates.
             status: { text: `Angefangen am ${draftStartedOn(draft)} - noch nicht eingereicht · ${whoseMove(item, 'weitermachen und zur Prüfung einreichen')}`, tone: 'plain' },
             main: { kind: 'resume', look: 'button', href: resumeHref(draft) },
             quiet: [discard],
@@ -501,7 +376,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
 
     switch (item.outcome) {
         case 'unreadable':
-            // No „Zurückziehen“: what it would mean depends on the stage, and the stage is what could not be read.
+            // No „Zurückziehen“: its meaning depends on the stage, which could not be read.
             return {
                 ...base,
                 status: { text: row.problem ? `Der Stand ließ sich nicht lesen: ${row.problem}` : 'Der Stand ließ sich nicht lesen.', tone: 'error' },
@@ -511,7 +386,6 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
         case 'in-review':
             return { ...base, track, status: plain(withRef(dash(stepName('review'), who), row.bundleMr.url)), main: gitlab(row.bundleMr.url), quiet: [withdraw] }
         case 'change-in-review':
-            // „Zurückziehen“ withdraws only the change: the dialog says so, from a fresh look at GitLab.
             return { ...base, track, status: plain(withRef(dash('Änderung am angenommenen Paket', who), row.bundleMr.url)), main: gitlab(row.bundleMr.url), quiet: [withdraw] }
         case 'removal-pending':
             return {
@@ -521,12 +395,10 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: [],
             }
         case 'accepted': {
-            // The catalogue team changed the package while taking it: worth a look before the entry, or before a new
-            // version, which would write over it. Their commits are on the proposal they merged.
+            // The team's review commits are on the proposal they merged.
             const verification = row.bundle?.verification
             const changed = verification?.changedInReview
             const merged = verification?.mergedMrUrl ?? row.bundleMr.url
-            // „Zurückziehen“ proposes taking the accepted package out again; the dialog says so.
             return {
                 ...base,
                 track,
@@ -546,7 +418,6 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 : `Paket angenommen, lässt sich aber nicht bestätigen (${verification ? verificationLabel(verification) : 'nicht prüfbar'})`
             const where = row.folderUrl ?? verification?.mergedMrUrl ?? row.bundleMr.url
             const atChange = changed && Boolean(row.folderUrl)
-            // A new version goes through the package check again; then the catalogue entry can follow.
             const move = `${atChange ? 'Änderung ansehen' : 'in GitLab ansehen'} und eine neue Version teilen, die wieder geprüft wird`
             return {
                 ...base,
@@ -557,10 +428,10 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             }
         }
         case 'broken':
-            // Only the operator, or someone at GitLab, can help: said once, asked of nobody here.
+            // No whose-move: only the operator or someone at GitLab can help.
             return { ...base, track, status: plain(`Paket angenommen. ${progress.blockedBy ?? 'Der Ablageort lässt sich gerade nicht lesen.'}`), main: gitlab(row.bundleMr.url), quiet: [withdraw] }
         case 'no-catalogue':
-            // Neutral, not a problem: the page says once that the catalogue is not set up, and who sets it up.
+            // Waiting, not a problem: the page says once who sets up the catalogue.
             return {
                 ...base,
                 track: trackOf(progress.states, { catalog: 'waiting' }),
@@ -568,10 +439,8 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: [newVersion, withdraw],
             }
         case 'entry-in-review':
-            // „Zurückziehen“ withdraws only the entry; the package stays accepted unless the person chooses otherwise.
             return { ...base, track, status: plain(withRef(dash(stepName('listing'), who), row.catalog?.mrUrl)), main: gitlab(row.catalog?.mrUrl), quiet: [withdraw] }
         case 'brings-back':
-            // Withdrawing it is the move: it would bring back what the catalogue team took out. Said as the dialog says it.
             return {
                 ...base,
                 track,
@@ -586,7 +455,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: [],
             }
         case 'declined':
-            // The package turned down: used up for this version, so the way on is a new one. Nothing is open to withdraw.
+            // A turned-down version is used up: the way on is a new one.
             return {
                 ...base,
                 ...told,
@@ -596,8 +465,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: [],
             }
         case 'entry-declined':
-            // The entry turned down: the package stays accepted, and the entry is not proposed again for this version.
-            // „Zurückziehen“ proposes taking the package out, unless that was turned down before.
+            // The package stays accepted; the entry is not proposed again for this version.
             return {
                 ...base,
                 ...told,
@@ -607,12 +475,10 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                 quiet: mayWithdraw(row) ? [withdraw] : [],
             }
         case 'removal-declined': {
-            // The removal turned down: the package stays accepted and may still get its entry. No progress line while it is
-            // news, as the row is about the removal; afterwards the line as it stands, and the team's words only in „Beendet“.
+            // No progress line while the "no" is news; later the team's words show only in „Beendet“.
             const entry = mayProposeEntry(row)
             const proposeEntry: RowAction[] = entry ? [{ kind: 'propose-entry', look: 'quiet' }] : []
             if (item.declined?.current) {
-                // With no reason there is nothing to read: the move is what the row offers.
                 const move = decline?.reason.kind === 'none' ? (entry ? 'Katalog-Eintrag vorschlagen oder eine neue Version teilen' : 'eine neue Version teilen') : 'Grund lesen'
                 return {
                     ...base,
@@ -621,7 +487,7 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
                     quiet: [...proposeEntry, newVersion],
                 }
             }
-            // Afterwards it waits for nobody and stays: the status names what it still offers, as „Auswählen“ does.
+            // Nobody's move now: the status names what it still offers, as „Auswählen“ does.
             const offers = entry ? 'den Katalog-Eintrag kannst du weiterhin vorschlagen oder eine neue Version teilen' : 'eine neue Version kannst du jederzeit teilen'
             return {
                 ...base,
@@ -631,23 +497,20 @@ export function rowView(item: InProgressItem, datasets: DatasetsHere): RowView {
             }
         }
         case 'entry-revoked': {
-            // The whole entry taken out at an earlier version: nobody here can bring this one in. The way out of the list is
-            // proposing to take the package out as well.
             const takenOut = row.catalog?.takenOut
-            // The status sentence says what was taken out; the line under it only which version was in, and why.
             const reason = takenOut?.reason ? ` Grund: ${sentence(takenOut.reason)}` : ''
             return {
                 ...base,
                 ...(takenOut ? { reasons: [{ text: `Zuletzt stand Version ${takenOut.version} im Katalog.${reason}` }, ...change] } : {}),
                 track,
-                // Who can move it on, without a contact, as `takenOutBlocker` says it in the wizard.
+                // Worded as `takenOutBlocker` in the wizard.
                 status: plain(`${stepName('catalog')} - der ganze Eintrag ist aus dem Katalog genommen · weiter geht es erst, wenn das Katalog-Team ihn wieder freigibt`),
                 main: gitlab(row.bundleMr.url),
                 quiet: mayWithdraw(row) ? [withdraw] : [],
             }
         }
         default:
-            // Not listed in „In Arbeit“ (`TAB_OF`); said as the stages say it, should a row get here.
+            // Not listed in „In Arbeit“ (`TAB_OF`): a fallback.
             return { ...base, track, status: plain(dot(progress.summary, who)), main: gitlab(row.bundleMr.url), quiet: [] }
     }
 }

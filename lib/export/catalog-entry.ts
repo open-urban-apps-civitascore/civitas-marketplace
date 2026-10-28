@@ -1,14 +1,6 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 
-/**
- * The catalogue side of an export: the v3 repo-list row for the package, and
- * the edit that places it in `index.json`.
- *
- * Pure functions on strings, so the interesting part (touching someone else's
- * index without disturbing the rest of it) is testable without a network.
- */
-
 export interface CatalogEntryInput {
     metadata?: ExportMetadata
     id: string
@@ -18,19 +10,14 @@ export interface CatalogEntryInput {
     maintainer: string
     license: string
     keywords: string[]
-    /** Target repository web URL. */
     repoUrl: string
-    /** Package directory inside the repository; '.' for the root. */
+    /** '.' for the repository root. */
     path: string
-    /** The commit the package was verified at — the pin. */
+    /** The pin: the commit the package was verified at. */
     commitSha: string
 }
 
-/**
- * The catalogue input for a package as it was merged, read from its manifest.
- * The export writes the whole profile there, so the entry needs no form, and
- * it lists exactly what the bundle review saw. A string names what is wrong.
- */
+/** From the merged manifest, so the entry lists exactly what the review saw; a string is the error. */
 export function catalogInputFromManifest(
     raw: string,
     location: Pick<CatalogEntryInput, 'repoUrl' | 'path' | 'commitSha'>,
@@ -112,13 +99,7 @@ function bumpPatch(version: unknown): string {
     return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`
 }
 
-/**
- * Adds the row to `useCases` (or replaces the row with the same id — a new
- * version of an already listed package). Bumps the index's own content
- * version and stamps `updatedAt`, as CONTRIBUTING asks every merge request
- * to. The rest of the file is re-serialised with the repository's two-space
- * style so the diff shows the one row and the two header fields, nothing else.
- */
+/** Bumps `version` and `updatedAt` as CONTRIBUTING asks; two-space JSON keeps the diff to the row. */
 export function applyCatalogEntry(
     indexJson: string,
     entry: Record<string, unknown>,
@@ -235,7 +216,6 @@ export function isListed(indexJson: string, id: string, version: string): boolea
     }
 }
 
-/** The Herausgeber the index names for a use case (its row's `maintainer`), for „Veröffentlicht“; undefined where none. */
 export function maintainerOf(indexJson: string, id: string): string | undefined {
     try {
         const index = JSON.parse(indexJson) as { useCases?: unknown }
@@ -247,18 +227,13 @@ export function maintainerOf(indexJson: string, id: string): string | undefined 
     }
 }
 
-/** One use case's row in the index, as far as the share pages care: the version, and whether the catalogue team withdrew it. */
 export interface IndexRow {
     version?: string
     revoked: boolean
-    /** Why it was withdrawn, when the row says. */
     reason?: string
 }
 
-/**
- * The index's row for `id`: undefined when the index has none, null when the
- * index is no JSON to read - then nobody can tell what it lists.
- */
+/** undefined: no row for `id`; null: the index is no JSON, so nobody can tell. */
 export function indexRowOf(indexJson: string, id: string): IndexRow | undefined | null {
     let index: { useCases?: unknown }
     try {

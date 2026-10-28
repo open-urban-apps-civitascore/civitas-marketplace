@@ -3,90 +3,41 @@ import { proposedByOther } from '@/lib/export/merge-request-text'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
 import { isNewerVersion, shareProgress, type ShareProgress } from '@/lib/export/share-stages'
 
-/**
- * Which of the three lists of "Teilen" a shared version belongs in - „In
- * Arbeit“, „Veröffentlicht“, „Beendet“ - and what the page needs around
- * them: the instance filter, the counts in the tab bar and the datasets that
- * are busy (plan of 2026-10-18, sections 4-6 and 10). One rule set, pure, for
- * the server and the client alike; tested like the stage rules it builds on.
- *
- * - „In Arbeit“: everything submitted that is not in the catalogue yet and
- *   that someone can still move on - including a version whose state could
- *   not be read, so it is not lost.
- * - „Veröffentlicht“: listed in the catalogue's index, not withdrawn, put
- *   there through this marketplace's proposal of exactly that version.
- * - „Beendet“: one entry per ended proposal (withdrawn, not accepted, a
- *   removal accepted), plus a version gone from the repository by hand and
- *   the version the catalogue team took out. Replaced versions are no ending:
- *   they show as earlier versions on the row that replaced them.
- *
- * Each list holds what came from this instance; a share of an unknown
- * instance (older ones whose README names none) is shown too, flagged in
- * „Veröffentlicht“ and „Beendet“; one of another instance only counted
- * (demo, dev and local share one account).
- *
- * A "no" of the catalogue team stays in „In Arbeit“ for {@link DECLINE_DAYS}
- * days, or until a newer version has a proposal; then it is only an ending
- * in „Beendet“. "Now" is a parameter, so this stays pure.
- */
-
 export type ShareTab = 'in-progress' | 'published' | 'ended'
 
-/**
- * Where a share came from, compared with this instance: `unknown` when
- * either side names no instance - then nothing can be told, and the share is
- * shown with a flag rather than hidden.
- */
+/** `unknown` when either side names no instance: such a share is flagged, not hidden. */
 export type InstanceMatch = 'this' | 'other' | 'unknown'
 
-/** What became of one version, as the tabs sort it; every ending of `shareProgress` maps onto one. */
+/** Every ending of `shareProgress` maps onto one. */
 export type ShareOutcome =
-    /** GitLab could not be read for it. */
     | 'unreadable'
-    /** Its package proposal waits for the catalogue team. */
     | 'in-review'
-    /** A proposal is open on a version that was accepted already (bodenfeuchte on the demo). */
     | 'change-in-review'
-    /** Its removal waits for the catalogue team. */
     | 'removal-pending'
-    /** Accepted; proposing the catalogue entry is the person's move. */
     | 'accepted'
     /** Accepted, but the folder is not what the review saw. */
     | 'needs-look'
-    /** Accepted, but the repository cannot tell: its base branch is missing, or the manifest is no JSON. */
+    /** Accepted, but the base branch is missing or the manifest is no JSON. */
     | 'broken'
-    /** Accepted, and this instance has no catalogue to propose it to. */
     | 'no-catalogue'
-    /** Its catalogue entry waits for the catalogue team. */
     | 'entry-in-review'
     /** An open catalogue proposal would bring back what the catalogue team took out. */
     | 'brings-back'
-    /** Accepted, but the catalogue team turned its entry down. */
     | 'entry-declined'
-    /** Accepted, and the catalogue team turned its removal down: the package stays. */
     | 'removal-declined'
     /** Accepted, but the whole entry was taken out at an earlier version: nobody can move it on. */
     | 'entry-revoked'
-    /** In the catalogue. */
     | 'listed'
-    /** A newer version of the package took its place in the repository. */
     | 'replaced'
-    /** The catalogue team took it out of the catalogue. */
     | 'taken-out'
-    /** Its removal was accepted. */
     | 'removed'
     /** Gone from the repository, or set back there, by hand: no removal proposal. */
     | 'gone'
-    /** Its proposal was withdrawn through the marketplace. */
     | 'withdrawn'
-    /** Its proposal was closed any other way - by a reviewer, or by hand through the marketplace's account: a "no". */
+    /** Closed any other way, also by hand through the marketplace's account. */
     | 'declined'
 
-/**
- * Where each outcome is listed; undefined for none of the lists. A "no" to the
- * package or the entry is in „In Arbeit“ only while current ({@link declineIsCurrent});
- * one to a removal stays there, as nobody's move, since the package stays accepted.
- */
+/** A "no" to package or entry is listed only while current (`ONLY_WHILE_CURRENT`). */
 export const TAB_OF: Readonly<Record<ShareOutcome, ShareTab | undefined>> = {
     unreadable: 'in-progress',
     'in-review': 'in-progress',
@@ -110,26 +61,20 @@ export const TAB_OF: Readonly<Record<ShareOutcome, ShareTab | undefined>> = {
     declined: 'in-progress',
 }
 
-/** A "no" listed in „In Arbeit“ only while current: afterwards nothing is left to move on. */
 const ONLY_WHILE_CURRENT: ReadonlySet<ShareOutcome> = new Set(['declined', 'entry-declined'])
 
-/**
- * A removal turned down after the entry was: the package stays, but only a new
- * version can move it on, so the row is listed only while current and makes no dataset busy.
- */
+/** Removal and entry both turned down: only a new version can move it on. */
 function entryUsedUp(outcome: ShareOutcome, row: SharedPackageRow): boolean {
     return outcome === 'removal-declined' && row.catalog?.state === 'declined'
 }
 
-/** Outcomes with a proposal open at GitLab: a new version of the dataset waits for them, and the server refuses it meanwhile. */
+/** A proposal is open at GitLab: the server refuses a new version of the dataset meanwhile. */
 export const OPEN_OUTCOMES: ReadonlySet<ShareOutcome> = new Set(['in-review', 'change-in-review', 'removal-pending', 'entry-in-review', 'brings-back'])
 
-/** Where a listed version stands, from everything the list read about it. */
 export function rowProgress(row: SharedPackageRow): ShareProgress {
     return shareProgress({ version: row.version, bundleMrState: row.bundleMr.state, bundle: row.bundle, catalog: row.catalog, withdrawn: row.withdrawn })
 }
 
-/** The proposals of a row, or for one built without them, what its own fields say. */
 function proposalsOf(row: SharedPackageRow): ShareProposal[] {
     if (row.proposals) return row.proposals
     const iid = (url: string) => Number(url.match(/\/merge_requests\/(\d+)/)?.[1] ?? 0)
@@ -140,26 +85,23 @@ function proposalsOf(row: SharedPackageRow): ShareProposal[] {
     ]
 }
 
-/** What became of one version (see {@link ShareOutcome}), in the order `shareProgress` decides, with "listed" first among the endings of a merge. */
 export function rowOutcome(row: SharedPackageRow, progress: ShareProgress = rowProgress(row)): ShareOutcome {
     if (row.problem) return 'unreadable'
     // A "no" is the review stage too: only one still waiting is in review.
     if (progress.active === 'review' && progress.states.review === 'waiting') {
-        // The version's own merge request was merged once already, and not removed since: the open one changes an accepted package.
         const acceptedBefore = presentProposals(proposalsOf(row), 'bundle').some((proposal) => proposal.state === 'merged')
         return acceptedBefore ? 'change-in-review' : 'in-review'
     }
     if (progress.removal === 'pending') return 'removal-pending'
-    // Listed pins a commit, so it stays installable whatever the folder does since; the warnings mean nothing for it.
+    // Listed pins a commit: what the folder does since no longer matters.
     if (row.bundleMr.state === 'merged' && row.catalog?.state === 'listed') return 'listed'
     if (progress.removal === 'done') return 'removed'
 
     const { bundle, catalog } = row
     if (bundle?.state === 'on-base') {
-        // A whole entry taken out at an earlier version leaves this one in the repository, with nowhere to go.
         if (catalog?.state === 'withdrawn') return catalog.takenOut && catalog.takenOut.version !== row.version ? 'entry-revoked' : 'taken-out'
         if (catalog?.state === 'mr-open' && catalog.bringsBack) return 'brings-back'
-        // The catalogue team's "no" comes before what the folder says; of two, the later one - an open entry proposal is newer than both.
+        // A "no" beats the folder; of two the later; an open entry proposal is newer than both.
         const entryNo = catalog?.state === 'declined' ? catalog.declined : undefined
         const removalNo = catalog?.state !== 'mr-open' ? bundle.removal?.declined : undefined
         const latest = laterDecline(entryNo, removalNo)
@@ -170,36 +112,29 @@ export function rowOutcome(row: SharedPackageRow, progress: ShareProgress = rowP
         return 'accepted'
     }
     if (row.bundleMr.state === 'merged') {
-        // Not read, and no reason given why: as good as unreadable.
         if (!bundle) return 'unreadable'
         if (bundle.reason === 'other-version' && bundle.onBase && isNewerVersion(bundle.onBase.version, row.version)) return 'replaced'
         if (bundle.reason === 'bad-manifest' || bundle.reason === 'no-base-branch') return 'broken'
         return 'gone'
     }
-    // Nothing was merged from its branch: a close without the withdrawal mark is a "no".
+    // A close without the withdrawal mark is a "no".
     if (row.bundleMr.state === 'closed') return row.withdrawn ? 'withdrawn' : 'declined'
-    // Any other state GitLab names (`locked` while it merges) is still in the catalogue team's hands.
+    // Other GitLab states (`locked` while it merges) are still with the catalogue team.
     return 'in-review'
 }
 
 const normalised = (instance: string) => instance.trim().replace(/\/+$/, '').toLowerCase()
 
-/** Where a share came from, compared with this instance (see {@link InstanceMatch}). */
 export function instanceMatch(source: { instance?: string } | undefined, instance: string | undefined): InstanceMatch {
     if (!source?.instance || !instance) return 'unknown'
     return normalised(source.instance) === normalised(instance) ? 'this' : 'other'
 }
 
-/**
- * Whether „Veröffentlicht“ and „Beendet“ flag a share as „Instanz unbekannt“,
- * with no way on: it names no instance while this one does. Without
- * `PORTAL_URL` every share counts as this instance's: a flag on every row would say nothing.
- */
+/** Never without `PORTAL_URL`: a flag on every row would say nothing. */
 export function ofUnknownInstance(origin: InstanceMatch, instance: string | undefined): boolean {
     return origin === 'unknown' && Boolean(instance)
 }
 
-/** The person's own move: their stage, on a share proposed for them or for nobody named - never for a colleague (plan, section 4). */
 export function isYourMove(row: SharedPackageRow, progress: ShareProgress, person: string | undefined): boolean {
     return !row.problem && progress.turn === 'you' && !proposedByOther(row.proposedBy, person)
 }
@@ -209,32 +144,23 @@ export interface TabRow {
     outcome: ShareOutcome
     progress: ShareProgress
     origin: InstanceMatch
-    /** The person's own move (see {@link isYourMove}), for a "no" only while current: what „Du bist dran“ counts. */
+    /** For a "no" only while current. */
     mine: boolean
-    /** Versions of the same package that this one replaced, lowest first: „Frühere Versionen“. */
+    /** Replaced versions of the same package, lowest first. */
     earlier: string[]
-    /** Lower versions whose package or entry was turned down, lowest first: „nicht angenommen“ among „Frühere Versionen“. */
     declinedEarlier: { version: string; kind: TurnedDown }[]
-    /** Of `earlier`, those once in the catalogue through a merged entry proposal: „Frühere Versionen im Katalog“. */
+    /** Of `earlier`, those once listed through a merged entry proposal. */
     listedEarlier: string[]
-    /** For a listed version: the newer version of the same package in progress meanwhile; `declined` where it stands at a "no". */
+    /** For a listed version: a newer one in progress meanwhile. */
     newer?: { key: string; version: string; declined?: TurnedDown }
-    /** The "no" the row stands at (package, entry or removal), and whether it is still the sharing side's move. */
+    /** `current`: still the sharing side's move. */
     declined?: { decline: Decline; current: boolean }
-    /** A change to this accepted version that the catalogue team did not take: a note while current, no block. */
     declinedChange?: Decline
 }
 
-/** How long a "no" is the sharing side's move, in milliseconds. */
 const DECLINE_WINDOW_MS = DECLINE_DAYS * 24 * 60 * 60 * 1000
 
-/**
- * Whether a "no" is still the sharing side's move: closed within
- * {@link DECLINE_DAYS} days, proposed from this instance, and no newer
- * version proposed since from here - another instance's newer version is
- * only counted, so it would end the "no" with no row to go on from. Never
- * without a date, nor while it may be an unread withdrawal (`mayBeWithdrawn`).
- */
+/** A newer version from another instance does not end a "no": it has no row to go on from. */
 export function declineIsCurrent(
     proposal: Pick<ShareProposal, 'kind' | 'closedAt' | 'closedByBot' | 'reason' | 'source'>,
     version: string,
@@ -249,118 +175,79 @@ export function declineIsCurrent(
     return !family.some((other) => instanceMatch(other.source, instance) !== 'other' && isNewerVersion(other.version, version))
 }
 
-/** Which of a row's proposals its "no" is, for the outcomes that stand at one. */
 const DECLINED_KIND: Partial<Record<ShareOutcome, ShareProposal['kind']>> = {
     declined: 'bundle',
     'entry-declined': 'catalog',
     'removal-declined': 'removal',
 }
 
-/**
- * - `withdrawn`: closed through the marketplace, with its mark or note
- * - `not-accepted`: closed any other way - by a reviewer, or by hand through the marketplace's account
- * - `removed`: a removal accepted, or the folder gone without one (`byHand`)
- * - `taken-out`: the catalogue team took the version out of the catalogue
- */
+/** `not-accepted` includes a close by hand through the marketplace's account. */
 export type Ending = 'withdrawn' | 'not-accepted' | 'removed' | 'taken-out'
 
-/** One row of „Beendet“. Never overwritten: a version withdrawn and submitted again keeps its old row. */
+/** Never overwritten: a version withdrawn and submitted again keeps its old row. */
 export interface EndedEntry {
     key: string
     ending: Ending
-    /** What ended: a proposal of the package, of its catalogue entry or of its removal - or the version itself. */
     what: ShareProposal['kind'] | 'version'
     row: SharedPackageRow
     version: string
-    /** The proposal that ended; absent for a version gone by hand or taken out of the catalogue. */
     proposal?: ShareProposal
-    /** When it ended, as GitLab says; absent when nobody can tell. */
     at?: string
-    /** For `taken-out`: the catalogue team's reason, when they gave one. */
     reason?: string
-    /** For `removed`: done by hand at GitLab, without a proposal. */
     byHand?: boolean
     origin: InstanceMatch
 }
 
 export interface ShareTabs {
-    /** „In Arbeit“, in the listing's order (newest first). */
     inProgress: TabRow[]
-    /** „Veröffentlicht“: one row per catalogue entry, at its listed version. */
     published: TabRow[]
-    /** „Beendet“, newest ending first; endings without a date last. */
     ended: EndedEntry[]
-    /** What other instances shared through the same account: counted per list, not listed. */
+    /** Other instances' shares (demo, dev and local share one account): counted, not listed. */
     elsewhere: Record<ShareTab, number>
-    /**
-     * The datasets something is submitted for and not in the catalogue yet,
-     * with the rows that make them busy - for „Auswählen“ to grey them out.
-     * From this instance or an unknown one, as „In Arbeit“ shows them; a row
-     * whose state could not be read makes nothing busy (the server checks
-     * again on submit), nor one whose way on is a new version (see
-     * `FREE_TO_CHOOSE`).
-     */
+    /** Datasets „Auswählen“ greys out: submitted, not in the catalogue yet; see `FREE_TO_CHOOSE`. */
     busy: ReadonlyMap<string, TabRow[]>
-    /** What the tab bar counts, one number per tab: the person's own moves are counted by the groups of „In Arbeit“. */
     counts: {
-        /** Rows in „In Arbeit“, with the started shares the caller counts in. */
+        /** Includes the started shares (`drafts`). */
         inProgress: number
         published: number
     }
 }
 
 export interface ShareTabsOptions {
-    /** This instance, as the listing names it (`ShareListing.instance`). */
     instance?: string
-    /** Who is looking, by the name proposals are made for (`proposerName`). */
+    /** The name proposals are made for (`proposerName`). */
     person?: string
-    /** Shares started in this browser: in „In Arbeit“, and always the person's own move. */
     drafts?: number
-    /** What a "no" is measured against, in ms: when the listing was read, so the lists do not change between readings. Now by default. */
+    /** When the listing was read, so the lists do not change between readings. */
     now?: number
 }
 
-/**
- * Outcomes in „In Arbeit“ that make no dataset busy: one that could not be
- * read (the server checks again on submit), and those whose way on is a new
- * version. A "no" to a removal is busy, unless the entry was turned down too.
- */
+/** Unreadable: the server checks again on submit; the rest go on only with a new version. */
 const FREE_TO_CHOOSE: ReadonlySet<ShareOutcome> = new Set(['unreadable', 'declined', 'entry-declined', 'entry-revoked'])
 
-/** The outcomes „Frühere Versionen“ lists plainly; those it lists as „nicht angenommen“ are `turnedDown`. */
 const REPLACED: ReadonlySet<ShareOutcome> = new Set(['replaced'])
 
-/** What a "no" turned down: the package, or only its entry. */
 export type TurnedDown = 'package' | 'entry'
 
-/** What the "no" a version stands at turned down, if any. */
 export function turnedDown(outcome: ShareOutcome): TurnedDown | undefined {
     return outcome === 'declined' ? 'package' : outcome === 'entry-declined' ? 'entry' : undefined
 }
 
-/** `{ declined }` for a cross-link to a version at such a "no" (`inProgressLinkText`), else nothing. */
 export function declinedKindOf(outcome: ShareOutcome): { declined?: TurnedDown } {
     const kind = turnedDown(outcome)
     return kind ? { declined: kind } : {}
 }
 
-/** Outcomes where the catalogue's index says what became of the entry, so a closed entry proposal is no ending of its own. */
+/** The index tells what became of the entry: a closed entry proposal is no ending of its own. */
 const ENTRY_SAID: ReadonlySet<ShareOutcome> = new Set(['listed', 'taken-out', 'entry-revoked'])
 
 const packageOf = (row: SharedPackageRow) => `${row.targetKey}#${row.slug}`
 
-/** The highest of plain x.y.z versions. */
 const highest = (versions: string[]) => versions.reduce<string | undefined>((best, version) => (!best || isNewerVersion(version, best) ? version : best), undefined)
 
-/** When a proposal ended, as GitLab says. */
 const endedAt = (proposal: ShareProposal) => proposal.mergedAt ?? proposal.closedAt
 
-/**
- * How one proposal of `row` ended, or undefined while it has not, or for a
- * merge that is no ending (a package's, a catalogue entry's). A row built
- * without its proposals knows of its own package proposal only that it was
- * withdrawn (`withdrawn`), not by whom.
- */
+/** A merge ends only a removal; a row without its proposals knows only its `withdrawn` flag. */
 function endingOf(proposal: ShareProposal, row: SharedPackageRow): Ending | undefined {
     if (proposal.state === 'closed') {
         const withdrawn = proposal.withdrawnBy !== undefined || (!row.proposals && proposal.kind === 'bundle' && row.withdrawn)
@@ -379,7 +266,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         const outcome = rowOutcome(row, progress)
         const proposals = proposalsOf(row)
         const current = (proposal: ShareProposal) => declineIsCurrent(proposal, row.version, families.get(packageOf(row)) ?? [], instance, now)
-        // A row built without its proposals knows its "no" only from its reading, and nothing of its time.
+        // Without its proposals a row knows its "no" only from its reading, not when it came.
         const kind = DECLINED_KIND[outcome]
         const proposal = kind ? declinedProposal(proposals, kind) : undefined
         const reading = outcome === 'entry-declined' ? row.catalog?.declined : outcome === 'removal-declined' ? row.bundle?.removal?.declined : undefined
@@ -390,7 +277,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
             progress,
             outcome,
             origin: instanceMatch(row.source, instance),
-            // May be a withdrawal whose comments could not be read: never told beside a newer version.
+            // Maybe an unread withdrawal: never told beside a newer version.
             unsure: proposal ? mayBeWithdrawn(proposal) : false,
             ...(decline ? { declined: { decline, current: proposal ? current(proposal) : false } } : {}),
             ...(change && current(change) ? { declinedChange: declineOf(change) } : {}),
@@ -400,7 +287,6 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
     const onlyWhileCurrent = (entry: (typeof read)[number]) => ONLY_WHILE_CURRENT.has(entry.outcome) || entryUsedUp(entry.outcome, entry.row)
     const tabOf = (entry: (typeof read)[number]) => (onlyWhileCurrent(entry) && !entry.declined?.current ? undefined : TAB_OF[entry.outcome])
 
-    // Per package: the versions replaced, and what is in progress, for the cross-links on each row.
     const byPackage = new Map<string, typeof read>()
     for (const entry of read) byPackage.set(packageOf(entry.row), [...(byPackage.get(packageOf(entry.row)) ?? []), entry])
     const tabRow = (entry: (typeof read)[number]): TabRow => {
@@ -411,14 +297,14 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
                 .map((other) => other.row.version)
                 .sort((a, b) => (isNewerVersion(a, b) ? 1 : isNewerVersion(b, a) ? -1 : 0))
         const earlier = below(REPLACED)
-        // Listed once through the marketplace's own entry proposal: an entry the team made by hand is no share of this one.
+        // An entry the team made by hand is no share of this one.
         const listedEarlier = below(REPLACED, (other) => proposalsOf(other.row).some((proposal) => proposal.kind === 'catalog' && proposal.state === 'merged'))
-        // Not one that may be an unread withdrawal („nicht angenommen“ would be a guess), nor another instance's, which this one did not end.
+        // Not a maybe-withdrawal („nicht angenommen“ would be a guess), nor another instance's.
         const declinedEarlier = family
             .filter((other) => turnedDown(other.outcome) && !other.unsure && shown(other.origin) && isNewerVersion(entry.row.version, other.row.version))
             .sort((a, b) => (isNewerVersion(a.row.version, b.row.version) ? 1 : isNewerVersion(b.row.version, a.row.version) ? -1 : 0))
             .map((other) => ({ version: other.row.version, kind: turnedDown(other.outcome) as TurnedDown }))
-        // Only to a row „In Arbeit“ shows: another instance's newer version is counted there, not listed, so a link would lead nowhere.
+        // Only to a row „In Arbeit“ lists: another instance's would be a link to nowhere.
         const newer = entry.outcome === 'listed'
             ? family.find((other) => tabOf(other) === 'in-progress' && shown(other.origin) && isNewerVersion(other.row.version, entry.row.version))
             : undefined
@@ -460,16 +346,15 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         for (const proposal of proposalsOf(row)) {
             const ending = endingOf(proposal, row)
             if (!ending) continue
-            // Listed or taken out, the index tells what became of the entry: a closed entry proposal adds nothing.
             if (ENTRY_SAID.has(outcome) && proposal.kind === 'catalog' && ending === 'not-accepted') continue
-            // A proposal names its own instance where it can: two proposals on one branch may come from two instances.
+            // Two proposals on one branch may come from two instances.
             const own = proposal.source?.instance ? instanceMatch(proposal.source, instance) : origin
             const at = endedAt(proposal)
             end({ key: `${row.key}#${proposal.kind}!${proposal.iid}`, ending, what: proposal.kind, row, version: row.version, proposal, ...(at ? { at } : {}), origin: own })
         }
         if (outcome === 'gone') end({ key: `${row.key}#gone`, ending: 'removed', what: 'version', row, version: row.version, byHand: true, origin })
     }
-    // One entry per package for what the catalogue team took out: the version its rows report, the newest one out.
+    // One „taken out“ entry per package, at the newest version taken out.
     for (const family of byPackage.values()) {
         const out = highest(family.flatMap(({ row }) => (row.catalog?.takenOut ? [row.catalog.takenOut.version] : [])))
         if (!out) continue
@@ -486,7 +371,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
             origin: holder.origin,
         })
     }
-    // Newest first; a stable sort keeps the listing's order among equals and puts what has no date last.
+    // Stable sort: the listing's order among equals, undated last.
     ended.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
 
     const busy = new Map<string, TabRow[]>()

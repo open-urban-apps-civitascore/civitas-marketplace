@@ -9,35 +9,13 @@ import {
     useCaseStatusSchema,
 } from '@/lib/catalog/vocabulary'
 
-/**
- * The catalogue index as a schema — the single definition of the wire format
- * that `index.json` speaks.
- */
+// The single definition of the wire format of the catalogue's `index.json`.
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
 
-/**
- * The id of a use case: `urn:<publisher>:usecase:<name>`, with both parts
- * already URL-safe. Matches what the export writes (`SEGMENT` and `SLUG` in
- * lib/export-actions) and is deliberately tighter than "some string".
- *
- * This is what makes the readable address `/use-cases/<publisher>/<name>` safe.
- * That address is two segments of this id copied verbatim, so as long as the id
- * conforms, distinct ids give distinct addresses — uniqueness of the address
- * follows from uniqueness of the id, which the catalogue already enforces, and
- * no separate rule has to be maintained or policed.
- *
- * Without this, the address would be derived by flattening whatever the id
- * happened to contain, and `urn:x:usecase:a-b` and `urn:x:usecase:a:b` would
- * both address `/x/a-b`: two entries, one URL, and a reader shown the wrong
- * costs. See lib/use-case-catalog/path.
- *
- * Data structures are NOT constrained: their id is a CORE URN owned by the
- * platform (`urn:core:standard:…`), they have no detail route, and redefining
- * their identity is not ours to do.
- */
-// Kept apart from the schema library (`use-case-id.ts`), so the share pages need not load it.
 export { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 
+// Tight on purpose: `/use-cases/<publisher>/<name>` copies the id's two parts, so distinct ids give
+// distinct addresses (lib/use-case-catalog/path). Data structure ids are the platform's: unconstrained.
 const USE_CASE_ID = new RegExp(`^urn:${PUBLISHER_PATTERN}:usecase:${NAME_PATTERN}$`)
 
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -47,14 +25,7 @@ const isSafeRelativePath = (value: string) =>
 
 const relativePathSchema = z.string().refine(isSafeRelativePath, 'must be a plain relative path')
 
-/**
- * Where the package content lives, pinned to an immutable commit.
- *
- * `ref` must be the commit itself. A tag or branch name here would resolve to
- * whatever it points at on the day of the install, laundering mutable content
- * through something that looks like a pin — `releaseTag` carries the human
- * name, and is never fetched.
- */
+/** `ref` must be a commit: a tag or branch moves. `releaseTag` is only the human name, never fetched. */
 export const deploymentRefSchema = z.object({
     url: z.url({ protocol: /^https$/ }),
     ref: z.string().regex(COMMIT_SHA, 'must be a full 40-hex commit SHA'),
@@ -71,10 +42,6 @@ export const contactSchema = z
     })
     .refine((contact) => Boolean(contact.email ?? contact.url), 'needs an email or a url')
 
-/**
- * A screenshot of the running thing - the one image nobody but the operating
- * municipality can supply, which is why it arrives through the form.
- */
 export const mediaSchema = z.object({
     src: z
         .string()
@@ -178,14 +145,8 @@ export const describedRowSchema = requiresAddressableId(z.looseObject({
     ...entryIdentityShape,
     ...entryDescriptionShape,
     implementation: implementationSchema.extend({ reference: referenceSchema }),
-    /**
-     * Must be ABSENT, not merely optional. The parser decides the branch by
-     * asking whether a pin is present, so a row carrying both a reference and
-     * a pin is parsed as pinned and rejected if that pin is not a commit.
-     * Without this the generated JSON Schema would accept such a row through
-     * this branch, CI would pass it, and the runtime would then reject the
-     * whole index into last-known-good — silently.
-     */
+    // Must be ABSENT: a row with a pin parses as pinned, and without this the JSON Schema would let CI pass
+    // a row the runtime then rejects, dropping the whole index to last-known-good.
     deploymentRef: z.undefined().optional(),
 }))
 

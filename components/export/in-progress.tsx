@@ -32,26 +32,16 @@ import {
 import type { ShareDraft } from '@/lib/export/share-drafts'
 import type { TabRow } from '@/lib/export/share-tabs'
 
-/** The name a dialog uses: a started share by the name typed so far, a shared version with its number. */
 function itemTitle(item: InProgressItem): string {
     return item.kind === 'draft' ? item.draft.basics.displayName?.trim() || item.draft.datasetName : `${item.row.displayName} ${item.row.version}`
 }
 
-/** Datasets that could not be read count as there: a portal that did not answer is no reason to stop anyone going on. */
+/** Unreadable datasets count as there: a portal that did not answer is no reason to stop anyone. */
 const ANY_DATASET: DatasetsHere = { has: () => true }
 
-/**
- * The tab „In Arbeit“ on its page (/export), fed from the share pages' one
- * listing: the rows the tab rules put here (`share-tabs.ts`, so other
- * instances' shares stay out and are only counted), and the started shares
- * of this browser. `enabled`: this person may see what was submitted;
- * without it only the started shares show. `datasets`: the datasets this
- * person may read here, to tell a started share whose dataset is gone and to
- * name where a share came from; undefined when they could not be read.
- */
 export function InProgressTab({ enabled, datasets }: { enabled: boolean; datasets?: { id: string; name: string }[] }) {
     const view = useShareView(enabled)
-    // Until the browser was read, an empty list would only flash „Gerade ist nichts in Arbeit.“.
+    // Until the browser was read, an empty list would only flash.
     if (!view.draftsReady) return null
     return (
         <InProgress
@@ -60,7 +50,6 @@ export function InProgressTab({ enabled, datasets }: { enabled: boolean; dataset
             rows={view.rows === null ? null : view.tabs.inProgress}
             elsewhere={view.rows === null ? 0 : view.tabs.elsewhere['in-progress']}
             error={view.error}
-            // Without the right to see submissions, the started shares are all there is: counted, but no empty groups.
             known={!enabled ? 'own' : view.rows !== null && !view.error ? 'all' : 'partial'}
             loaded={view.loaded}
             onReload={view.reload}
@@ -69,10 +58,8 @@ export function InProgressTab({ enabled, datasets }: { enabled: boolean; dataset
     )
 }
 
-/** A result of an action, kept for the row it is about - or for its place, once the row moved to another tab. */
 interface RowResult {
     key: string
-    /** Where the row stood - its group, and its place in it - for the result to stand there when the row is gone. */
     group: InProgressGroup
     index: number
     done: DeletionDone
@@ -80,7 +67,6 @@ interface RowResult {
 
 const entries = (count: number) => `${count} ${count === 1 ? 'Eintrag' : 'Einträge'}`
 
-/** „Du bist dran · 2“ to see, „Du bist dran, 2 Einträge“ to hear, as the tab bar counts; no count while it is unknown. */
 function GroupHeading({ group, count }: { group: InProgressGroup; count?: number }) {
     return (
         <h3 className="text-base font-semibold text-foreground">
@@ -95,21 +81,7 @@ function GroupHeading({ group, count }: { group: InProgressGroup; count?: number
     )
 }
 
-/**
- * "In Arbeit": everything someone started sharing and has not finished
- * (plan of 2026-10-18, section 4). Started shares come at once, the proposals
- * when GitLab answered. The rows stand in groups: „Du bist dran“, „Wartet auf
- * andere“ and, when there is any, „Stand nicht lesbar“. Nothing is cut off.
- *
- * Every button in a row is secondary, because several rows can be the
- * person's move at once and the page's one primary is „Neues Paket teilen“.
- * The way out („Verwerfen“, „Zurückziehen“) asks first, in the dialog that
- * says what it means at the row's stage.
- *
- * While focus is inside the list its order and groups hold: a row that moves
- * to another group after the person acted on it stays where they are looking,
- * with its result in it, until they leave the list.
- */
+/** While focus is inside the list its order holds: a row acted on stays put until focus leaves. */
 export function InProgress({
     drafts,
     datasets,
@@ -123,46 +95,38 @@ export function InProgress({
 }: {
     drafts: ShareDraft[]
     datasets?: { id: string; name: string }[]
-    /** The shared versions „In Arbeit“ holds, by the tab rules; null while GitLab is asked. */
+    /** Null while GitLab is asked. */
     rows: TabRow[] | null
-    /** Versions in progress from other instances: counted, not listed. */
     elsewhere?: number
     error?: string
-    /** What the groups may count (`GroupsKnown`); by default, all once GitLab answered. */
     known?: GroupsKnown
-    /** How many readings of them came back so far (`useSharedListing`). */
+    /** How many readings came back so far. */
     loaded: number
-    /** Reads the shared packages again, after something here changed them. */
     onReload: () => void
     onDiscard: (datasetId: string) => void
 }) {
     const { proposing, propose, outcomeFor } = useCatalogProposal(onReload)
     const [deleting, setDeleting] = useState<InProgressItem | null>(null)
     const [result, setResult] = useState<RowResult | null>(null)
-    // The row just withdrawn at GitLab, until the next reading comes back (answer or failure): no stale buttons meanwhile.
+    // Just withdrawn at GitLab, until the next reading: no stale buttons meanwhile.
     const [settling, setSettling] = useState<{ key: string; loaded: number } | null>(null)
-    // „Erneut versuchen“ was pressed at this reading, for the list or one row: busy until the next one comes back.
     const [retried, setRetried] = useState<{ key?: string; loaded: number } | null>(null)
-    // Where the rows stood when focus came into the list; null while it is elsewhere.
     const [frozen, setFrozen] = useState<Placed[] | null>(null)
     const listRef = useRef<HTMLDivElement>(null)
-    // Which result takes the focus when it appears: once, so a result shown again does not pull it back from elsewhere.
+    // Once only: a result shown again must not pull the focus back.
     const focusNextRef = useRef<string | null>(null)
 
     const here = useMemo<DatasetsHere>(() => (datasets ? new Map(datasets.map((dataset) => [dataset.id, dataset.name])) : ANY_DATASET), [datasets])
     const items = inProgressItems(drafts, here, rows ?? [])
     const byKey = new Map(items.map((item) => [item.key, item]))
     const sorted = placesOf(items)
-    // A result whose row is gone takes the row's place again, also in the order and the groups the person saw.
     const kept = frozen ? keptPlaces(frozen, sorted) : sorted
     const placed = result && !byKey.has(result.key) ? withPlace(kept, { key: result.key, group: result.group }, result.index) : kept
     const order = placed.map((place) => place.key)
-    // Counts, and empty groups, show only once they are known (`shownGroups`).
     const groups = shownGroups(placed, known)
     const settlingKey = settling && settling.loaded === loaded ? settling.key : undefined
 
-    // Focus can leave without a blur reaching the list - the element it was on went away with a change of
-    // the rows: then the order is free again. Checked after each change of what the list shows.
+    // Focus can vanish with a removed row, without a blur: rechecked after each change of what is shown.
     const shown = `${placed.map((place) => `${place.group}:${place.key}`).join('\n')}|${settlingKey ?? ''}|${proposing ?? ''}|${loaded}`
     useEffect(() => {
         if (frozen && !listRef.current?.contains(document.activeElement)) setFrozen(null)
@@ -216,16 +180,14 @@ export function InProgress({
                             setFrozen(null)
                             return
                         }
-                        // No new target: the focus may only have left the window - „In GitLab ansehen“ opens a tab -
-                        // and comes back to the same row then, which a reading landing meanwhile must not move.
-                        // Decided once the browser has settled where the focus is.
+                        // No new target: maybe only the window lost focus (a new tab); decided once the browser settled.
                         setTimeout(() => {
                             if (!list.contains(document.activeElement)) setFrozen(null)
                         }, 0)
                     }}
                 >
                     {groups.map(({ group, keys, counted }) => {
-                        // A result standing where its row was is no row of the group.
+                        // A result in a gone row's place is not counted.
                         const count = keys.filter((key) => byKey.has(key)).length
                         const lead = GROUP_LEADS[group]
                         return (
@@ -238,7 +200,6 @@ export function InProgress({
                                     <ul className="flex flex-col gap-4">
                                         {keys.map((key) => {
                                             const item = byKey.get(key)
-                                            // The row moved on to another tab (withdrawn, discarded): its result stands where it was.
                                             if (!item) return result?.key === key ? <li key={key}>{doneNotice(result)}</li> : null
                                             const outcome = item.kind === 'shared' ? outcomeFor(item.row.key) : undefined
                                             return (
@@ -283,7 +244,6 @@ export function InProgress({
             )}
             {rows === null && !error && <Pending>Stand bei GitLab wird abgefragt …</Pending>}
             {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
-            {/* Started shares above still show: they live in this browser, not at GitLab. */}
             {error && (
                 <Notice
                     tone="error"
@@ -320,16 +280,7 @@ export function InProgress({
     )
 }
 
-/**
- * Where a result appears, inside the row it is about: it takes the focus
- * once, when it is the one asked for, so the person hears it and finds it
- * where they acted - and the list keeps its order around them meanwhile.
- *
- * The same result is shown anew where its row was once the row went to
- * another tab (withdrawn, discarded). The focus was in the row and went with
- * it to the start of the page; then it comes back here, without scrolling,
- * rather than being lost. Focus the person moved elsewhere stays there.
- */
+/** Takes the focus once when asked for, or without scrolling when it fell to the body with its row. */
 function ResultSlot({ id, focusNextRef, children }: { id: string; focusNextRef: RefObject<string | null>; children: ReactNode }) {
     const ref = useRef<HTMLDivElement>(null)
     useEffect(() => {
@@ -362,11 +313,9 @@ function InProgressRow({
 }: {
     item: InProgressItem
     here: DatasetsHere
-    /** Just withdrawn; the list is being read again. */
     settling: boolean
     proposing: boolean
     retrying: boolean
-    /** A catalogue proposal is under way somewhere in the list: no second one meanwhile. */
     disabled: boolean
     onPropose: () => void
     onRemove: () => void
@@ -374,7 +323,6 @@ function InProgressRow({
     children?: ReactNode
 }) {
     const view = rowView(item, here)
-    // A link from the wizard („Weiter geht es unter „In Arbeit““) lands on the row it names.
     const id = item.kind === 'shared' ? rowAnchor(item.row) : undefined
     if (settling) {
         return (
@@ -415,7 +363,6 @@ function InProgressRow({
 
 const ICONS = { discard: Trash2, withdraw: Undo2, 'new-version': PackagePlus, 'propose-entry': GitMerge } as const
 
-/** One action of a row, in the look the stage table gives it: a secondary button, a link to GitLab, or a quiet action. */
 function RowButton({
     action,
     pending,
@@ -432,7 +379,6 @@ function RowButton({
     onRetry: () => void
 }) {
     const label = ACTION_LABELS[action.kind]
-    // In the buttons' size: the link stands among them.
     if (action.kind === 'gitlab') {
         return (
             <ExternalAnchor href={action.href ?? '#'} className="text-sm">
@@ -452,7 +398,7 @@ function RowButton({
     }
     const onClick = action.kind === 'propose-entry' ? onPropose : action.kind === 'retry' ? onRetry : onRemove
     return (
-        // „Erneut versuchen“ only reads again, which a proposal under way elsewhere does not stand in the way of.
+        // A retry only reads, so a proposal under way does not block it.
         <Button
             variant={variant}
             icon={action.kind === 'retry' ? undefined : ICONS[action.kind]}

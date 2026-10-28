@@ -2,29 +2,10 @@ import { createHash } from 'node:crypto'
 
 import { compactName } from '@/lib/export/names'
 
-/**
- * CORE URN helpers for the export: parsing, the catalogue's derived identity,
- * and the name normalisation the catalogue packages use.
- *
- * Identity policy on export (decision with Daniel, 2026-09-08): an artifact
- * whose URN already carries scope `standard` came from a catalogue package
- * and KEEPS its identity — re-exporting it must not fork the shared identity.
- * Everything the instance minted itself (any other scope, random
- * disambiguator) is re-identified as a catalogue artifact:
- *
- *   urn:core:standard:<publisher>:<type>:<domain>:<name>:<derived>
- *
- * The disambiguator is DERIVED exactly as Model Forge's
- * `UrnParser.deriveDisambiguator` does for externally identified artifacts:
- * SHA-256 over the stable key `<publisher>#<name>`, one base36 character per
- * hash byte (`hash[i] % 36`), ten characters. Verified against the published
- * packages on 2026-09-08 (`openurbanapps#kiezbaum` → `f1i2sjhgvq`), so an
- * export computes the identical identity a hand-authored package carries.
- */
-
 const DISAMBIGUATOR_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 const DISAMBIGUATOR_LENGTH = 10
 
+/** Must stay identical to Model Forge's `UrnParser.deriveDisambiguator`. */
 export function deriveDisambiguator(key: string): string {
     const hash = createHash('sha256').update(key, 'utf8').digest()
     let out = ''
@@ -50,16 +31,10 @@ export interface CoreUrn {
     domain: string
     name: string
     disambiguator: string
-    /** Present on a versioned URN, absent on a logical one. */
     version?: string
 }
 
-/**
- * `urn:core:<scope>:<owner>:<type>:<domain>:<name>:<disambiguator>[:<version>]`.
- * Returns undefined for anything that is not a CORE URN — callers treat that
- * as "not an identity", never as an error, because connector documents may
- * legitimately carry non-URN references.
- */
+/** Undefined for anything else, which is no error: connector documents may carry non-URN references. */
 export function parseCoreUrn(value: unknown): CoreUrn | undefined {
     if (typeof value !== 'string') return undefined
     const parts = value.split(':')
@@ -75,7 +50,6 @@ export function isCoreUrn(value: unknown): value is string {
     return parseCoreUrn(value) !== undefined
 }
 
-/** The version-free form; a logical URN is returned unchanged. */
 export function logicalUrn(urn: string): string {
     const parsed = parseCoreUrn(urn)
     if (!parsed?.version) return urn
@@ -87,10 +61,9 @@ export function isCatalogAuthored(urn: string): boolean {
     return parseCoreUrn(urn)?.scope === 'standard'
 }
 
-// Apart from the hash (`names.ts`), so the share pages can make a short name in the browser.
 export { compactName, slugify } from '@/lib/export/names'
 
-/** A URN segment must not carry the separator or whitespace; the publisher and domain come from a form. */
+/** Publisher and domain come from a form: no separator or whitespace may reach the URN. */
 export function urnSegment(value: string, fallback: string): string {
     const segment = compactName(value)
     return segment === 'unnamed' ? fallback : segment

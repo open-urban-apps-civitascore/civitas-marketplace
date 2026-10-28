@@ -8,26 +8,9 @@ import { reasonWords, type Decline } from '@/lib/export/declines'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { declinedStage, removalDeclinedNotice, STAGES, WAITING_FOR_TEAM, type DeclinedStage, type ShareProgress, type Stage, type StageState } from '@/lib/export/share-stages'
 
-/**
- * "So geht es weiter": the last step of "Teilen" as the task it is (Ewa's
- * point 8 of 2026-10-13). Four stages, two of them the person's own, two the
- * catalogue team's. Exactly one primary button, at the stage that is the
- * person's move now; a stage that waits for others offers "Stand prüfen";
- * later stages are a grey line, not a disabled button. What stops a stage
- * says why, at the stage.
- *
- * No numbers on purpose: the stepper above already numbers the steps of the
- * form, and two numbered lists on one page read as one.
- *
- * "Merge Request" is said only in the fold-out that explains it; everywhere
- * else a proposal is a "Vorschlag" and GitLab is where it can be seen.
- *
- * A stage the catalogue team turned down shows the problem mark, who said no
- * and when, their words and the way on - a higher version. No button: what was
- * turned down is used up for this version.
- */
+// One primary button at most, at the person's move now; later stages are grey text, not disabled buttons.
+// No numbers on purpose: the stepper above numbers the form, and two numbered lists read as one.
 
-/** Who the stage belongs to, and whether it is theirs now. A stage nobody can move on is nobody's turn. */
 function whoLine(stage: Stage, state: StageState, progress: ShareProgress, declined: DeclinedStage | undefined): string {
     if (state === 'done') return `${stage.who} - erledigt`
     if (state === 'declined') return declined?.who ?? `${stage.who} - nicht angenommen`
@@ -42,12 +25,10 @@ const MARK: Record<StageState, LucideIcon> = {
     current: Circle,
     waiting: Clock,
     blocked: Circle,
-    // Never the mark of the person's next step: the catalogue team turned this stage down.
     declined: TriangleAlert,
     later: Circle,
 }
 
-/** " (Vorschlag !12)", or nothing when the address names no number. */
 function proposalRef(url: string | undefined): string {
     const ref = mergeRequestRef(url)
     return ref ? ` (Vorschlag ${ref})` : ''
@@ -73,29 +54,20 @@ export function ShareSteps({
     onCatalog,
 }: {
     progress: ShareProgress
-    /** The action running right now, so only its button spins. */
     pendingIntent?: 'bundle' | 'status' | 'catalog'
-    /** Any request is running: no second one meanwhile. */
     busy: boolean
-    /** Why the package cannot be proposed from here, if it cannot. */
     proposeBlocker?: string
-    /** `proposeBlocker` is another open proposal of the dataset: a fact, so said in neutral. */
+    /** `proposeBlocker` is another open proposal: a fact, shown neutral. */
     proposeWaits?: boolean
-    /** Why the catalogue step cannot be taken from here, if it cannot. */
     catalogBlocker?: string
-    /** GitLab can be asked at all (sharing set up, and the person may). */
     canCheck: boolean
     bundleMrUrl?: string
     catalogMrUrl?: string
-    /** The merge request that proposes taking the version out again, when there is one. */
     removalMrUrl?: string
-    /** The version the stages are about: the way on after a "no" names the one above it. */
     version: string
-    /** The next free version of the package, where the page knows its other versions. */
     suggested?: string
-    /** The catalogue team's "no" to the package and to the entry. */
     declines?: { review?: Decline; listing?: Decline }
-    /** Their "no" to the removal, while it is the news (`removalDeclineShown`): the package stays accepted. */
+    /** Only while it is news (`removalDeclineShown`). */
     removalDeclined?: Decline
     onPropose: () => void
     onCheck: () => void
@@ -105,7 +77,6 @@ export function ShareSteps({
         if (state === 'current' && stage.key === 'propose' && !proposeBlocker) {
             return (
                 <>
-                    {/* Said before the click: the proposal is public, and it names the person. */}
                     <span className="text-xs text-muted-foreground">Dein Name erscheint im öffentlichen Vorschlag bei GitLab.</span>
                     <Button variant="primary" icon={GitPullRequest} pending={pendingIntent === 'bundle'} disabled={busy} onClick={onPropose}>
                         Zur Prüfung einreichen
@@ -114,14 +85,13 @@ export function ShareSteps({
             )
         }
         if (state === 'current' && stage.key === 'catalog' && !catalogBlocker) {
-            // After a "no" to the removal, reading it comes first: the entry stays possible, but not as the primary.
+            // After a "no" to the removal, reading it comes first: the entry is no longer the primary.
             return (
                 <Button variant={removalDeclined ? 'secondary' : 'primary'} icon={GitMerge} pending={pendingIntent === 'catalog'} disabled={busy} onClick={onCatalog}>
                     Katalog-Eintrag vorschlagen
                 </Button>
             )
         }
-        // Waiting on others, or stopped by something that can be fixed elsewhere: ask GitLab again.
         if ((state === 'waiting' || (state === 'blocked' && progress.turn === 'you')) && canCheck) {
             return (
                 <Button icon={RefreshCw} pending={pendingIntent === 'status'} disabled={busy} onClick={onCheck}>
@@ -134,8 +104,7 @@ export function ShareSteps({
 
     const link = (stage: Stage, state: StageState) => {
         const url = stage.key === 'propose' || stage.key === 'review' ? bundleMrUrl : catalogMrUrl
-        // Once per merge request: at the stage that waits on it, afterwards at the stage that opened it - after a "no",
-        // only as „Vorschlag ansehen“ after the team's words.
+        // Once per merge request: where it is waited on, else where it was opened; after a "no", not here.
         const shows =
             (stage.key === 'propose' && state === 'done' && progress.states.review !== 'waiting' && !declinedAt(STAGES[1], progress.states.review)) ||
             (stage.key === 'review' && state === 'waiting') ||
@@ -152,7 +121,6 @@ export function ShareSteps({
         return undefined
     }
 
-    // The team's "no" at a stage they turned down, with the proposal's address.
     function declinedAt(stage: Stage, state: StageState): (DeclinedStage & { url: string }) | undefined {
         if (state !== 'declined' || (stage.key !== 'review' && stage.key !== 'listing')) return undefined
         const decline = declines?.[stage.key]
@@ -161,7 +129,6 @@ export function ShareSteps({
 
     return (
         <Panel title="So geht es weiter">
-            {/* Outside the four stages: it undoes them, or would have. Said first, because it decides what the stages below still mean. */}
             {progress.removal ? (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <InlineNotice tone="neutral">
@@ -202,7 +169,7 @@ export function ShareSteps({
                             className="flex flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
                         >
                             <div className="flex min-w-0 items-start gap-3">
-                                {/* Neutral marks: green already means "verified" and "use case" here. Only a "no" takes a colour, the warn amber. */}
+                                {/* No green: it already means "verified" and "use case" here. */}
                                 <Mark
                                     aria-hidden
                                     className={`mt-0.5 size-4 shrink-0 ${
@@ -214,7 +181,6 @@ export function ShareSteps({
                                     <p className="text-xs text-muted-foreground">{whoLine(stage, state, progress, declined)}</p>
                                     {declined && (
                                         <div className="mt-1.5 flex flex-col gap-1.5">
-                                            {/* A reason cut at 300 characters goes on in the proposal. */}
                                             <p className="break-words text-sm leading-relaxed text-foreground">
                                                 {declined.reason} <ExternalAnchor href={declined.url}>Vorschlag ansehen</ExternalAnchor>
                                             </p>
@@ -223,8 +189,6 @@ export function ShareSteps({
                                     )}
                                     {reason && (
                                         <div className="mt-1.5">
-                                            {/* Neutral once nothing is left to do - nobody on this page can change it - and for a proposal open
-                                                elsewhere, which is a fact, not a problem. */}
                                             <InlineNotice tone={progress.finished || (stage.key === 'propose' && proposeWaits) ? 'neutral' : 'warn'}>{reason}</InlineNotice>
                                         </div>
                                     )}
@@ -249,9 +213,6 @@ export function ShareSteps({
                 </p>
             </Disclosure>
 
-            {/* Said at the moment someone might leave: the way back has to be known before it is needed.
-                „dort geht es nach der Prüfung weiter“ only while a review is open; otherwise the package
-                waits for the person's own move. */}
             {progress.states.propose === 'done' && !progress.finished && !progress.removal && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                     Du kannst diese Seite jetzt verlassen. Du findest das Paket jederzeit unter „Teilen“ › „In Arbeit“

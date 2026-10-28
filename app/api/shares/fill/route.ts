@@ -2,17 +2,7 @@ import { readNewVersionFill, type NewVersionFill } from '@/lib/export/new-versio
 import { fetchShareRight, shareRefusal, SIGNED_OUT } from '@/lib/export/share-permission'
 import { accessTokenOrUndefined, currentSession } from '@/lib/session'
 
-/**
- * The Steckbrief of a new version, from one shared before
- * (`readNewVersionFill`): `?target=…&slug=…&version=…`. A route, not a server
- * action, as `/api/shares` is: Next runs a page's actions one at a time, so
- * reading a dataset's content would wait behind it.
- *
- * It answers a `NewVersionFill` in JSON whatever happens, never a redirect to
- * the login page: 401 without a session, 403 without the right to share, 503
- * when the portal cannot say which right the person has. Not cached: the
- * answer depends on who asks.
- */
+// A route, not a server action, as Next runs a page's actions one at a time.
 const PRIVATE = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
 const answer = (body: NewVersionFill, status = 200) => Response.json(body, { status, headers: PRIVATE })

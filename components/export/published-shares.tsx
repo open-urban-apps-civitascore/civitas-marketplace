@@ -15,7 +15,6 @@ import type { TabRow } from '@/lib/export/share-tabs'
 /** A link inside the marketplace, in the look of `ExternalAnchor` without its ↗. */
 const PAGE_LINK = 'font-medium text-primary underline-offset-2 hover:underline'
 
-/** „Veröffentlicht“ from the share pages' one listing (`useShareView`), so coming from another tab does not ask GitLab again. */
 export function PublishedShares() {
     const view = useShareView(true)
     if (view.rows === null) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
@@ -24,11 +23,6 @@ export function PublishedShares() {
     return <Published rows={view.tabs.published} elsewhere={view.tabs.elsewhere.published} error={view.error} now={now} instance={view.instance} />
 }
 
-/**
- * „Veröffentlicht“: what this instance put into the catalogue through this
- * marketplace, one card per entry at its listed version. „Neue Version teilen“
- * is secondary, as the page's one primary is „Neues Paket teilen“.
- */
 export function Published({
     rows,
     elsewhere = 0,
@@ -40,12 +34,10 @@ export function Published({
     elsewhere?: number
     error?: string
     now?: number
-    /** This instance as the listing names it, for `ofUnknownInstance`. */
     instance?: string
 }) {
     return (
         <div className="flex flex-col gap-4">
-            {/* In the words the other two tabs use; „Aktualisieren“ above asks again. */}
             {error && (
                 <Notice tone="error" live>
                     Was im Katalog steht, ließ sich gerade nicht abfragen ({error}).
@@ -90,7 +82,6 @@ export function PublishedRow({ line }: { line: PublishedLine }) {
                             Neue Version teilen
                         </Link>
                     )}
-                    {/* In the button's place while a newer version is under way. */}
                     {next?.kind === 'newer' && (
                         <Link href={next.href} className={`${PAGE_LINK} text-sm`}>
                             {inProgressLinkText(next.version, next.declined)}

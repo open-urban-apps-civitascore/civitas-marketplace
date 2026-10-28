@@ -1,19 +1,12 @@
 import type { NewVersionFill } from '@/lib/export/new-version-fill'
 
-/**
- * How the wizard asks `/api/shares/fill` for the Steckbrief of a new version.
- * The route answers a `NewVersionFill` whatever happens; `signal` cancels a
- * request once the person chooses another dataset.
- */
-
 export function newVersionFillUrl(targetKey: string, slug: string, version: string): string {
     return `/api/shares/fill?${new URLSearchParams({ target: targetKey, slug, version })}`
 }
 
-/** Said where the route could not be asked, or answered no such thing. */
 export const FILL_REQUEST_FAILED = 'Die Anfrage an den Server ist fehlgeschlagen.'
 
-/** The route's answer; a cancelled request rejects, as `fetch` does, so the caller drops it. */
+/** A cancelled request rejects, as `fetch` does; any other failure is answered as `error`. */
 export async function requestNewVersionFill(
     fill: { targetKey: string; slug: string; version: string },
     signal?: AbortSignal,
