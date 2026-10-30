@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import Link from 'next/link'
 
+import { ExternalAnchor } from '@/components/ui/button'
 import { InlineNotice, Notice, Pending } from '@/components/ui/notice'
 import { IN_PROGRESS_PATH } from '@/lib/export/in-progress-items'
 import type { StageNotice } from '@/lib/export/new-version'
@@ -25,9 +26,13 @@ export function BusySentence({ options }: { options: ReturnType<typeof busyOptio
             {options.map((option, index) => (
                 <Fragment key={option.value}>
                     {index > 0 && ', '}
-                    <Link href={option.busy.href} className={linkClass}>
-                        {option.label}
-                    </Link>{' '}
+                    {option.busy.external ? (
+                        <ExternalAnchor href={option.busy.href}>{option.label}</ExternalAnchor>
+                    ) : (
+                        <Link href={option.busy.href} className={linkClass}>
+                            {option.label}
+                        </Link>
+                    )}{' '}
                     ({option.busy.versions})
                 </Fragment>
             ))}
@@ -53,7 +58,9 @@ export function StageNoticeView({ notice }: { notice: StageNotice }) {
         <Notice
             tone="neutral"
             action={
-                notice.link ? (
+                notice.link?.external ? (
+                    <ExternalAnchor href={notice.link.href}>{notice.link.label}</ExternalAnchor>
+                ) : notice.link ? (
                     <Link href={notice.link.href} className={linkClass}>
                         {notice.link.label}
                     </Link>

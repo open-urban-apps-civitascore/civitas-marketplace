@@ -451,9 +451,9 @@ export async function exportAction(
             if (form.follows && !proposalOfHere(form.follows.url, [target.url, ...(config.catalog ? [config.catalog.url] : [])])) {
                 return { intent: 'bundle', status: 'invalid', detail: 'Die Angabe zum nicht angenommenen Vorschlag ist ungültig - bitte die Seite neu laden.' }
             }
-            // A dataset with another proposal open is greyed out in „Auswählen“; this catches a link or a race.
+            // Another proposal of this package open: greyed out in „Auswählen“; this catches a link or a race.
             const project = await getProject(client, parseProjectUrl(target.url).projectPath)
-            const open = await openShareOf(config, token, form.datasetId)
+            const open = await openShareOf(config, token, form.options.slug)
             if (open) return { intent: 'bundle', status: 'invalid', detail: busyRefusal(open), mrUrl: open.url, busy: true, bundle: current }
             // The refusal carries a "no" the page did not know, so the Steckbrief asks what changed.
             const followed = await followedOnServer(client, project, config, token, form.options.slug, form.options.version, id, catalogue)
@@ -540,15 +540,14 @@ function proposalOfHere(url: string, projects: string[]): boolean {
 }
 
 /** Asks the account per GitLab, as a token is someone else on another host. */
-async function openShareOf(config: ExportConfig, token: string, datasetId: string): Promise<OpenShare | undefined> {
-    const instance = thisInstance()
+async function openShareOf(config: ExportConfig, token: string, slug: string): Promise<OpenShare | undefined> {
     const projects = new Map([...config.targets.map((target) => target.url), ...(config.catalog ? [config.catalog.url] : [])].map((url) => [withoutSlash(url), url]))
     const found = await Promise.all(
         [...projects.values()].map(async (url) => {
             const where = shareClient(url, token)
             const project = await getProject(where, parseProjectUrl(url).projectPath)
             const [requests, bot] = await Promise.all([listOpenMergeRequests(where, project.id), currentUser(where)])
-            return openSharesOf(requests, datasetId, bot.id, instance)
+            return openSharesOf(requests, slug, bot.id)
         }),
     )
     return found.flat()[0]

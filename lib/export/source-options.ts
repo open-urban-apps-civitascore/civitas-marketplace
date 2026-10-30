@@ -1,5 +1,4 @@
-import { inProgressHref } from '@/lib/export/in-progress-items'
-import { datasetStage, stageHint, versionsOf, type ListingFacts } from '@/lib/export/new-version'
+import { busyLink, datasetStage, stageHint, versionsOf, type ListingFacts } from '@/lib/export/new-version'
 import { draftStartedOn, type ShareDraft } from '@/lib/export/share-drafts'
 import type { ExportSource } from '@/lib/export/sources'
 import { DATASET_STATUS_LABELS } from '@/lib/ui/dataset-status'
@@ -10,7 +9,7 @@ export interface SourceOption {
     detail?: string
     hint?: string
     disabled?: boolean
-    busy?: { versions: string; href: string }
+    busy?: { versions: string; href: string; external?: true }
 }
 
 /** While `loading` or `failed` nothing is greyed out: the server checks again on submit. */
@@ -47,7 +46,7 @@ export function sourceOptions(sources: ExportSource[], drafts: ShareDraft[], lis
                 label: source.name,
                 ...(detail ? { detail } : {}),
                 ...(hint ? { hint } : {}),
-                ...(stage?.kind === 'busy' ? { disabled: true, busy: { versions: versionsOf(stage.rows), href: inProgressHref(stage.rows[0].row) } } : {}),
+                ...(stage?.kind === 'busy' ? { disabled: true, busy: { versions: versionsOf(stage.rows), ...busyLink(stage.rows[0]) } } : {}),
             }
         })
 }
