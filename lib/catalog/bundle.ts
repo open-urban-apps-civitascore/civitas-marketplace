@@ -1,5 +1,6 @@
 import { assembleCatalogEntry, CatalogIntegrityError, parsePackageManifest } from '@/lib/catalog/assemble'
 import type { CatalogEntry, CatalogSummary, DeploymentRef } from '@/lib/catalog/types'
+import { GitLabPausedError, throughGate } from '@/lib/gitlab-gate'
 
 /**
  * Fetches a package (manifest + member files) straight from its git artifact
@@ -30,6 +31,9 @@ export class BundleError extends Error {
 }
 
 const FETCH_TIMEOUT_MS = 5000
+/** Packages kept; the oldest go first. */
+const KEPT_PACKAGES = 50
+const FAILURE_KEPT_MS = 60_000
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
 // Mirrors the parse boundary's allowlist (repo-list.ts) as defence in depth:
@@ -43,11 +47,14 @@ function rawUrl(repoUrl: string, ref: string, path: string): string {
 }
 
 async function fetchJson(url: string): Promise<unknown> {
-    const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    }).catch((error) => {
+    const response = await throughGate(url, { token: false }, () =>
+        fetch(url, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        }),
+    ).catch((error) => {
+        if (error instanceof GitLabPausedError) throw new BundleError(error.message, 503)
         throw new BundleError(
             `Bundle fetch failed: ${error instanceof Error ? error.message : url}`,
             502,
@@ -71,13 +78,41 @@ export interface FetchedCatalogEntry {
     commit: string
 }
 
+const fetched = new Map<string, { read: Promise<FetchedCatalogEntry>; failed?: true }>()
+
+export function resetBundleCacheForTests(): void {
+    fetched.clear()
+}
+
 /**
  * Fetches and assembles the package a catalogue row points at. Cross-checks
  * row against package manifest (id and version must match) so the listing
  * duplication in the index stays honest — a row that promises one package and
  * delivers another is refused, never installed.
+ *
+ * Kept per pin, as the files at a commit never change; every caller gets its
+ * own copy. A failure is kept a minute, so a broken package is not read
+ * again on every view; `retryFailed` (an install) reads it again at once.
  */
-export async function fetchCatalogEntry(summary: CatalogSummary): Promise<FetchedCatalogEntry> {
+export async function fetchCatalogEntry(summary: CatalogSummary, { retryFailed = false } = {}): Promise<FetchedCatalogEntry> {
+    const pin = summary.deploymentRef
+    const key = `${summary.id}@${summary.version}@${pin?.url}@${pin?.ref}@${pin?.path}`
+    let kept = fetched.get(key)
+    if (!kept || (retryFailed && kept.failed)) {
+        const fresh: { read: Promise<FetchedCatalogEntry>; failed?: true } = { read: readCatalogEntry(summary) }
+        fresh.read.catch(() => {
+            fresh.failed = true
+            setTimeout(() => {
+                if (fetched.get(key) === fresh) fetched.delete(key)
+            }, FAILURE_KEPT_MS).unref?.()
+        })
+        fetched.set(key, (kept = fresh))
+        while (fetched.size > KEPT_PACKAGES) fetched.delete(fetched.keys().next().value as string)
+    }
+    return structuredClone(await kept.read)
+}
+
+async function readCatalogEntry(summary: CatalogSummary): Promise<FetchedCatalogEntry> {
     const pin: DeploymentRef | undefined = summary.deploymentRef
     if (!pin) {
         throw new BundleError(`Catalogue row ${summary.id} has no source to fetch from`, 500)

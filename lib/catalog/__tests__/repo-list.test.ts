@@ -51,6 +51,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
 })
@@ -94,6 +96,50 @@ describe('repo-list', () => {
         expect(meta.stale).toBe(true)
         // Content survives: the last valid state is still served.
         expect(await getRepoListSummaries('usecase')).toHaveLength(1)
+    })
+
+    it('after a failure asks again only a minute later, and names the wait GitLab asked for', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        vi.useFakeTimers({ now: Date.parse('2026-10-30T12:00:00Z') })
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(jsonResponse(VALID_INDEX))
+            .mockRejectedValueOnce(new Error('network down'))
+            .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '600' } }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await getRepoListMeta()
+        vi.advanceTimersByTime(901_000)
+        expect((await getRepoListMeta()).stale).toBe(true)
+        await getRepoListMeta()
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+
+        vi.advanceTimersByTime(61_000)
+        const paused = await getRepoListMeta()
+        expect(fetchMock).toHaveBeenCalledTimes(3)
+        expect(paused).toMatchObject({ stale: true, pausedUntil: new Date(Date.now() + 600_000) })
+
+        vi.advanceTimersByTime(300_000)
+        expect(await getRepoListSummaries('usecase')).toHaveLength(1)
+        expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    it('names the wait where the marketplace held the request back itself, and asks once for views that ask together', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(VALID_INDEX))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await Promise.all([getRepoListMeta(), getRepoListSummaries('usecase'), getRepoListSummaries('usecase')])
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+
+        // The one request of the minute is used up: the next is not sent.
+        vi.stubEnv('GITLAB_REQUESTS_PER_MINUTE', '1')
+        expect(expireRepoListIfOlder({ version: '9.0.0' })).toBe(true)
+        const meta = await getRepoListMeta()
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+        expect(meta.stale).toBe(true)
+        expect(meta.pausedUntil).toBeInstanceOf(Date)
     })
 
     it('serves an empty catalogue on a cold start with an unreachable remote', async () => {

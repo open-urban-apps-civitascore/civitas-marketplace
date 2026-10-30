@@ -117,7 +117,7 @@ export async function findUseCaseByPath(
  * fixture files; remote: fetched from the pinned artifact repo. Returns
  * undefined for unknown ids; integrity failures throw (see bundle.ts).
  */
-export async function resolveCatalogEntry(id: string): Promise<CatalogEntry | undefined> {
+export async function resolveCatalogEntry(id: string, options: { retryFailed?: boolean } = {}): Promise<CatalogEntry | undefined> {
     // Packages the assistant generated are in no catalogue; they wait in its store.
     if (isAssistantEntryId(id)) return loadAssistantEntry(id)
     // After the install they are looked up by their package id, the one the journal records.
@@ -134,7 +134,7 @@ export async function resolveCatalogEntry(id: string): Promise<CatalogEntry | un
 
     const summary = await findRepoListSummary(id)
     if (!summary) return undefined
-    return (await fetchCatalogEntry(summary)).entry
+    return (await fetchCatalogEntry(summary, options)).entry
 }
 
 /** Listable add-ons. The fixtures carry none — an empty list is honest here. */

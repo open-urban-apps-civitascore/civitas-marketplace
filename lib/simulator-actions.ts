@@ -109,7 +109,7 @@ export async function reactivateDemoStreams(
 
     let entry
     try {
-        entry = await resolveCatalogEntry(catalogEntryId)
+        entry = await resolveCatalogEntry(catalogEntryId, { retryFailed: true })
     } catch (error) {
         return {
             status: 'error',

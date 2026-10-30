@@ -509,4 +509,6 @@ export interface CatalogMeta {
     origin: 'remote' | 'mock' | 'unconfigured' | 'unreachable'
     /** true = not live: last-known-good, unconfigured, or unreachable. */
     stale: boolean
+    /** GitLab asked to wait until then. */
+    pausedUntil?: Date
 }

@@ -15,6 +15,7 @@ import type {
     DeploymentRef,
     RepoListIndex,
 } from '@/lib/catalog/types'
+import { GitLabPausedError, pausedUntil, throughGate } from '@/lib/gitlab-gate'
 
 /**
  * The repo-list: a single git-hosted `index.json` (F-Droid model) that every
@@ -41,7 +42,7 @@ interface CacheEntry {
     stale: boolean
 }
 
-// The ultimate fallback: an empty catalogue. Never cached, so the next call retries.
+// The ultimate fallback: an empty catalogue. Never cached, so the next attempt retries.
 const EMPTY_INDEX: RepoListIndex = {
     version: '0.0.0',
     updatedAt: new Date(0).toISOString(),
@@ -52,13 +53,23 @@ const EMPTY_INDEX: RepoListIndex = {
 
 const DEFAULT_TTL_SECONDS = 900
 const FETCH_TIMEOUT_MS = 5000
+const RETRY_AFTER_FAILURE_MS = 60_000
 
 // Module-scoped: shared across requests within a server process, reset on deploy.
 let cache: CacheEntry | undefined
+/** After a failure no new attempt before this, so not every page view asks again. */
+let retryAt = 0
+/** Until when a refusal holds the next attempt back, for the hint. */
+let refusedUntil = 0
+/** The request under way, which views asking at the same time share. */
+let loading: Promise<CacheEntry> | undefined
 
 /** Test seam: clears the module-scoped cache between test cases. */
 export function resetRepoListCacheForTests(): void {
     cache = undefined
+    retryAt = 0
+    refusedUntil = 0
+    loading = undefined
 }
 
 function ttlMs(): number {
@@ -229,7 +240,7 @@ function emptyEntry(origin: 'unconfigured' | 'unreachable'): CacheEntry {
 
 async function loadIndex(): Promise<CacheEntry> {
     // Serve a fresh, healthy cache without touching the network. A stale entry
-    // is deliberately not short-circuited so we retry the remote next call.
+    // is retried, but not before `retryAt`.
     if (cache && !cache.stale && Date.now() - cache.fetchedAt.getTime() < ttlMs()) {
         return cache
     }
@@ -239,21 +250,33 @@ async function loadIndex(): Promise<CacheEntry> {
         // No repo-list configured — serve an empty catalogue (honest, non-crashing).
         return emptyEntry('unconfigured')
     }
+    if (Date.now() < retryAt) return cache ?? emptyEntry('unreachable')
+    loading ??= fetchIndex(url).finally(() => {
+        loading = undefined
+    })
+    return loading
+}
 
+async function fetchIndex(url: string): Promise<CacheEntry> {
     try {
-        const response = await fetch(url, {
-            headers: { Accept: 'application/json' },
-            // We run our own TTL cache; don't let the framework cache the response too.
-            cache: 'no-store',
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        })
+        const response = await throughGate(url, { token: false }, () =>
+            fetch(url, {
+                headers: { Accept: 'application/json' },
+                // We run our own TTL cache; don't let the framework cache the response too.
+                cache: 'no-store',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            }),
+        )
         if (!response.ok) {
             throw new Error(`repo-list responded ${response.status} ${response.statusText}`)
         }
         const index = parseRepoListIndex(await response.json())
         cache = { index, fetchedAt: new Date(), origin: 'remote', stale: false }
+        retryAt = refusedUntil = 0
         return cache
     } catch (error) {
+        refusedUntil = error instanceof GitLabPausedError ? error.until : 0
+        retryAt = refusedUntil || Date.now() + RETRY_AFTER_FAILURE_MS
         console.error(`[repo-list] fetch/validate failed for ${url}:`, error)
         // Last-known-good: keep serving the previous valid state, flagged stale.
         if (cache) return (cache = { ...cache, stale: true })
@@ -296,7 +319,9 @@ export function expireRepoListIfOlder(seen: { version?: unknown; updatedAt?: unk
 /** Freshness metadata for the "catalogue as of …" hint in the UI. */
 export async function getRepoListMeta(): Promise<CatalogMeta> {
     const { index, fetchedAt, origin, stale } = await loadIndex()
-    return { version: index.version, fetchedAt, origin, stale }
+    const url = repoListUrl()
+    const until = Math.max((url && pausedUntil(url, false)) || 0, refusedUntil)
+    return { version: index.version, fetchedAt, origin, stale, ...(until > Date.now() ? { pausedUntil: new Date(until) } : {}) }
 }
 
 /** Listable add-ons (revoked entries are hidden — tombstone convention). */

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { assembleCatalogEntry } from '@/lib/catalog/assemble'
-import { BundleError, fetchCatalogEntry } from '@/lib/catalog/bundle'
-import type { CatalogSummary } from '@/lib/catalog/types'
+import { BundleError, fetchCatalogEntry, resetBundleCacheForTests } from '@/lib/catalog/bundle'
+import { isDataStructureEntry, type CatalogSummary } from '@/lib/catalog/types'
 import { mockPackages } from '@/lib/mock-catalog'
 
 /**
@@ -51,7 +51,9 @@ function stubRepo(overrides: { manifest?: unknown; missing?: string; path?: stri
 }
 
 afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
+    resetBundleCacheForTests()
 })
 
 describe('fetchCatalogEntry', () => {
@@ -119,6 +121,39 @@ describe('fetchCatalogEntry', () => {
         const failure = await fetchCatalogEntry(SUMMARY).catch((error: unknown) => error)
         expect(failure).toBeInstanceOf(BundleError)
         expect((failure as BundleError).status).toBe(424)
+    })
+
+    it('keeps a package per pin: the next read asks nothing and gets a copy of its own; a failure is kept a minute', async () => {
+        vi.useFakeTimers()
+        stubRepo({ missing: 'zaehlung-zu-messung.mapping.json' })
+        await expect(fetchCatalogEntry(SUMMARY)).rejects.toBeInstanceOf(BundleError)
+
+        const fetchMock = stubRepo()
+        await expect(fetchCatalogEntry(SUMMARY)).rejects.toBeInstanceOf(BundleError)
+        expect(fetchMock).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(60_000)
+
+        const first = await fetchCatalogEntry(SUMMARY)
+        const asked = fetchMock.mock.calls.length
+        expect(asked).toBeGreaterThan(0)
+        if (isDataStructureEntry(first.entry)) throw new Error('a use case was expected')
+        first.entry.bundle.dataStructures.length = 0
+
+        const second = await fetchCatalogEntry(SUMMARY)
+        expect(fetchMock).toHaveBeenCalledTimes(asked)
+        expect(second.entry).toEqual(assembleCatalogEntry(traffic.manifest, (file) => traffic.files[file]))
+    })
+
+    it('reads a kept failure again at once for an install', async () => {
+        vi.useFakeTimers()
+        stubRepo({ missing: 'zaehlung-zu-messung.mapping.json' })
+        await expect(fetchCatalogEntry(SUMMARY)).rejects.toBeInstanceOf(BundleError)
+
+        stubRepo()
+        await expect(fetchCatalogEntry(SUMMARY)).rejects.toBeInstanceOf(BundleError)
+        expect((await fetchCatalogEntry(SUMMARY, { retryFailed: true })).commit).toBe(COMMIT)
+        // Kept from then on, for the views too.
+        expect((await fetchCatalogEntry(SUMMARY)).commit).toBe(COMMIT)
     })
 
     it('refuses a summary without a source pointer', async () => {

@@ -105,7 +105,7 @@ export async function installEntry(
 
     let entry: CatalogEntry | undefined
     try {
-        entry = typeof entryId === 'string' ? await resolveCatalogEntry(entryId) : undefined
+        entry = typeof entryId === 'string' ? await resolveCatalogEntry(entryId, { retryFailed: true }) : undefined
     } catch (error) {
         // A package that cannot be fetched or does not hang together must
         // fail loudly here — never install a half-assembled bundle.
@@ -476,7 +476,7 @@ export async function reimportDashboards(
 
     let entry: CatalogEntry | undefined
     try {
-        entry = await resolveCatalogEntry(installation.packageId)
+        entry = await resolveCatalogEntry(installation.packageId, { retryFailed: true })
     } catch (error) {
         return {
             status: 'error',

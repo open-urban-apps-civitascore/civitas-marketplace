@@ -1,6 +1,7 @@
 import { CloudOff, FlaskConical, RefreshCw } from 'lucide-react'
 
 import type { CatalogMeta } from '@/lib/catalog/types'
+import { pauseText } from '@/lib/gitlab-gate'
 
 const TIME_FORMAT = new Intl.DateTimeFormat('de-DE', {
     dateStyle: 'medium',
@@ -23,11 +24,13 @@ export function CatalogFreshness({ meta }: { meta: CatalogMeta }) {
         )
     }
 
+    const paused = meta.pausedUntil ? pauseText(meta.pausedUntil.getTime()) : undefined
+
     if (meta.origin === 'unconfigured' || meta.origin === 'unreachable') {
         return (
             <p className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">
                 <CloudOff className="size-3.5 shrink-0" />
-                Katalog-Quelle nicht erreichbar — der Katalog ist derzeit leer.
+                {paused ? `${paused} Bis dahin ist der Katalog leer.` : 'Katalog-Quelle nicht erreichbar — der Katalog ist derzeit leer.'}
             </p>
         )
     }
@@ -38,7 +41,7 @@ export function CatalogFreshness({ meta }: { meta: CatalogMeta }) {
                 <>
                     <CloudOff className="size-3.5 shrink-0" />
                     <span className="font-medium">
-                        Katalog-Quelle nicht erreichbar — letzter bekannter Stand:
+                        {paused ? `${paused} Letzter bekannter Stand:` : 'Katalog-Quelle nicht erreichbar — letzter bekannter Stand:'}
                     </span>
                 </>
             ) : (
