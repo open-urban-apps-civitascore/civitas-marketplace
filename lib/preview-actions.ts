@@ -26,7 +26,7 @@ export async function fetchSamplePreview(entryId: string): Promise<SamplePreview
 
     let entry
     try {
-        entry = await resolveCatalogEntry(entryId)
+        entry = await resolveCatalogEntry(entryId, { retryFailed: true })
     } catch (error) {
         return { status: 'error', detail: `Katalog-Eintrag nicht ladbar: ${String(error)}` }
     }
