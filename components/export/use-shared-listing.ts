@@ -34,11 +34,13 @@ export function useSharedListing(enabled: boolean) {
         fetchListing(controller.signal)
             .then((listing) => {
                 if (controller.signal.aborted) return
-                setRows(listing.rows)
+                // Nothing new to show: what is on screen stays.
+                setRows((shown) => (listing.error && !listing.rows.length && shown?.length ? shown : listing.rows))
                 setInstance(listing.instance)
                 setOlder(listing.older)
                 setError(listing.error)
-                if (!listing.error) setReadAt(new Date().toISOString())
+                if (listing.readAt) setReadAt(listing.readAt)
+                else if (!listing.error) setReadAt(new Date().toISOString())
             })
             .catch(() => {
                 if (controller.signal.aborted) return

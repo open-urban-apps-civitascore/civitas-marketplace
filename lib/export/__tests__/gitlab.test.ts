@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
     canPush,
@@ -60,8 +60,26 @@ describe('parseProjectUrl / canPush', () => {
     })
 })
 
+afterEach(() => {
+    vi.unstubAllEnvs()
+})
+
 describe('openMergeRequest', () => {
     const files = { 'packages/x/core-ir/manifest.json': '{}\n', 'packages/x/README.md': '# x\n' }
+
+    it('reads on between its writes when the minute is used up, as part of an action', async () => {
+        vi.stubEnv('GITLAB_REQUESTS_PER_MINUTE', '1')
+        const gl = fakeGitLab([
+            ['GET', '/projects/10/merge_requests', []],
+            ['GET', '/projects/10/repository/branches/export%2Fx-1.0.0', new Response('', { status: 404 })],
+            ['GET', '/projects/10/repository/branches/main', { commit: { id: 'abc' } }],
+            ['POST', '/projects/10/repository/commits', { id: 'def' }],
+            ['POST', '/projects/10/merge_requests', { iid: 7, web_url: 'https://gitlab.example/mr/7', state: 'opened', source_branch: 'export/x-1.0.0' }],
+        ])
+        const input = { upstream: upstream(40), baseBranch: 'main', branch: 'export/x-1.0.0', title: 'Export', description: 'body', files, existingPaths: new Set<string>() }
+        const acting = { ...clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), acting: true }
+        expect(await openMergeRequest(acting, input)).toMatchObject({ status: 'created', iid: 7 })
+    })
 
     it('commits straight onto the upstream when the token may push', async () => {
         const gl = fakeGitLab([

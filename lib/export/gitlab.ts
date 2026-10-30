@@ -2,6 +2,7 @@
 
 import { sinceStart, startedOver } from '@/lib/export/declines'
 import { declineReasonOf, withdrawalMarkIn, withdrawalNoteIn, type DeclineReason } from '@/lib/export/merge-request-text'
+import { GitLabPausedError, throughGate } from '@/lib/gitlab-gate'
 
 export class GitLabError extends Error {
     constructor(
@@ -26,6 +27,7 @@ export class HeldBranchError extends GitLabError {
 export function gitlabMessage(error: GitLabError): string {
     switch (error.status) {
         case 0:
+        case 429:
             return error.message
         case 401:
             return 'GitLab lehnt den hinterlegten Token ab (401) - ungültig oder abgelaufen.'
@@ -46,6 +48,8 @@ export interface GitLabClient {
     cache?: GitLabReadCache
     /** Reads only; writes never time out. */
     timeoutMs?: number
+    /** Part of an action that writes: its reads are never held back, see `throughGate`. */
+    acting?: boolean
 }
 
 /** Reads only: giving up on a write would not undo it, only hide whether it happened. */
@@ -97,6 +101,10 @@ const isTimeout = (cause: unknown) => cause instanceof Error && cause.name === '
 
 function bodyFailure(client: GitLabClient, cause: unknown): unknown {
     return isTimeout(cause) ? unreachable(client, cause) : cause
+}
+
+function failure(client: GitLabClient, cause: unknown): GitLabError {
+    return cause instanceof GitLabPausedError ? new GitLabError(cause.message, 429) : unreachable(client, cause)
 }
 
 function unreachable(client: GitLabClient, cause: unknown): GitLabError {
@@ -175,20 +183,23 @@ async function gl<T>(
 ): Promise<T> {
     const doFetch = client.fetchImpl ?? fetch
     const method = init?.method ?? 'GET'
+    const url = `${client.apiBase}${path}`
     let response: Response
     try {
-        response = await doFetch(`${client.apiBase}${path}`, {
-            method,
-            headers: {
-                'PRIVATE-TOKEN': client.token,
-                ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-            },
-            body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-            cache: 'no-store',
-            signal: readSignal(client, method),
-        })
+        response = await throughGate(url, { token: true, acting: client.acting || method !== 'GET' }, () =>
+            doFetch(url, {
+                method,
+                headers: {
+                    'PRIVATE-TOKEN': client.token,
+                    ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+                },
+                body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+                cache: 'no-store',
+                signal: readSignal(client, method),
+            }),
+        )
     } catch (cause) {
-        throw unreachable(client, cause)
+        throw failure(client, cause)
     }
     if (response.status === 404) {
         throw new GitLabError(`nicht gefunden: ${path}`, 404)
@@ -332,14 +343,14 @@ export function readFile(
 ): Promise<string | undefined> {
     return readOnce(client, `file|${projectId}|${path}|${ref}`, COMMIT_SHA.test(ref), async () => {
         const doFetch = client.fetchImpl ?? fetch
+        const url = `${client.apiBase}/projects/${projectId}/repository/files/${encode(path)}/raw?ref=${encode(ref)}`
         let response: Response
         try {
-            response = await doFetch(
-                `${client.apiBase}/projects/${projectId}/repository/files/${encode(path)}/raw?ref=${encode(ref)}`,
-                { headers: { 'PRIVATE-TOKEN': client.token }, cache: 'no-store', signal: readSignal(client, 'GET') },
+            response = await throughGate(url, { token: true, acting: client.acting }, () =>
+                doFetch(url, { headers: { 'PRIVATE-TOKEN': client.token }, cache: 'no-store', signal: readSignal(client, 'GET') }),
             )
         } catch (cause) {
-            throw unreachable(client, cause)
+            throw failure(client, cause)
         }
         if (response.status === 404) return undefined
         if (!response.ok) {

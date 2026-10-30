@@ -194,6 +194,13 @@ afterEach(() => {
 describe('deleting a version that waits for review', () => {
     const waiting = () => world({ exportMrs: [mr(4, 'opened', 'export/pegel-1.0.0', { title: 'Export use case: Pegelkarte 1.0.0' })] })
 
+    it('withdraws all the same when the minute is used up: an action is never stopped halfway', async () => {
+        vi.stubEnv('GITLAB_REQUESTS_PER_MINUTE', '1')
+        const { result, calls } = await planAndDelete(waiting(), 'pegel', '1.0.0')
+        expect(result).toMatchObject({ status: 'ok' })
+        expect(sent(calls)).toHaveLength(3)
+    })
+
     it('withdraws the merge request: the close first, then a note on whose behalf, then its branch', async () => {
         const { plan, result, calls } = await planAndDelete(waiting(), 'pegel', '1.0.0')
         expect(plan).toMatchObject({ kind: 'withdraw', closes: [{ what: 'bundle', ref: '!4', url: `${WEB}/-/merge_requests/4` }], proposedBy: 'Ewa' })

@@ -75,4 +75,19 @@ describe('fetchAddonPackage', () => {
         expect(commit).toBe(SHA)
         expect(Object.keys(files).sort()).toEqual(['charts/values.yaml', 'civitas-component.yaml'])
     })
+
+    it('gives up on a read that stalls, so it does not hold a place in the gate', async () => {
+        const timedOut = new AbortController()
+        const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timedOut.signal)
+        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))),
+        ))
+        const failure = fetchAddonPackage(SHA_REF).catch((error: unknown) => error)
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+        timedOut.abort(new DOMException('timed out', 'TimeoutError'))
+
+        expect(await failure).toBeInstanceOf(PackageFetchError)
+        expect(timeout).toHaveBeenCalledWith(10_000)
+        timeout.mockRestore()
+    })
 })

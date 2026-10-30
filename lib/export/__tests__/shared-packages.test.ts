@@ -7,7 +7,8 @@ import type { MergeRequestNote } from '@/lib/export/gitlab'
 import { inProgressItems, rowProgress } from '@/lib/export/in-progress-items'
 import { shareSourceLine, withdrawalMark } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
-import { olderProposalsUrl, readShareListing, servesSameIndex } from '@/lib/export/share-listing'
+import { olderProposalsUrl, readShareListing, resetShareListingForTests, servesSameIndex } from '@/lib/export/share-listing'
+import { resetGitLabGateForTests } from '@/lib/gitlab-gate'
 import { shareTabs } from '@/lib/export/share-tabs'
 
 const HEAD = 'f'.repeat(40)
@@ -119,9 +120,11 @@ beforeEach(() => {
     vi.stubEnv('PORTAL_URL', 'https://portal.hier.example')
     SHARE_READS.clear()
     resetRepoListCacheForTests()
+    resetShareListingForTests()
 })
 
 afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
 })
@@ -176,7 +179,7 @@ describe('readShareListing', () => {
         gitlab.calls.length = 0
         const second = await readShareListing()
 
-        expect(second).toEqual(first)
+        expect(second).toEqual({ ...first, readAt: second.readAt })
         // Kept: what the base head, a merged commit and a merged request hold, and the READMEs at their commits.
         expect(count(gitlab.calls, 'manifest.json')).toBe(0)
         expect(count(gitlab.calls, 'README.md')).toBe(0)
@@ -348,6 +351,41 @@ describe('readShareListing', () => {
         const { rows, error } = await readShareListing()
         expect(rows).toEqual([])
         expect(error).toContain('500')
+    })
+
+    it('shows the last complete reading while GitLab asks to wait, with when it was read, and asks nothing meanwhile', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        vi.stubGlobal('fetch', fakeGitLab().fetchImpl)
+        const first = await readShareListing()
+        expect(first.readAt).toBeDefined()
+
+        const refusing = vi.fn(async () => new Response('{"message":"Rate limit exceeded"}', { status: 429, headers: { 'Retry-After': '300' } }))
+        vi.stubGlobal('fetch', refusing)
+        expect(await readShareListing()).toEqual({ ...first, error: 'GitLab bremst gerade - in etwa 5 Minuten geht es weiter.' })
+
+        const asked = refusing.mock.calls.length
+        expect((await readShareListing()).rows).toEqual(first.rows)
+        expect(refusing).toHaveBeenCalledTimes(asked)
+    })
+
+    it('keeps a partial reading only while there is no complete one', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const refusing = async () => new Response('{"message":"Rate limit exceeded"}', { status: 429, headers: { 'Retry-After': '300' } })
+
+        vi.stubGlobal('fetch', fakeGitLab(['manifest.json']).fetchImpl)
+        const partial = await readShareListing()
+        expect(partial.rows.some((row) => row.problem)).toBe(true)
+        vi.stubGlobal('fetch', vi.fn(refusing))
+        expect((await readShareListing()).rows).toEqual(partial.rows)
+
+        resetGitLabGateForTests()
+        vi.stubGlobal('fetch', fakeGitLab().fetchImpl)
+        const complete = await readShareListing()
+        SHARE_READS.clear()
+        vi.stubGlobal('fetch', fakeGitLab(['manifest.json']).fetchImpl)
+        expect((await readShareListing()).rows.some((row) => row.problem)).toBe(true)
+        vi.stubGlobal('fetch', vi.fn(refusing))
+        expect((await readShareListing()).rows).toEqual(complete.rows)
     })
 })
 
@@ -710,6 +748,7 @@ describe('how much is listed', () => {
             return new Response(JSON.stringify({ message: `404 ${path}` }), { status: 404 })
         }) as typeof fetch
         vi.stubGlobal('fetch', fetchImpl)
+        vi.stubEnv('GITLAB_REQUESTS_PER_MINUTE', '10000')
 
         const first = await readShareListing()
         expect(first.rows).toHaveLength(300)
@@ -717,7 +756,8 @@ describe('how much is listed', () => {
         expect(SHARE_READS.size).toBeGreaterThan(1000)
 
         calls.length = 0
-        expect(await readShareListing()).toEqual(first)
+        const second = await readShareListing()
+        expect(second).toEqual({ ...first, readAt: second.readAt })
         // Three pages of proposals, the base head, the open requests and the index: nothing kept was pushed out.
         expect(calls).toHaveLength(6)
     })

@@ -87,6 +87,17 @@ export interface ShareListing {
     /** Link to older proposals at GitLab; set only where the listing was cut at `AUTHOR_PAGES`. */
     older?: string
     error?: string
+    /** When the rows were read; older than now where GitLab asked to wait and the last reading is shown. */
+    readAt?: string
+}
+
+/** The last reading, shown while GitLab asks to wait; a partial one only until there is a complete one. */
+let lastRead: Pick<ShareListing, 'rows' | 'older' | 'readAt'> | undefined
+let lastComplete = false
+
+export function resetShareListingForTests(): void {
+    lastRead = undefined
+    lastComplete = false
 }
 
 export function olderProposalsUrl(projectUrl: string, account: string): string {
@@ -176,10 +187,17 @@ export async function readShareListing(config: ExportConfig = exportConfig()): P
         // Before `olderOf`: the catalogue's proposals can be cut too.
         await catalog.catch(() => undefined)
         const older = olderOf(visit, config.targets)
-        return { rows, ...named, ...(older ? { older } : {}) }
+        const read = { rows, ...(older ? { older } : {}), readAt: new Date().toISOString() }
+        const complete = !rows.some((row) => row.problem)
+        if (complete || !lastComplete) {
+            lastRead = read
+            lastComplete = complete
+        }
+        return { ...read, ...named }
     } catch (error) {
-        if (error instanceof GitLabError) return { rows: [], ...named, error: gitlabMessage(error) }
-        throw error
+        if (!(error instanceof GitLabError)) throw error
+        const kept = error.status === 429 && lastRead ? lastRead : { rows: [] }
+        return { ...kept, ...named, error: gitlabMessage(error) }
     }
 }
 
