@@ -1,3 +1,4 @@
+import { GitLabPausedError, throughGate } from '@/lib/gitlab-gate'
 import type { AddonPackage, PackageFile } from '@/lib/package-file'
 import type { AddonPackageRef } from './listing'
 
@@ -23,6 +24,20 @@ import type { AddonPackageRef } from './listing'
 const API = 'https://gitlab.com/api/v4/projects'
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i
+
+/** Also covers the body; a stalled read would hold one of the gate's few slots. */
+export const READ_TIMEOUT_MS = 10_000
+
+async function send(url: string): Promise<Response> {
+    try {
+        return await throughGate(url, { token: false }, () =>
+            fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(READ_TIMEOUT_MS) }),
+        )
+    } catch (cause) {
+        if (cause instanceof GitLabPausedError) throw new PackageFetchError(cause.message, 429)
+        throw new PackageFetchError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
+    }
+}
 
 /**
  * Guards against a repository that would blow up a pull request. Generous
@@ -69,13 +84,7 @@ export async function resolvePinnedCommit(ref: AddonPackageRef): Promise<string>
 }
 
 async function gitlab<T>(project: string, path: string): Promise<T> {
-    const url = `${API}/${encodeURIComponent(project)}${path}`
-    let response: Response
-    try {
-        response = await fetch(url, { cache: 'no-store' })
-    } catch (cause) {
-        throw new PackageFetchError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
-    }
+    const response = await send(`${API}/${encodeURIComponent(project)}${path}`)
     if (!response.ok) {
         throw new PackageFetchError(
             `GitLab antwortete mit ${response.status} für ${project}`,
@@ -133,12 +142,7 @@ async function readPackageFile(
         `${API}/${encodeURIComponent(ref.project)}/repository/files/` +
         `${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref.ref)}`
 
-    let response: Response
-    try {
-        response = await fetch(url, { cache: 'no-store' })
-    } catch (cause) {
-        throw new PackageFetchError(`GitLab ist nicht erreichbar: ${String(cause)}`, 0)
-    }
+    const response = await send(url)
     if (!response.ok) {
         throw new PackageFetchError(
             `Datei ${path} konnte nicht gelesen werden (${response.status})`,

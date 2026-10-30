@@ -1,7 +1,8 @@
 import { parse } from 'yaml'
 
+import { throughGate } from '@/lib/gitlab-gate'
 import type { AddonPackageRef } from './listing'
-import { resolvePinnedCommit } from './package-source'
+import { READ_TIMEOUT_MS, resolvePinnedCommit } from './package-source'
 
 
 
@@ -29,18 +30,31 @@ type Node = Record<string, unknown>
 const isNode = (value: unknown): value is Node =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
 
+/** A read that failed for now; unlike a missing file, it is not kept. */
+const UNREAD = Symbol('unread')
+
 async function readYaml(ref: AddonPackageRef, file: string): Promise<unknown> {
     const path = ref.path === '.' ? file : `${ref.path.replace(/\/+$/, '')}/${file}`
     const url =
         `${API}/${encodeURIComponent(ref.project)}/repository/files/` +
         `${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref.ref)}`
 
+    let text: string
     try {
-        const response = await fetch(url, { cache: 'no-store' })
-        if (!response.ok) return undefined
-        return parse(await response.text())
+        const response = await throughGate(url, { token: false }, () =>
+            fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(READ_TIMEOUT_MS) }),
+        )
+        if (response.status === 404) return undefined
+        if (!response.ok) return UNREAD
+        text = await response.text()
     } catch {
         // A package that cannot be read costs the page a section, nothing more.
+        return UNREAD
+    }
+    try {
+        return parse(text)
+    } catch {
+        // Broken at its commit for good: read, with nothing in it.
         return undefined
     }
 }
@@ -99,12 +113,13 @@ export async function fetchAddonPackageFacts(ref: AddonPackageRef): Promise<Addo
     if (!commit) return EMPTY
     const pinned: AddonPackageRef = { ...ref, ref: commit }
 
-    const [component, keycloak, images, charts] = await Promise.all([
+    const reads = await Promise.all([
         readYaml(pinned, 'civitas-component.yaml'),
         readYaml(pinned, 'keycloak-clients.yaml'),
         readYaml(pinned, 'images.yaml'),
         readYaml(pinned, 'charts.yaml'),
     ])
+    const [component, keycloak, images, charts] = reads.map((read) => (read === UNREAD ? undefined : read))
 
     const facts: AddonPackageFacts = {
         parts: readParts(component),
@@ -130,7 +145,7 @@ export async function fetchAddonPackageFacts(ref: AddonPackageRef): Promise<Addo
         ),
     }
 
-    cache.set(key, facts)
+    if (!reads.includes(UNREAD)) cache.set(key, facts)
     return facts
 }
 

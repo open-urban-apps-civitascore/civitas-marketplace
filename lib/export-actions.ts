@@ -122,7 +122,7 @@ interface ExportForm {
 
 /** Cached reads (`SHARE_READS`); lists of proposals and reads at a branch stay fresh. */
 function shareClient(url: string, token: string): GitLabClient {
-    return { ...clientFor(url, token), cache: SHARE_READS }
+    return { ...clientFor(url, token), cache: SHARE_READS, acting: true }
 }
 
 const SLUG = useCaseSlugPattern

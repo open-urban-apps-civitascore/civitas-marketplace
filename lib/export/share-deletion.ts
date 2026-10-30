@@ -104,7 +104,7 @@ async function readCatalogSide(
     target: { client: GitLabClient; project: GitLabProject },
 ) {
     const same = clientFor(repo.url, token).apiBase === target.client.apiBase && parseProjectUrl(repo.url).projectPath === target.project.path_with_namespace
-    const client: GitLabClient = same ? target.client : { ...clientFor(repo.url, token), cache: SHARE_READS }
+    const client: GitLabClient = same ? target.client : { ...clientFor(repo.url, token), cache: SHARE_READS, acting: true }
     const project = same ? target.project : await getProject(client, parseProjectUrl(repo.url).projectPath)
     const [requests, index] = await Promise.all([
         findMergeRequests(client, project.id, catalogBranch(slug, version)),
@@ -172,7 +172,7 @@ export async function readDeletion(
     requestedBy: string,
     scope: DeletionScope = 'proposal',
 ): Promise<{ plan: DeletionPlan; work: DeletionWork; alternative?: DeletionPlan }> {
-    const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS }
+    const client: GitLabClient = { ...clientFor(target.url, token), cache: SHARE_READS, acting: true }
     const project = await getProject(client, parseProjectUrl(target.url).projectPath)
     const [bot, requests, removals] = await Promise.all([
         currentUser(client),

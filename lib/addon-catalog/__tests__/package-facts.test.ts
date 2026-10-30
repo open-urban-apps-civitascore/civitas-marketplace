@@ -30,6 +30,27 @@ describe('fetchAddonPackageFacts', () => {
         expect(yamlReads).toHaveLength(4)
     })
 
+    it('reads again after a read that failed, but keeps facts where files are only missing or broken', async () => {
+        const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const pinned = ref({ ref: 'a'.repeat(40) })
+
+        await fetchAddonPackageFacts(pinned)
+        await fetchAddonPackageFacts(pinned)
+        expect(fetchMock).toHaveBeenCalledTimes(8)
+
+        fetchMock.mockImplementation(async () => new Response('not there', { status: 404 }))
+        await fetchAddonPackageFacts(pinned)
+        await fetchAddonPackageFacts(pinned)
+        expect(fetchMock).toHaveBeenCalledTimes(12)
+
+        const broken = ref({ ref: 'b'.repeat(40) })
+        fetchMock.mockImplementation(async () => new Response('parts: [unclosed', { status: 200 }))
+        await fetchAddonPackageFacts(broken)
+        await fetchAddonPackageFacts(broken)
+        expect(fetchMock).toHaveBeenCalledTimes(16)
+    })
+
     it('returns empty facts for a non-commit pin — nothing is read at a mutable ref', async () => {
         const fetchMock = vi.fn()
         vi.stubGlobal('fetch', fetchMock)
