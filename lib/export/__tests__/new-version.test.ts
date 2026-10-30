@@ -24,6 +24,7 @@ import {
     followsRefOf,
     nameTakenIn,
     openSharesOf,
+    packageRows,
     parseFollows,
     proposedHere,
     proposedVersionsIn,
@@ -120,7 +121,10 @@ const removed = (number: string, iid: number, listedOnce = false) =>
     })
 
 /** The listing as „Auswählen“ gets it: the rows, and what the tab rules make busy. */
-const facts = (rows: SharedPackageRow[]): ListingFacts => ({ rows, busy: shareTabs(rows, { instance: HERE, person: 'Ewa', now: NOW }).busy, instance: HERE })
+const facts = (rows: SharedPackageRow[]): ListingFacts => {
+    const tabs = shareTabs(rows, { instance: HERE, person: 'Ewa', now: NOW })
+    return { rows, busy: tabs.busy, open: tabs.openByPackage, instance: HERE }
+}
 const pkgOf = (rows: SharedPackageRow[]) => sharedPackageOf(rows, { datasetId: 'ds-baeume' }, HERE)
 const DATASET: ExportSource = { id: 'ds-baeume', name: 'Baumkataster Mitte' }
 
@@ -250,7 +254,9 @@ describe('the "no" a new version follows (R7)', () => {
         const local = inReview('1.1.5', 40, { ...sourced(THERE), proposals: [proposal('bundle', 40, 'opened', sourced(THERE))] })
         const rows = [local, entryTurnedDown('1.1.4', 6), listed('1.1.3', 2)]
         expect(followedDecline(pkgOf(rows), HERE)).toMatchObject({ version: '1.1.4', kind: 'entry', decline: { iid: 32 } })
-        expect(datasetStage(DATASET, facts(rows))).toMatchObject({ kind: 'declined', followed: { version: '1.1.4' } })
+        // Not shareable while local's 1.1.5 is open: it writes into the same folder.
+        expect(datasetStage(DATASET, facts(rows))).toMatchObject({ kind: 'busy' })
+        expect(datasetStage(DATASET, facts(rows.slice(1)))).toMatchObject({ kind: 'declined', followed: { version: '1.1.4' } })
         // Its version counts for the one to take all the same (R6).
         expect(suggestedVersion(pkgOf(rows))).toBe('1.1.6')
     })
@@ -347,10 +353,11 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         expect(stageNotice(datasetStage(DATASET, facts([noCatalogue])), DATASET.name)?.text).toBe(
             'Für „Baumkataster Mitte“ ist Version 1.1.0 angenommen, steht aber noch nicht im Katalog. Unter „In Arbeit“ teilst du eine neue Version.',
         )
-        // „Neue Version teilen“ on its row names it; a link naming the same number of another package does not.
+        // „Neue Version teilen“ on its row names it; a link to another package of the dataset goes into another folder.
         expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0', slug: 'baeume' } }).kind).toBe('none')
         expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0' } }).kind).toBe('none')
-        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0', slug: 'anderes' } }).kind).toBe('busy')
+        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.0.0', slug: 'baeume' } }).kind).toBe('busy')
+        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.0', slug: 'anderes' } }).kind).not.toBe('busy')
         expect(datasetStage(DATASET, facts(rows), { started: true }).kind).toBe('none')
         expect(blockingRows(undefined)).toEqual([])
     })
@@ -364,14 +371,51 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         const start = wizardStart(DATASET, facts(rows), opening, ['t'])
         expect(start.stage).toMatchObject({ kind: 'declined', followed: { version: '1.1.1', kind: 'package' } })
         expect(start.suggested).toBe('1.1.2')
-        // A link from a lower version, or another package, still finds it busy; and so does any link while a proposal is open.
+        // A link from a lower version still finds it busy; and so does any link while a proposal is open.
         expect(datasetStage(DATASET, facts(rows), { from: { version: '1.0.0', slug: 'baeume' } }).kind).toBe('busy')
-        expect(datasetStage(DATASET, facts(rows), { from: { version: '1.1.1', slug: 'anderes' } }).kind).toBe('busy')
         expect(datasetStage(DATASET, facts([inReview('1.1.0', 2)]), opening).kind).toBe('busy')
     })
 
     it('greys out one whose removal was turned down, like any accepted version (S8)', () => {
         expect(stageHint(datasetStage(DATASET, facts([removalTurnedDown('1.0.0', 1)])))).toBe('In Arbeit (1.0.0) - nicht wählbar')
+    })
+
+    it('counts only the package the share goes into: a dataset shared as two packages is busy for one, not the other', () => {
+        // Demo, 30.10.: „Jungbaumbewässerung Musterbach“ was also shared as the test package „jungbaum-test“, whose entry is open.
+        const dataset: ExportSource = { id: 'ds-baeume', name: 'Baeume' }
+        const openEntry = proposal('catalog', 30, 'opened', { createdAt: '2026-10-17T10:00:00Z' })
+        const other = version('1.0.0', 7, 'merged', {
+            key: 't#export/test-1.0.0',
+            slug: 'test',
+            displayName: 'Test',
+            bundle: onBase,
+            catalog: { state: 'mr-open', mrUrl: `${WEB}/30` },
+            proposals: [openEntry, proposal('bundle', 7, 'merged')],
+        })
+        const rows = [other, entryTurnedDown('1.1.4', 6)]
+        // Without a link, the share goes into the package named like the dataset, though the other one moved last.
+        const plain = datasetStage(dataset, facts(rows))
+        expect(plain).toMatchObject({ kind: 'declined', followed: { version: '1.1.4', kind: 'entry' } })
+        expect(stageHint(plain)).toBe('Katalog-Eintrag für 1.1.4 nicht angenommen - du teilst eine neue Version')
+        // „Neue Version teilen“ on the 1.1.4 row: free; on the other package's row: busy, as its entry is in review.
+        expect(datasetStage(dataset, facts(rows), { from: { version: '1.1.4', slug: 'baeume' } }).kind).toBe('declined')
+        expect(datasetStage(dataset, facts(rows), { from: { version: '1.0.0', slug: 'test' } }).kind).toBe('busy')
+        expect(wizardStart(dataset, facts(rows), {}, ['t'])).toMatchObject({ pkg: { slug: 'baeume' }, suggested: '1.1.5' })
+        expect(sharedPackageOf(rows, { datasetId: 'ds-baeume', slug: 'test' })?.slug).toBe('test')
+    })
+
+    it('counts an open proposal of the package from another dataset or instance too, as the server refuses it there', () => {
+        const fromThere = inReview('1.3.0', 9, sourced(THERE, 'ds-dort'))
+        const stage = datasetStage(DATASET, facts([listed('1.0.0', 1), fromThere]))
+        expect(stage.kind).toBe('busy')
+        // „In Arbeit“ does not list it here: followed at GitLab.
+        expect(stageNotice(stage, DATASET.name)).toMatchObject({
+            text: expect.stringMatching(/^Für das Paket „baeume“ läuft schon ein Vorschlag von einer anderen Instanz \(Version 1\.3\.0, /),
+            link: { label: 'Vorschlag bei GitLab', href: `${WEB}/9`, external: true },
+        })
+        expect(datasetStage(DATASET, facts([listed('1.0.0', 1), inReview('1.3.0', 9, sourced(HERE, 'ds-andere'))])).kind).toBe('busy')
+        const beside = busyBeside(packageRows(facts([listed('1.0.0', 1), fromThere]), DATASET.id, 'Baeume'), { targetKey: 't', slug: 'baeume', version: '1.4.0' })
+        expect(beside.map((tabbed) => tabbed.row.version)).toEqual(['1.3.0'])
     })
 
     it('keeps one whose package or entry was turned down a choice: the way on is a new version', () => {
@@ -584,7 +628,9 @@ describe('a busy dataset at the Steckbrief and the preview (a link or a race)', 
     it('counts the proposals open beside the form’s own, not the version it submitted, nor one accepted without an entry', () => {
         const tabbed = facts([inReview('1.1.0', 2), inReview('1.2.0', 3), accepted('1.0.0', 1)]).busy.get('ds-baeume') ?? []
         expect(busyBeside(tabbed, { targetKey: 't', slug: 'Baeume', version: '1.2.0' }).map((row) => row.row.version)).toEqual(['1.1.0'])
-        expect(busyBeside(tabbed, { targetKey: 'anderswo', slug: 'baeume', version: '1.2.0' }).map((row) => row.row.version)).toEqual(['1.1.0', '1.2.0'])
+        // Another place, or another package of the dataset, is another folder.
+        expect(busyBeside(tabbed, { targetKey: 'anderswo', slug: 'baeume', version: '1.2.0' })).toEqual([])
+        expect(busyBeside(tabbed, { targetKey: 't', slug: 'anderes', version: '1.0.0' })).toEqual([])
         expect(BUSY_BLOCKER).toBe('Einreichen geht erst, wenn über den anderen Vorschlag entschieden ist.')
     })
 })
@@ -626,26 +672,23 @@ describe('the server’s side', () => {
         ...facts,
     })
 
-    it('finds the account’s open proposals of a dataset - package, entry or removal - from this instance or one that names none', () => {
+    it('finds the account’s open proposals of one package - package, entry or removal - whoever shared them', () => {
         const requests = [
             request(1, 'export/baeume-1.1.0'),
             request(2, 'catalog/baeume-1.0.0'),
-            request(3, 'remove/baeume-0.9.0', { description: shareSourceLine({ kind: 'dataset', id: 'ds-baeume' }) }),
-            // Not counted: closed, by someone else, another dataset, another instance, no source line, a branch not the marketplace's.
-            request(4, 'export/baeume-1.2.0', { state: 'closed' }),
-            request(5, 'export/baeume-1.3.0', { author: { id: 7 } }),
-            request(6, 'export/baeume-1.4.0', { description: shareSourceLine({ kind: 'dataset', id: 'ds-anders', instance: HERE }) }),
-            request(7, 'export/baeume-1.5.0', { description: shareSourceLine({ kind: 'dataset', id: 'ds-baeume', instance: THERE }) }),
-            request(8, 'export/baeume-1.6.0', { description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.' }),
-            request(9, 'feature/baeume-1.7.0'),
+            // The same folder, so counted too: another instance's, and one older than the source line.
+            request(3, 'remove/baeume-0.9.0', { description: shareSourceLine({ kind: 'dataset', id: 'ds-baeume', instance: THERE }) }),
+            request(4, 'export/baeume-1.6.0', { description: 'Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.' }),
+            // Not counted: closed, by someone else, another package of the same dataset, a branch not the marketplace's.
+            request(5, 'export/baeume-1.2.0', { state: 'closed' }),
+            request(6, 'export/baeume-1.3.0', { author: { id: 7 } }),
+            request(7, 'catalog/test-1.0.0'),
+            request(8, 'feature/baeume-1.7.0'),
         ]
-        expect(openSharesOf(requests, 'ds-baeume', BOT, HERE)).toEqual([
-            { kind: 'bundle', slug: 'baeume', version: '1.1.0', iid: 1, url: `${WEB}/1` },
-            { kind: 'catalog', slug: 'baeume', version: '1.0.0', iid: 2, url: `${WEB}/2` },
-            { kind: 'removal', slug: 'baeume', version: '0.9.0', iid: 3, url: `${WEB}/3` },
-        ])
-        expect(busyRefusal(openSharesOf(requests, 'ds-baeume', BOT, HERE)[1])).toBe(
-            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.0.0, Eintrags-Prüfung, Vorschlag !2). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
+        expect(openSharesOf(requests, 'Baeume', BOT).map((open) => open.iid)).toEqual([1, 2, 3, 4])
+        expect(openSharesOf(requests, 'baeume', BOT)[1]).toEqual({ kind: 'catalog', slug: 'baeume', version: '1.0.0', iid: 2, url: `${WEB}/2` })
+        expect(busyRefusal(openSharesOf(requests, 'baeume', BOT)[1])).toBe(
+            'Nicht eingereicht: Für dieses Paket läuft schon ein Vorschlag (Version 1.0.0, Eintrags-Prüfung, Vorschlag !2). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
         )
     })
 

@@ -206,6 +206,8 @@ export interface ShareTabs {
     elsewhere: Record<ShareTab, number>
     /** Datasets „Auswählen“ greys out: submitted, not in the catalogue yet; see `FREE_TO_CHOOSE`. */
     busy: ReadonlyMap<string, TabRow[]>
+    /** Open proposals per package short name, from any dataset and instance: the server refuses a share beside them. */
+    openByPackage: ReadonlyMap<string, TabRow[]>
     counts: {
         /** Includes the started shares (`drafts`). */
         inProgress: number
@@ -380,6 +382,10 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         if (!datasetId || FREE_TO_CHOOSE.has(tabbed.outcome) || entryUsedUp(tabbed.outcome, tabbed.row)) continue
         busy.set(datasetId, [...(busy.get(datasetId) ?? []), tabbed])
     }
+    const openByPackage = new Map<string, TabRow[]>()
+    for (const entry of read) {
+        if (OPEN_OUTCOMES.has(entry.outcome)) openByPackage.set(entry.row.slug, [...(openByPackage.get(entry.row.slug) ?? []), tabRow(entry)])
+    }
 
     return {
         inProgress,
@@ -387,6 +393,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         ended,
         elsewhere,
         busy,
+        openByPackage,
         counts: {
             inProgress: inProgress.length + drafts,
             published: published.length,

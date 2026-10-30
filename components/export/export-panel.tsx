@@ -21,6 +21,7 @@ import {
     followedDecline,
     followsRefOf,
     nameTakenIn,
+    packageRows,
     sharedPackageOf,
     stageNotice,
     startingBasics,
@@ -85,7 +86,7 @@ function listingStateOf(enabled: boolean, view: ReturnType<typeof useShareView>)
     if (!enabled) return NOTHING_READ
     if (view.rows === null) return { state: 'loading' }
     if (view.error) return { state: 'failed' }
-    return { state: 'read', rows: view.rows, busy: view.tabs.busy, ...(view.instance ? { instance: view.instance } : {}) }
+    return { state: 'read', rows: view.rows, busy: view.tabs.busy, open: view.tabs.openByPackage, ...(view.instance ? { instance: view.instance } : {}) }
 }
 
 interface FillState {
@@ -392,7 +393,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const followed = (heard?.key === packageKey ? heard.followed : undefined) ?? (listing ? followedDecline(formPackage, listing.instance) : undefined)
     const whatChanged = asksWhatChanged(followed, basics.version) ? followed : undefined
     const wayOn = suggestedVersion(formPackage, [basics.version])
-    const beside = listing ? busyBeside(listing.busy.get(source.id) ?? [], { targetKey, slug: basics.slug, version: basics.version }) : []
+    const beside = listing ? busyBeside(packageRows(listing, source.id, basics.slug), { targetKey, slug: basics.slug, version: basics.version }) : []
     const busyNotice = beside.length ? stageNotice({ kind: 'busy', rows: beside }, source.name) : undefined
     const nameTaken = listing && !catalog ? nameTakenIn(listing.rows, basics.slug, listing.instance, targetKey) : undefined
     const nameNotice = nameTaken ? stageNotice({ kind: 'name-taken', slug: nameTaken.slug, pkg: nameTaken }, source.name) : undefined

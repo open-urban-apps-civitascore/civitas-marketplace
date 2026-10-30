@@ -129,6 +129,8 @@ export function followsLine(ref: FollowsRef, note: string, by: string): string {
 export interface ListingFacts {
     rows: readonly SharedPackageRow[]
     busy: ReadonlyMap<string, TabRow[]>
+    /** See `ShareTabs.openByPackage`. */
+    open?: ReadonlyMap<string, TabRow[]>
     instance?: string
 }
 
@@ -141,8 +143,18 @@ export interface Opening {
 const namedBy = (tabbed: TabRow, from: Opening['from']) =>
     Boolean(from && (!from.slug || tabbed.row.slug === from.slug) && !isNewerVersion(tabbed.row.version, from.version))
 
-export function blockingRows(busy: readonly TabRow[] | undefined, opening: Opening = {}): TabRow[] {
-    return (busy ?? []).filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) || !(opening.started || namedBy(tabbed, opening.from)))
+/** The dataset's busy rows, and the open proposals of the package from any other dataset or instance. */
+export function packageRows(listing: Pick<ListingFacts, 'busy' | 'open'>, datasetId: string, slug: string): TabRow[] {
+    const own = listing.busy.get(datasetId) ?? []
+    const others = (listing.open?.get(slug.trim().toLowerCase()) ?? []).filter((tabbed) => !own.some((mine) => mine.row.key === tabbed.row.key))
+    return [...own, ...others]
+}
+
+/** Only the package the share goes into: another package made from the same dataset is another folder. */
+export function blockingRows(busy: readonly TabRow[] | undefined, opening: Opening = {}, slug?: string): TabRow[] {
+    return (busy ?? [])
+        .filter((tabbed) => !slug || tabbed.row.slug === slug)
+        .filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) || !(opening.started || namedBy(tabbed, opening.from)))
 }
 
 export type DatasetStage =
@@ -162,9 +174,10 @@ export function packageOfSource(source: Pick<ExportSource, 'id' | 'name' | 'cata
 }
 
 export function datasetStage(source: Pick<ExportSource, 'id' | 'name' | 'catalog'>, listing: ListingFacts, opening: Opening = {}): DatasetStage {
-    const blocking = blockingRows(listing.busy.get(source.id), opening)
-    if (blocking.length) return { kind: 'busy', rows: blocking }
     const pkg = packageOfSource(source, listing)
+    const into = opening.from?.slug ?? pkg?.slug ?? defaultSlugOf(source)
+    const blocking = blockingRows(packageRows(listing, source.id, into), opening, into)
+    if (blocking.length) return { kind: 'busy', rows: blocking }
     const followed = followedDecline(pkg, listing.instance)
     if (followed) return { kind: 'declined', followed }
     // Any instance's version counts: the catalogue holds one entry per package.
@@ -217,7 +230,12 @@ function busyStage(tabbed: TabRow): string {
 
 export interface StageNotice {
     text: string
-    link?: { label: string; href: string }
+    link?: { label: string; href: string; external?: true }
+}
+
+/** Where a busy row is followed: „In Arbeit“ lists no other instance's rows, so theirs is at GitLab. */
+export function busyLink(tabbed: TabRow): { href: string; external?: true } {
+    return tabbed.origin === 'other' ? { href: tabbed.row.bundleMr.url, external: true } : { href: inProgressHref(tabbed.row) }
 }
 
 function nextOnRow(tabbed: TabRow): string {
@@ -233,7 +251,10 @@ export function stageNotice(stage: DatasetStage, datasetName: string): StageNoti
         case 'busy': {
             const open = stage.rows.find((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome))
             const shown = open ?? stage.rows[0]
-            const link = { label: 'Zu „In Arbeit“', href: inProgressHref(shown.row) }
+            const link = { label: shown.origin === 'other' ? 'Vorschlag bei GitLab' : 'Zu „In Arbeit“', ...busyLink(shown) }
+            if (open?.origin === 'other') {
+                return { text: `Für das Paket „${open.row.slug}“ läuft schon ein Vorschlag von einer anderen Instanz (Version ${open.row.version}, ${busyStage(open)}).`, link }
+            }
             if (open) return { text: `Für „${datasetName}“ läuft schon ein Vorschlag (Version ${open.row.version}, ${busyStage(open)}).`, link }
             return { text: `Für „${datasetName}“ ist Version ${shown.row.version} angenommen, steht aber noch nicht im Katalog. ${nextOnRow(shown)}`, link }
         }
@@ -261,11 +282,11 @@ export function stageNotice(stage: DatasetStage, datasetName: string): StageNoti
     }
 }
 
-/** Open proposals beside the form's own version, which once submitted is its own proposal in review. */
+/** Open proposals of the form's package beside its own version, which once submitted is its own proposal in review. */
 export function busyBeside(rows: readonly TabRow[], form: { targetKey: string; slug: string; version: string }): TabRow[] {
     const slug = form.slug.trim().toLowerCase()
-    const own = (tabbed: TabRow) => tabbed.row.targetKey === form.targetKey && tabbed.row.slug === slug && tabbed.row.version === form.version.trim()
-    return rows.filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) && !own(tabbed))
+    const samePackage = (tabbed: TabRow) => tabbed.row.targetKey === form.targetKey && tabbed.row.slug === slug
+    return rows.filter((tabbed) => OPEN_OUTCOMES.has(tabbed.outcome) && samePackage(tabbed) && tabbed.row.version !== form.version.trim())
 }
 
 export const BUSY_BLOCKER = 'Einreichen geht erst, wenn über den anderen Vorschlag entschieden ist.'
@@ -389,15 +410,14 @@ const BRANCH_KINDS: [ShareProposal['kind'], (branch: string) => { slug: string; 
     ['removal', parseRemovalBranch],
 ]
 
-/** Proposals whose source line names no dataset count for none: nothing is guessed from a name. */
-export function openSharesOf(requests: readonly MergeRequestRef[], datasetId: string, botId: number, instance?: string): OpenShare[] {
+/** The account's open proposals of one package, whoever shared them: they all write into its folder. */
+export function openSharesOf(requests: readonly MergeRequestRef[], slug: string, botId: number): OpenShare[] {
+    const wanted = slug.trim().toLowerCase()
     return requests.flatMap((mr) => {
         if (mr.state !== 'opened' || mr.author?.id !== botId) return []
-        const source = shareSourceOf(mr.description)
-        if (source?.id !== datasetId || instanceMatch(source, instance) === 'other') return []
         for (const [kind, parse] of BRANCH_KINDS) {
             const branch = parse(mr.source_branch)
-            if (branch) return [{ kind, ...branch, iid: mr.iid, url: mr.web_url }]
+            if (branch) return branch.slug === wanted ? [{ kind, ...branch, iid: mr.iid, url: mr.web_url }] : []
         }
         return []
     })
@@ -432,7 +452,7 @@ export function entryUsedUpRefusal(followed: FollowedDecline, instead: string): 
 const OPEN_STAGE: Record<ShareProposal['kind'], string> = { bundle: 'Paket-Prüfung', catalog: 'Eintrags-Prüfung', removal: 'Entfernen' }
 
 export function busyRefusal(open: OpenShare): string {
-    return `Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version ${open.version}, ${OPEN_STAGE[open.kind]}, Vorschlag !${open.iid}). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.`
+    return `Nicht eingereicht: Für dieses Paket läuft schon ein Vorschlag (Version ${open.version}, ${OPEN_STAGE[open.kind]}, Vorschlag !${open.iid}). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.`
 }
 
 const onBranch = (requests: readonly MergeRequestRef[], parse: (branch: string) => { slug: string; version: string } | undefined, slug: string, version: string) =>

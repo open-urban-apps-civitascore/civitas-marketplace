@@ -152,7 +152,7 @@ describe('a dataset with another proposal open (plan of 2026-10-18, section 10.7
         const result = await exportAction(null, bundleForm('1.2.0'))
         expect(result).toMatchObject({ intent: 'bundle', status: 'invalid', busy: true, mrUrl: `${WEB}/31` })
         expect(result.detail).toBe(
-            'Nicht eingereicht: Für diesen Datensatz läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung, Vorschlag !31). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
+            'Nicht eingereicht: Für dieses Paket läuft schon ein Vorschlag (Version 1.1.0, Paket-Prüfung, Vorschlag !31). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.',
         )
         expect(readUseCase).not.toHaveBeenCalled()
         expect(openMergeRequest).not.toHaveBeenCalled()
@@ -178,11 +178,18 @@ describe('a dataset with another proposal open (plan of 2026-10-18, section 10.7
         expect(openMergeRequest).not.toHaveBeenCalled()
     })
 
-    it('lets it through next to an open proposal of another dataset, another instance or another account, and a closed one', async () => {
+    it('is refused next to an open proposal of the same package from another instance: it writes into the same folder', async () => {
+        vi.stubGlobal('fetch', fakeGitLab({ requests: [request(32, 'export/baeume-1.1.0', { description: shareSourceLine({ kind: 'dataset', id: 'dort', instance: THERE }) })] }).fetchImpl)
+        const result = await exportAction(null, bundleForm('1.2.0'))
+        expect(result).toMatchObject({ status: 'invalid', busy: true, mrUrl: `${WEB}/32` })
+        expect(openMergeRequest).not.toHaveBeenCalled()
+    })
+
+    it('lets it through next to an open proposal of another package - also one shared from the same dataset -, another account’s, and a closed one', async () => {
         const closedAt = '2026-10-21T10:00:00Z'
         const requests = [
             request(31, 'export/eichen-1.0.0', { description: shareSourceLine({ kind: 'dataset', id: 'anders', instance: HERE }) }),
-            request(32, 'export/baeume-1.1.0', { description: shareSourceLine({ kind: 'dataset', id: 'local', instance: THERE }) }),
+            request(32, 'catalog/test-1.0.0'),
             request(33, 'export/baeume-1.1.1', { author: { id: 7 } }),
             // Withdrawn: it decided nothing, so the new version follows no "no" either (R8).
             request(34, 'export/baeume-1.1.2', { state: 'closed', closed_at: closedAt, description: `${request(0, '').description}\n${withdrawalMark('Ewa', new Date(closedAt))}` }),

@@ -38,7 +38,9 @@ export function sharedPackageOf(rows: readonly SharedPackageRow[], match: Packag
     const bySlug = slug
         ? rows.filter((row) => row.slug === slug && (!match.targetKey || row.targetKey === match.targetKey) && (match.anyInstance || notElsewhere(row)))
         : []
-    const found = byDataset.length ? byDataset : bySlug
+    // A dataset shared as several packages: the one under the asked short name first.
+    const named = slug ? byDataset.filter((row) => row.slug === slug) : []
+    const found = named.length ? named : byDataset.length ? byDataset : bySlug
     if (!found.length) return undefined
     const newest = found.reduce((best, row) => (lastProposed(row) > lastProposed(best) ? row : best))
     const versions = rows
