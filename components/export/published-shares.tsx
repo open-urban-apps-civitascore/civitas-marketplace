@@ -5,7 +5,7 @@ import { PackagePlus } from 'lucide-react'
 
 import { useShareView } from '@/components/export/share-listing-provider'
 import { ShareRow } from '@/components/export/share-row'
-import { elsewhereLine, EmptyTab } from '@/components/export/share-tab-states'
+import { EmptyTab } from '@/components/export/share-tab-states'
 import { buttonClass, ExternalAnchor } from '@/components/ui/button'
 import { Notice, Pending } from '@/components/ui/notice'
 import { inProgressLinkText } from '@/lib/export/in-progress-items'
@@ -20,18 +20,16 @@ export function PublishedShares() {
     if (view.rows === null) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
     // The dates are told against the reading, so they do not change between two renders.
     const now = view.readAt ? Date.parse(view.readAt) : undefined
-    return <Published rows={view.tabs.published} elsewhere={view.tabs.elsewhere.published} error={view.error} now={now} instance={view.instance} />
+    return <Published rows={view.tabs.published} error={view.error} now={now} instance={view.instance} />
 }
 
 export function Published({
     rows,
-    elsewhere = 0,
     error,
     now,
     instance,
 }: {
     rows: TabRow[]
-    elsewhere?: number
     error?: string
     now?: number
     instance?: string
@@ -52,7 +50,6 @@ export function Published({
                     ))}
                 </ul>
             )}
-            {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
         </div>
     )
 }

@@ -10,7 +10,6 @@ vi.mock('next/link', () => ({
 }))
 
 import { InProgress } from '@/components/export/in-progress'
-import { elsewhereLine } from '@/components/export/share-tab-states'
 import { ShareTrack } from '@/components/export/share-track'
 import type { ShareDraft } from '@/lib/export/share-drafts'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
@@ -326,18 +325,6 @@ describe('the groups of „In Arbeit“', () => {
 })
 
 describe('around the rows of „In Arbeit“', () => {
-    it('counts what other instances have in progress in one line', () => {
-        expect(elsewhereLine(1)).toBe('1 weiterer Eintrag stammt von einer anderen Instanz.')
-        expect(elsewhereLine(2)).toBe('2 weitere Einträge stammen von anderen Instanzen.')
-        expect(text(list([row('baeume', { bundleMr: { url: `${WEB}/31`, state: 'opened' } })], { elsewhere: 2 }))).toContain(
-            '2 weitere Einträge stammen von anderen Instanzen.',
-        )
-        // Also when nothing of this instance is in progress.
-        const empty = text(list([], { elsewhere: 1 }))
-        expect(empty).toContain('Gerade ist nichts in Arbeit.')
-        expect(empty).toContain('1 weiterer Eintrag stammt von einer anderen Instanz.')
-    })
-
     it('says that GitLab could not be read, with „Erneut versuchen“', () => {
         const html = text(list([], { rows: [], error: 'GitLab-Fehler (502)' }))
         expect(html).toBe('Was bei GitLab offen ist, ließ sich gerade nicht abfragen (GitLab-Fehler (502)). Erneut versuchen')

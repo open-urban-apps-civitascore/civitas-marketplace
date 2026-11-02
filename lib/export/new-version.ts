@@ -165,15 +165,25 @@ export type DatasetStage =
     | { kind: 'name-taken'; slug: string; pkg: SharedPackage }
     | { kind: 'none' }
 
-export function defaultSlugOf(source: Pick<ExportSource, 'name' | 'catalog'>): string {
-    return source.catalog ? catalogEntryPath(source.catalog.id).slug : slugify(source.name)
+type SourceFacts = Pick<ExportSource, 'id' | 'name' | 'catalog' | 'installedFrom'>
+
+const installedPackageOf = (source: Pick<ExportSource, 'catalog' | 'installedFrom'>) => source.installedFrom ?? source.catalog?.id
+
+export function defaultSlugOf(source: Pick<ExportSource, 'name' | 'catalog' | 'installedFrom'>): string {
+    const installed = installedPackageOf(source)
+    return installed ? catalogEntryPath(installed).slug : slugify(source.name)
 }
 
-export function packageOfSource(source: Pick<ExportSource, 'id' | 'name' | 'catalog'>, listing: Pick<ListingFacts, 'rows' | 'instance'>): SharedPackage | undefined {
-    return sharedPackageOf(listing.rows, { datasetId: source.id, slug: defaultSlugOf(source), anyInstance: Boolean(source.catalog) }, listing.instance)
+export function packageOfSource(source: SourceFacts, listing: Pick<ListingFacts, 'rows' | 'instance'>): SharedPackage | undefined {
+    const slug = defaultSlugOf(source)
+    const installed = Boolean(installedPackageOf(source))
+    const own = sharedPackageOf(listing.rows, { datasetId: source.id, slug, anyInstance: installed }, listing.instance)
+    // A package withdrawn before any review never was one: an installed dataset goes on with the package it came from.
+    if (!installed || !own || own.slug === slug || !own.versions.every((fact) => fact.outcome === 'withdrawn')) return own
+    return sharedPackageOf(listing.rows, { slug, anyInstance: true }, listing.instance) ?? own
 }
 
-export function datasetStage(source: Pick<ExportSource, 'id' | 'name' | 'catalog'>, listing: ListingFacts, opening: Opening = {}): DatasetStage {
+export function datasetStage(source: SourceFacts, listing: ListingFacts, opening: Opening = {}): DatasetStage {
     const pkg = packageOfSource(source, listing)
     const into = opening.from?.slug ?? pkg?.slug ?? defaultSlugOf(source)
     const blocking = blockingRows(packageRows(listing, source.id, into), opening, into)
@@ -302,7 +312,7 @@ export interface WizardStart {
 
 /** Fills nothing for a busy dataset, a started share (it fills its own) or a package found only by name. */
 export function wizardStart(
-    source: Pick<ExportSource, 'id' | 'name' | 'catalog'>,
+    source: SourceFacts,
     listing: ListingFacts | undefined,
     opening: Opening & { from?: { again?: boolean } },
     targets: readonly string[],
@@ -374,14 +384,15 @@ export function steckbriefFromManifest(
 }
 
 export function startingBasics(
-    source: Pick<ExportSource, 'name' | 'description' | 'catalog'>,
+    source: Pick<ExportSource, 'name' | 'description' | 'catalog' | 'installedFrom'>,
     defaults: { publisher: string; maintainer: string },
     start: { fill?: Omit<FilledSteckbrief, 'from' | 'targetKey'>; version?: string } = {},
 ): SteckbriefBasics {
     const { fill, version } = start
     const catalog = source.catalog
+    const installed = installedPackageOf(source)
     // The catalogue's own split, not another regex: a looser one seeds a slug the server rejects on submit.
-    const address = catalog ? catalogEntryPath(catalog.id) : undefined
+    const address = installed ? catalogEntryPath(installed) : undefined
     return {
         displayName: fill?.displayName ?? catalog?.displayName ?? source.name,
         description: fill?.description ?? catalog?.description ?? source.description ?? '',

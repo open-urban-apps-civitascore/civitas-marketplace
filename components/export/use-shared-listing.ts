@@ -8,8 +8,13 @@ const LISTING_URL = '/api/shares'
 
 const UNREACHABLE = 'Die Anfrage an den Server ist fehlgeschlagen.'
 
-async function fetchListing(signal: AbortSignal): Promise<ShareListing> {
-    const response = await fetch(LISTING_URL, { cache: 'no-store', headers: { Accept: 'application/json' }, signal })
+type Shown = Omit<ShareListing, 'rows'> & { rows: SharedPackageRow[] | null }
+
+/** The last good reading in this tab: a visit back to „Teilen“ shows it at once while it is read again. */
+let kept: ShareListing | undefined
+
+async function fetchListing(signal: AbortSignal, fresh: boolean): Promise<ShareListing> {
+    const response = await fetch(fresh ? `${LISTING_URL}?fresh` : LISTING_URL, { cache: 'no-store', headers: { Accept: 'application/json' }, signal })
     const body = (await response.json().catch(() => null)) as Partial<ShareListing> | null
     if (!response.ok) return { rows: [], error: typeof body?.error === 'string' ? body.error : UNREACHABLE }
     if (!body || !Array.isArray(body.rows)) return { rows: [], error: UNREACHABLE }
@@ -18,11 +23,7 @@ async function fetchListing(signal: AbortSignal): Promise<ShareListing> {
 
 /** A GET, not a server action, so the listing never waits in line behind the page's actions. */
 export function useSharedListing(enabled: boolean) {
-    const [rows, setRows] = useState<SharedPackageRow[] | null>(null)
-    const [instance, setInstance] = useState<string>()
-    const [older, setOlder] = useState<string>()
-    const [error, setError] = useState<string>()
-    const [readAt, setReadAt] = useState<string>()
+    const [shown, setShown] = useState<Shown>(() => kept ?? { rows: null })
     const [attempt, setAttempt] = useState(0)
     const [loaded, setLoaded] = useState(0)
     const [answered, setAnswered] = useState(-1)
@@ -31,21 +32,21 @@ export function useSharedListing(enabled: boolean) {
         if (!enabled) return
         const controller = new AbortController()
         const asked = attempt
-        fetchListing(controller.signal)
+        // A reload follows „Aktualisieren“ or an action: the server's reading of the last minute would not show it.
+        fetchListing(controller.signal, asked > 0)
             .then((listing) => {
                 if (controller.signal.aborted) return
-                // Nothing new to show: what is on screen stays.
-                setRows((shown) => (listing.error && !listing.rows.length && shown?.length ? shown : listing.rows))
-                setInstance(listing.instance)
-                setOlder(listing.older)
-                setError(listing.error)
-                if (listing.readAt) setReadAt(listing.readAt)
-                else if (!listing.error) setReadAt(new Date().toISOString())
+                const read = listing.error ? listing : { ...listing, readAt: listing.readAt ?? new Date().toISOString() }
+                if (!listing.error) kept = read
+                setShown((before) => {
+                    // Nothing new to show: what is on screen stays, with the instance it was read for.
+                    if (listing.error && !listing.rows.length && before.rows?.length) return { ...before, error: listing.error }
+                    return { ...read, readAt: read.readAt ?? before.readAt }
+                })
             })
             .catch(() => {
                 if (controller.signal.aborted) return
-                setRows((previous) => previous ?? [])
-                setError(UNREACHABLE)
+                setShown((before) => ({ ...before, rows: before.rows ?? [], error: UNREACHABLE }))
             })
             .finally(() => {
                 if (controller.signal.aborted) return
@@ -56,5 +57,5 @@ export function useSharedListing(enabled: boolean) {
     }, [enabled, attempt])
 
     const reload = useCallback(() => setAttempt((n) => n + 1), [])
-    return { rows, instance, older, error, readAt, loaded, pending: enabled && answered !== attempt, reload }
+    return { ...shown, loaded, pending: enabled && answered !== attempt, reload }
 }

@@ -55,6 +55,7 @@ const OUTCOMES: [ShareOutcome, SharedPackageRow, ShareTab | undefined][] = [
     // Listed pins a commit: what happened to the folder since does not matter for it.
     ['listed', row('a', '1.0.0', { bundle: onBase({ verification: { state: 'changed-after-merge' } }), catalog: { state: 'listed' } }), 'published'],
     ['replaced', row('a', '1.0.0', { bundle: replacedBy('1.1.0'), catalog: { state: 'none' } }), undefined],
+    ['replaced', row('a', '1.0.0', { bundle: onBase(), catalog: { state: 'declined', mrUrl: `${WEB}/32`, declined: decline(32), newerListed: '1.1.0' } }), undefined],
     ['taken-out', row('a', '1.0.0', { bundle: onBase(), catalog: { state: 'withdrawn', takenOut: { version: '1.0.0' } } }), 'ended'],
     ['removed', row('a', '1.0.0', { bundle: { state: 'none', reason: 'no-package', removal: { state: 'merged', mrUrl: `${WEB}/9` } } }), 'ended'],
     ['gone', row('a', '1.0.0', { bundle: { state: 'none', reason: 'no-package' } }), 'ended'],
@@ -126,7 +127,6 @@ describe('shareTabs', () => {
         expect(keys(tabs.published)).toEqual(['musterbach 1.1.3'])
         expect(tabs.published[0].newer).toBeUndefined()
         expect(tabs.inProgress).toEqual([])
-        expect(tabs.elsewhere['in-progress']).toBe(1)
     })
 
     it('makes an accepted package waiting for its entry the move of the person who proposed it, not of a colleague', () => {
@@ -285,7 +285,7 @@ describe('shareTabs', () => {
         expect(withdrawn.ended.map((entry) => [entry.proposal?.iid, entry.ending])).toEqual([[21, 'withdrawn']])
     })
 
-    it('counts another instance’s shares in every list instead of listing them, and makes none of its datasets busy', () => {
+    it('leaves another instance’s shares out of every list, uncounted, and makes none of its datasets busy', () => {
         const there = { kind: 'dataset' as const, id: 'ds-x', instance: THERE }
         const tabs = shareTabs(
             [
@@ -298,7 +298,6 @@ describe('shareTabs', () => {
         expect(tabs.inProgress).toEqual([])
         expect(tabs.published).toEqual([])
         expect(tabs.ended).toEqual([])
-        expect(tabs.elsewhere).toEqual({ 'in-progress': 1, published: 1, ended: 1 })
         expect(tabs.busy.size).toBe(0)
         expect(tabs.counts).toEqual({ inProgress: 0, published: 0 })
     })
@@ -334,7 +333,6 @@ describe('shareTabs', () => {
             { instance: HERE },
         )
         expect(tabs.ended.map((entry) => entry.proposal?.iid)).toEqual([7])
-        expect(tabs.elsewhere.ended).toBe(1)
     })
 
     it('puts the newest ending first and what has no date last', () => {
@@ -432,12 +430,11 @@ describe('a "no" from the catalogue team (2026-10-22)', () => {
         })
     })
 
-    it('stays the person’s move next to another instance’s newer version, which only counts here (demo, dev and local share one account)', () => {
+    it('stays the person’s move next to another instance’s newer version, which is not listed here (demo, dev and local share one account)', () => {
         // Demo's 1.1.4 entry turned down (!32), then a local test share of 1.1.5: the "no" is still demo's to answer.
         const local = row('pegel', '1.0.1', { ...open, source: { kind: 'dataset', id: 'ds-pegel', instance: THERE }, proposals: [proposal('bundle', 15, 'opened', { source: { kind: 'dataset', id: 'ds-pegel', instance: THERE } })] })
         const tabs = shareTabs([local, packageNo()], { instance: HERE, person: 'Ewa', now: NOW })
         expect(tabs.inProgress.map((tabbed) => [tabbed.row.version, tabbed.outcome, tabbed.declined?.current])).toEqual([['1.0.0', 'declined', true]])
-        expect(tabs.elsewhere['in-progress']).toBe(1)
         expect(declineIsCurrent(proposal('bundle', 14, 'closed', { ...sourced, closedAt: '2026-10-21T10:00:00Z' }), '1.0.0', [local], HERE, NOW)).toBe(true)
         // Nor does this instance's newer version tell another instance's "no" among its earlier versions: it never was this one's.
         const theirs = packageNo({ source: { kind: 'dataset', id: 'ds-x', instance: THERE } })
@@ -481,6 +478,17 @@ describe('a "no" from the catalogue team (2026-10-22)', () => {
             ['catalog', 'not-accepted', 31, true],
         ])
         expect(tabs.busy.size).toBe(0)
+
+        // The team then pinned 1.1.5 by hand from another repository: the "no" is over, the closes stay told.
+        const overtaken = { ...musterbach, catalog: { ...musterbach.catalog!, newerListed: '1.1.5' } }
+        const later = shareTabs([overtaken], { instance: HERE, person: 'Ewa', now: NOW })
+        expect(later.inProgress).toEqual([])
+        expect(later.published).toEqual([])
+        expect(later.counts).toEqual({ inProgress: 0, published: 0 })
+        expect(later.ended.map((entry) => [entry.what, entry.ending, entry.proposal?.iid])).toEqual([
+            ['catalog', 'not-accepted', 32],
+            ['catalog', 'not-accepted', 31],
+        ])
     })
 
     it('keeps a package whose removal was turned down in „In Arbeit“: the person’s move for 30 days, then nobody’s (S8)', () => {

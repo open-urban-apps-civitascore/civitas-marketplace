@@ -89,15 +89,23 @@ export interface ShareListing {
     error?: string
     /** When the rows were read; older than now where GitLab asked to wait and the last reading is shown. */
     readAt?: string
+    /** Where GitLab tells what the catalogue team changed by hand, and when. */
+    catalogHistory?: string
 }
 
-/** The last reading, shown while GitLab asks to wait; a partial one only until there is a complete one. */
-let lastRead: Pick<ShareListing, 'rows' | 'older' | 'readAt'> | undefined
+/** The last reading, shown while GitLab asks to wait and, complete, for `maxAgeMs`; a partial one only until there is a complete one. */
+let lastRead: (Pick<ShareListing, 'rows' | 'older'> & { readAt: string }) | undefined
 let lastComplete = false
+/** Only the newest reading is handed out again: never one from before an action. */
+let newestComplete = false
+/** Visits arriving while a reading runs wait for it rather than asking GitLab twice. */
+let reading: Promise<ShareListing> | undefined
 
 export function resetShareListingForTests(): void {
     lastRead = undefined
     lastComplete = false
+    newestComplete = false
+    reading = undefined
 }
 
 export function olderProposalsUrl(projectUrl: string, account: string): string {
@@ -169,11 +177,23 @@ interface TargetContext {
     removals: Map<string, MergeRequestRef[]>
 }
 
-/** Checks no session or right: `app/api/shares/route.ts` does. */
-export async function readShareListing(config: ExportConfig = exportConfig()): Promise<ShareListing> {
+/** Checks no session or right: `app/api/shares/route.ts` does. A complete reading younger than `maxAgeMs` is handed out again. */
+export async function readShareListing(config: ExportConfig = exportConfig(), { maxAgeMs = 0 }: { maxAgeMs?: number } = {}): Promise<ShareListing> {
     const instance = thisInstance()
-    const named = instance ? { instance } : {}
+    const named = { ...(instance ? { instance } : {}), ...(config.catalog ? { catalogHistory: historyUrl(config.catalog.url, config.catalog.baseBranch, 'index.json') } : {}) }
     if (exportReadiness(config) !== 'ready') return { rows: [], ...named }
+    if (lastRead && newestComplete && Date.now() - Date.parse(lastRead.readAt) < maxAgeMs) return { ...lastRead, ...named }
+    if (reading && maxAgeMs > 0) return reading
+    const read = readAnew(config, named)
+    reading = read
+    try {
+        return await read
+    } finally {
+        if (reading === read) reading = undefined
+    }
+}
+
+async function readAnew(config: ExportConfig, named: Pick<ShareListing, 'instance' | 'catalogHistory'>): Promise<ShareListing> {
     const token = config.token as string
     const visit = newVisit()
 
@@ -189,6 +209,7 @@ export async function readShareListing(config: ExportConfig = exportConfig()): P
         const older = olderOf(visit, config.targets)
         const read = { rows, ...(older ? { older } : {}), readAt: new Date().toISOString() }
         const complete = !rows.some((row) => row.problem)
+        newestComplete = complete
         if (complete || !lastComplete) {
             lastRead = read
             lastComplete = complete
@@ -249,7 +270,7 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         version: version.version,
         displayName: displayNameOf(mr.title, version.version) ?? version.slug,
         bundleMr: { url: mr.web_url, state: mr.state },
-        folderUrl: folderHistoryUrl(target, version.slug),
+        folderUrl: historyUrl(target.url, target.baseBranch, packageDir(target, version.slug)),
         ...(mr.state === 'closed' && own?.withdrawnBy ? { withdrawn: true } : {}),
         ...state,
         ...(source ? { source } : {}),
@@ -258,9 +279,9 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
     }
 }
 
-function folderHistoryUrl(target: ExportTarget, slug: string): string {
-    const encoded = (path: string) => path.split('/').map(encodeURIComponent).join('/')
-    return `${target.url.replace(/\/+$/, '')}/-/commits/${encoded(target.baseBranch)}/${encoded(packageDir(target, slug))}`
+function historyUrl(projectUrl: string, branch: string, path: string): string {
+    const encoded = (part: string) => part.split('/').map(encodeURIComponent).join('/')
+    return `${projectUrl.replace(/\/+$/, '')}/-/commits/${encoded(branch)}/${encoded(path)}`
 }
 
 function samePackageOnBase(bundle: BundleStatus, slug: string): string | undefined {

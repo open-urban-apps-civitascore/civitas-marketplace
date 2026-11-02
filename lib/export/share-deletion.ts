@@ -235,7 +235,7 @@ export async function readDeletion(
         }
         if (catalog.takenOut) {
             if (closes.length) return withdrawOnly({ takenOut: true })
-            return nothing(`Das Katalog-Team hat Version ${version} aus dem Katalog genommen, und offen ist dazu nichts mehr. Das angenommene Paket bleibt, wie es ist.`)
+            return nothing(`Das Katalog-Team hat Version ${version} aus dem Katalog genommen, und offen ist dazu nichts mehr. Das Paket selbst bleibt angenommen.`)
         }
     }
 
@@ -341,8 +341,12 @@ function removalBody(removal: NonNullable<DeletionWork['removal']>, plan: Deleti
     ].join('\n')
 }
 
-function closedSentence(closed: string[]): string {
-    return closed.length === 1 ? `Vorschlag ${closed[0]} ist geschlossen` : `Die Vorschläge ${closed.join(' und ')} sind geschlossen`
+/** Names what each proposal was for: the package can stay accepted beside a withdrawn one. */
+function closedSentence(closed: { ref: string; what: 'bundle' | 'catalog' }[], plan: DeletionPlan): string {
+    const accepted = plan.kind === 'remove' || plan.accepted || plan.listed || plan.takenOut
+    const forWhat = ({ ref, what }: (typeof closed)[number]) =>
+        `${what === 'catalog' ? 'für den Katalog-Eintrag' : accepted ? 'zur Änderung am Paket' : 'für das Paket'} (${ref})`
+    return closed.length === 1 ? `Der Vorschlag ${forWhat(closed[0])} ist zurückgezogen` : `Die Vorschläge ${closed.map(forWhat).join(' und ')} sind zurückgezogen`
 }
 
 /** Reads, then closes, then removes; a failure after a close is `partial`: the close stays. */
@@ -368,24 +372,24 @@ export async function runDeletion(
           )
         : {}
 
-    const closed: string[] = []
+    const closed: { ref: string; what: 'bundle' | 'catalog' }[] = []
     try {
         for (const step of work.closes) {
             await withdrawMergeRequest(step.client, step.projectId, step.mr, {
                 note: withdrawalNote(step.what, plan, requestedBy),
                 mark: withdrawalMark(requestedBy, new Date()),
             })
-            closed.push(ref(step.mr))
+            closed.push({ ref: ref(step.mr), what: step.what })
         }
         if (!removal) {
             const stays = plan.listed
                 ? 'Die Version bleibt im Katalog, wie sie ist.'
                 : plan.accepted || plan.takenOut
-                  ? 'Das angenommene Paket bleibt, wie es ist.'
+                  ? 'Das Paket selbst bleibt angenommen, im Katalog steht es nicht.'
                   : undefined
             return {
                 status: 'ok',
-                detail: stays ? `${closedSentence(closed)}. ${stays}` : `${closedSentence(closed)} - das Teilen ist zurückgezogen.`,
+                detail: stays ? `${closedSentence(closed, plan)}. ${stays}` : `${closedSentence(closed, plan)}.`,
                 mrUrl: plan.closes.at(-1)?.url,
             }
         }
@@ -405,9 +409,9 @@ export async function runDeletion(
             outcome.status === 'already-open'
                 ? `Das Entfernen ist schon vorgeschlagen (${mrRef}).`
                 : `Entfernen vorgeschlagen: Vorschlag ${mrRef} wartet auf das Katalog-Team.`
-        return { status: 'ok', detail: closed.length ? `${proposed} ${closedSentence(closed)}.` : proposed, mrUrl: outcome.url }
+        return { status: 'ok', detail: closed.length ? `${proposed} ${closedSentence(closed, plan)}.` : proposed, mrUrl: outcome.url }
     } catch (error) {
         if (!(error instanceof GitLabError) || closed.length === 0) throw error
-        return { status: 'error', detail: `${closedSentence(closed)}. Danach ging es nicht weiter: ${explain(error)}`, partial: true }
+        return { status: 'error', detail: `${closedSentence(closed, plan)}. Danach ging es nicht weiter: ${explain(error)}`, partial: true }
     }
 }

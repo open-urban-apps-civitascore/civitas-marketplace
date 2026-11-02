@@ -12,6 +12,8 @@ vi.mock('@/lib/export/share-listing', () => ({
     readShareListing: vi.fn(async () => ({ rows: [{ key: 'k', slug: 'baeume', version: '1.0.0' }], instance: 'https://portal.hier.example' })),
 }))
 
+import { NextRequest } from 'next/server'
+
 import * as route from '@/app/api/shares/route'
 import { readShareListing } from '@/lib/export/share-listing'
 import { fetchShareRight, LISTING_HIDDEN_BECAUSE } from '@/lib/export/share-permission'
@@ -22,8 +24,8 @@ afterEach(() => {
 })
 
 /** The answer as the page's fetch meets it. */
-async function call() {
-    const response = await route.GET()
+async function call(query = '') {
+    const response = await route.GET(new NextRequest(`http://localhost/api/shares${query}`))
     return { response, body: (await response.json()) as { error?: string; rows?: unknown[]; instance?: string } }
 }
 
@@ -77,6 +79,13 @@ describe('GET /api/shares', () => {
         expect(response.status).toBe(503)
         expect(body).toEqual({ error: LISTING_HIDDEN_BECAUSE.unknown })
         expect(readShareListing).not.toHaveBeenCalled()
+    })
+
+    it('hands every visit the reading of the last minute, and reads anew where the page asks fresh', async () => {
+        await call()
+        expect(vi.mocked(readShareListing).mock.calls[0][1]).toEqual({ maxAgeMs: 60_000 })
+        await call('?fresh')
+        expect(vi.mocked(readShareListing).mock.calls[1][1]).toEqual({ maxAgeMs: 0 })
     })
 
     it('only reads: writes stay server actions', () => {

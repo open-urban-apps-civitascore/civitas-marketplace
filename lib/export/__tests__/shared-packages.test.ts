@@ -124,6 +124,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
@@ -386,6 +387,62 @@ describe('readShareListing', () => {
         expect((await readShareListing()).rows.some((row) => row.problem)).toBe(true)
         vi.stubGlobal('fetch', vi.fn(refusing))
         expect((await readShareListing()).rows).toEqual(complete.rows)
+    })
+
+    it('hands a complete reading out again for `maxAgeMs` without asking GitLab, never a partial one', async () => {
+        vi.useFakeTimers({ now: Date.parse('2026-10-31T12:00:00Z'), toFake: ['Date'] })
+        vi.stubGlobal('fetch', fakeGitLab().fetchImpl)
+        const first = await readShareListing()
+        expect(first.catalogHistory).toBe(`${WEB}/-/commits/main/index.json`)
+
+        const asked = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', asked)
+        vi.setSystemTime(Date.parse('2026-10-31T12:00:59Z'))
+        expect(await readShareListing(undefined, { maxAgeMs: 60_000 })).toEqual(first)
+        expect(asked).not.toHaveBeenCalled()
+        vi.setSystemTime(Date.parse('2026-10-31T12:01:01Z'))
+        expect((await readShareListing(undefined, { maxAgeMs: 60_000 })).readAt).toBe('2026-10-31T12:01:01.000Z')
+        expect(asked).toHaveBeenCalled()
+
+        resetShareListingForTests()
+        SHARE_READS.clear()
+        vi.stubGlobal('fetch', fakeGitLab(['manifest.json']).fetchImpl)
+        expect((await readShareListing()).rows.some((row) => row.problem)).toBe(true)
+        const again = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', again)
+        await readShareListing(undefined, { maxAgeMs: 60_000 })
+        expect(again).toHaveBeenCalled()
+
+        // A partial reading after a complete one: the older complete one is not handed out, it may predate an action.
+        SHARE_READS.clear()
+        vi.stubGlobal('fetch', fakeGitLab(['manifest.json']).fetchImpl)
+        await readShareListing()
+        const after = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', after)
+        await readShareListing(undefined, { maxAgeMs: 60_000 })
+        expect(after).toHaveBeenCalled()
+    })
+
+    it('lets visits that arrive while a reading runs wait for it, and a fresh one ask anew', async () => {
+        const single = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', single)
+        await readShareListing(undefined, { maxAgeMs: 60_000 })
+        const once = single.mock.calls.length
+
+        resetShareListingForTests()
+        SHARE_READS.clear()
+        const both = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', both)
+        const [first, second] = await Promise.all([readShareListing(undefined, { maxAgeMs: 60_000 }), readShareListing(undefined, { maxAgeMs: 60_000 })])
+        expect(second).toEqual(first)
+        expect(both).toHaveBeenCalledTimes(once)
+
+        resetShareListingForTests()
+        SHARE_READS.clear()
+        const fresh = vi.fn(fakeGitLab().fetchImpl)
+        vi.stubGlobal('fetch', fresh)
+        await Promise.all([readShareListing(undefined, { maxAgeMs: 60_000 }), readShareListing()])
+        expect(fresh.mock.calls.length).toBeGreaterThan(once)
     })
 })
 
@@ -823,14 +880,13 @@ describe('the catalogue pages’ copy of the index', () => {
 })
 
 describe('the tabs, fed from the listing', () => {
-    it('shows this instance’s shares, counts another’s, and knows which datasets are busy', async () => {
+    it('shows this instance’s shares, not another’s, and knows which datasets are busy', async () => {
         const files = { ...FILES, [`${MERGED_NEW}|packages/baeume/README.md`]: readme('https://portal.dev.example') }
         vi.stubGlobal('fetch', fakeGitLab([], { botMrs: [SOURCED_PEGEL, BOT_MRS[1], BOT_MRS[3]], files }).fetchImpl)
         const listing = await readShareListing()
         const tabs = shareTabs(listing.rows, { instance: listing.instance, person: 'Ewa' })
-        expect(tabs.inProgress.map((tabbed) => tabbed.row.slug)).toEqual(['pegel'])
         // Bäume 1.1.0 waits for its entry, but came from dev; 1.0.0 was replaced by it.
-        expect(tabs.elsewhere).toEqual({ 'in-progress': 1, published: 0, ended: 0 })
+        expect(tabs.inProgress.map((tabbed) => tabbed.row.slug)).toEqual(['pegel'])
         expect([...tabs.busy.keys()]).toEqual(['ds-pegel'])
         expect(tabs.counts).toEqual({ inProgress: 1, published: 0 })
     })

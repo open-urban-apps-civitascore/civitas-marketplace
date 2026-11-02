@@ -8,7 +8,7 @@ import { ProposalOutcome, useCatalogProposal } from '@/components/export/catalog
 import { DeleteShareDialog, type DeletionDone } from '@/components/export/delete-share-dialog'
 import { useShareView } from '@/components/export/share-listing-provider'
 import { ShareRow, StatusLine } from '@/components/export/share-row'
-import { elsewhereLine, EmptyTab } from '@/components/export/share-tab-states'
+import { EmptyTab } from '@/components/export/share-tab-states'
 import { Button, buttonClass, ExternalAnchor } from '@/components/ui/button'
 import { Notice, Pending } from '@/components/ui/notice'
 import {
@@ -48,7 +48,6 @@ export function InProgressTab({ enabled, datasets }: { enabled: boolean; dataset
             drafts={view.drafts}
             datasets={datasets}
             rows={view.rows === null ? null : view.tabs.inProgress}
-            elsewhere={view.rows === null ? 0 : view.tabs.elsewhere['in-progress']}
             error={view.error}
             known={!enabled ? 'own' : view.rows !== null && !view.error ? 'all' : 'partial'}
             loaded={view.loaded}
@@ -86,7 +85,6 @@ export function InProgress({
     drafts,
     datasets,
     rows,
-    elsewhere = 0,
     error,
     known = rows === null || error ? 'partial' : 'all',
     loaded,
@@ -97,7 +95,6 @@ export function InProgress({
     datasets?: { id: string; name: string }[]
     /** Null while GitLab is asked. */
     rows: TabRow[] | null
-    elsewhere?: number
     error?: string
     known?: GroupsKnown
     /** How many readings came back so far. */
@@ -134,14 +131,7 @@ export function InProgress({
 
     if (order.length === 0) {
         if (rows === null && !error) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
-        if (!error) {
-            return (
-                <div className="flex flex-col gap-4">
-                    <EmptyTab tab="in-progress" />
-                    {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
-                </div>
-            )
-        }
+        if (!error) return <EmptyTab tab="in-progress" />
     }
 
     const finish = (item: InProgressItem, done: DeletionDone) => {
@@ -243,7 +233,6 @@ export function InProgress({
                 </div>
             )}
             {rows === null && !error && <Pending>Stand bei GitLab wird abgefragt …</Pending>}
-            {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
             {error && (
                 <Notice
                     tone="error"

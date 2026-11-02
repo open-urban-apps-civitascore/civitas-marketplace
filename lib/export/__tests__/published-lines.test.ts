@@ -186,9 +186,8 @@ describe('the list „Veröffentlicht“', () => {
         expect(html).not.toContain('sm:row-span-2')
     })
 
-    it('says when nothing is published, counts other instances’ entries, and says when GitLab could not be read', () => {
+    it('says when nothing is published, and when GitLab could not be read', () => {
         expect(text(list({}))).toContain('Von dieser Instanz steht noch nichts im Katalog.')
-        expect(text(list({ rows: published([listed('1.1.3', 20)]), elsewhere: 1 }))).toContain('1 weiterer Eintrag stammt von einer anderen Instanz.')
         expect(text(list({ error: 'GitLab-Fehler (500)' }))).toBe('Was im Katalog steht, ließ sich gerade nicht abfragen (GitLab-Fehler (500)).')
     })
 })

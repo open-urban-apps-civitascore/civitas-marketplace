@@ -13,6 +13,7 @@ import {
     CHANGE_NOTE_MAX,
     changeNoteProblem,
     datasetStage,
+    defaultSlugOf,
     declineIsNews,
     entryUsedUpRefusal,
     filledNotice,
@@ -24,6 +25,7 @@ import {
     followsRefOf,
     nameTakenIn,
     openSharesOf,
+    packageOfSource,
     packageRows,
     parseFollows,
     proposedHere,
@@ -466,6 +468,44 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
             catalog: { id: 'urn:stadt:usecase:jungbaum', displayName: 'Jungbaumbewässerung', description: '', version: '1.1.3', maintainer: '', license: 'EUPL-1.2', keywords: [], metadata: {} },
         }
         expect(datasetStage(installed, facts([]))).toEqual({ kind: 'listed', version: '1.1.3', name: 'Jungbaumbewässerung' })
+    })
+
+    it('lets a "no" go once the catalogue lists a newer version, also one pinned by hand from elsewhere', () => {
+        const overtaken = entryTurnedDown('1.1.4', 6)
+        const rows = [{ ...overtaken, catalog: { ...overtaken.catalog!, newerListed: '1.1.5' } }]
+        const installed: ExportSource = {
+            ...DATASET,
+            catalog: { id: 'urn:stadt:usecase:baeume', displayName: 'Baumkataster', description: '', version: '1.1.5', maintainer: '', license: 'EUPL-1.2', keywords: [], metadata: {} },
+        }
+        expect(followedDecline(pkgOf(rows), HERE)).toBeUndefined()
+        expect(stageHint(datasetStage(installed, facts(rows)))).toBe('Im Katalog als 1.1.5 - du teilst eine neue Version')
+        expect(wizardStart(installed, facts(rows), {}, ['t']).version).toBe('1.1.6')
+        // Made here, not installed: the catalogue's newer version is used up all the same.
+        expect(wizardStart(DATASET, facts(rows), {}, ['t']).version).toBe('1.1.6')
+    })
+
+    it('goes on with the package an installation came from once its catalogue entry is gone, not with a new one under the dataset’s name', () => {
+        // Shared from another dataset, then taken out of the catalogue: the installation still names the package.
+        const shared = takenOut('1.0.2', 11)
+        const rows = [{ ...shared, ...sourced(HERE, 'ds-other') }]
+        const installed: ExportSource = { id: 'ds-installed', name: 'Baumkataster 2', installedFrom: 'urn:stadt:usecase:baeume' }
+        expect(defaultSlugOf(installed)).toBe('baeume')
+        expect(stageHint(datasetStage(installed, facts(rows)))).toBe('Version 1.0.2 aus dem Katalog genommen - du teilst eine neue Version')
+        expect(wizardStart(installed, facts(rows), {}, ['t'])).toMatchObject({ version: '1.0.3', fill: { slug: 'baeume', version: '1.0.2' } })
+        expect(startingBasics(installed, { publisher: 'x', maintainer: 'y' }).slug).toBe('baeume')
+
+        // Shared by mistake as a new package and withdrawn: that one never was, the installation's goes on.
+        const mistaken = version('1.0.0', 33, 'closed', {
+            key: 't#export/baumkataster-2-1.0.0',
+            slug: 'baumkataster-2',
+            withdrawn: true,
+            ...sourced(HERE, 'ds-installed'),
+            proposals: [proposal('bundle', 33, 'closed', { closedByBot: true, withdrawnBy: 'Ewa', createdAt: '2026-10-30T18:44:00Z' })],
+        })
+        expect(packageOfSource(installed, facts([...rows, mistaken]))?.slug).toBe('baeume')
+        // Still in review, it is the package the dataset is being shared as.
+        const pending = { ...mistaken, bundleMr: { url: `${WEB}/33`, state: 'opened' }, withdrawn: undefined, proposals: [proposal('bundle', 33, 'opened', { createdAt: '2026-10-30T18:44:00Z' })] }
+        expect(packageOfSource(installed, facts([...rows, pending]))?.slug).toBe('baumkataster-2')
     })
 
     it('says nothing of one nothing was shared of', () => {
