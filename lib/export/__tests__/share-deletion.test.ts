@@ -205,7 +205,7 @@ describe('deleting a version that waits for review', () => {
         const { plan, result, calls } = await planAndDelete(waiting(), 'pegel', '1.0.0')
         expect(plan).toMatchObject({ kind: 'withdraw', closes: [{ what: 'bundle', ref: '!4', url: `${WEB}/-/merge_requests/4` }], proposedBy: 'Ewa' })
         expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/4` })
-        expect(result.detail).toBe('Vorschlag !4 ist geschlossen - das Teilen ist zurückgezogen.')
+        expect(result.detail).toBe('Der Vorschlag für das Paket (!4) ist zurückgezogen.')
 
         expect(sent(calls)).toEqual([
             'PUT /projects/7/merge_requests/4',
@@ -301,7 +301,7 @@ describe('deleting a merged version', () => {
         expect(opened.description).toContain(`Withdrawn with it: ${WEB}/-/merge_requests/9`)
 
         expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/30` })
-        expect(result.detail).toBe('Entfernen vorgeschlagen: Vorschlag !30 wartet auf das Katalog-Team. Vorschlag !9 ist geschlossen.')
+        expect(result.detail).toBe('Entfernen vorgeschlagen: Vorschlag !30 wartet auf das Katalog-Team. Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen.')
     })
 
     it('withdraws the open proposals of a merged version together with the rest, in one go, when the person chose both', async () => {
@@ -314,7 +314,7 @@ describe('deleting a merged version', () => {
         expect(plan).toMatchObject({ kind: 'remove', closes: [{ what: 'bundle', ref: '!21' }, { what: 'catalog', ref: '!20' }] })
         expect(sent(calls).filter((call) => call.startsWith('PUT'))).toEqual(['PUT /projects/7/merge_requests/21', 'PUT /projects/7/merge_requests/20'])
         expect(sent(calls).at(-1)).toBe('POST /projects/7/merge_requests')
-        expect(result.detail).toContain('Die Vorschläge !21 und !20 sind geschlossen.')
+        expect(result.detail).toContain('Die Vorschläge zur Änderung am Paket (!21) und für den Katalog-Eintrag (!20) sind zurückgezogen.')
     })
 
     it('hands the folder back to the version it replaced, writing only what differs', async () => {
@@ -400,7 +400,7 @@ describe('deleting a merged version', () => {
         const { result } = await planAndDelete(world({ catalogMrs: [catalogMr(9)], failing: ['POST /projects/7/repository/commits'] }), 'baeume', '1.1.0', 'version')
         expect(result.status).toBe('error')
         expect(result.partial).toBe(true)
-        expect(result.detail).toContain('Vorschlag !9 ist geschlossen.')
+        expect(result.detail).toContain('Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen. Danach ging es nicht weiter')
         expect(result.detail).toContain('500')
     })
 
@@ -411,7 +411,7 @@ describe('deleting a merged version', () => {
         })
         const { plan, result, calls } = await planAndDelete(state)
         expect(plan).toMatchObject({ kind: 'withdraw', listed: true, closes: [{ what: 'catalog', ref: '!9' }] })
-        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Die Version bleibt im Katalog, wie sie ist.')
+        expect(result.detail).toBe('Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen. Die Version bleibt im Katalog, wie sie ist.')
         expect(writes(calls).map((call) => call.method)).toEqual(['PUT', 'POST', 'DELETE'])
         expect(writes(calls)[1].body?.body).toContain('listed version stays')
     })
@@ -475,7 +475,7 @@ describe('the choice between the open proposal and the accepted package', () => 
             'DELETE /projects/7/repository/branches/catalog%2Fbaeume-1.1.0',
         ])
         expect(result).toMatchObject({ status: 'ok', mrUrl: `${WEB}/-/merge_requests/9` })
-        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(result.detail).toBe('Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen. Das Paket selbst bleibt angenommen, im Katalog steht es nicht.')
         expect(writes(calls)[1].body?.body).toContain('The merged package stays in the repository as it is.')
     })
 
@@ -492,7 +492,7 @@ describe('the choice between the open proposal and the accepted package', () => 
         const { plan, result, calls } = await planAndDelete(world({ exportMrs: [], catalogMrs: [catalogMr(9)] }))
         expect(plan).toMatchObject({ kind: 'withdraw', accepted: true, closes: [{ what: 'catalog', ref: '!9' }] })
         expect(plan.scope).toBeUndefined()
-        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(result.detail).toBe('Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen. Das Paket selbst bleibt angenommen, im Katalog steht es nicht.')
         expect(writes(calls)[1].body?.body).toContain('The merged package stays in the repository as it is.')
     })
 
@@ -552,7 +552,7 @@ describe('a version the catalogue team took out', () => {
         const { plan, result, calls } = await planAndDelete(takenOut([catalogMr(27)]))
         expect(plan).toMatchObject({ kind: 'withdraw', takenOut: true, closes: [{ what: 'catalog', ref: '!27' }] })
         expect(plan.removal).toBeUndefined()
-        expect(result).toMatchObject({ status: 'ok', detail: 'Vorschlag !27 ist geschlossen. Das angenommene Paket bleibt, wie es ist.' })
+        expect(result).toMatchObject({ status: 'ok', detail: 'Der Vorschlag für den Katalog-Eintrag (!27) ist zurückgezogen. Das Paket selbst bleibt angenommen, im Katalog steht es nicht.' })
         expect(sent(calls)).toEqual([
             'PUT /projects/7/merge_requests/27',
             'POST /projects/7/merge_requests/27/notes',
@@ -708,7 +708,7 @@ describe('what the catalogue team turned down (2026-10-22)', () => {
         expect(plan?.scope).toBeUndefined()
         expect(alternative).toBeUndefined()
         const { result, calls } = await planAndDelete(state())
-        expect(result.detail).toBe('Vorschlag !9 ist geschlossen. Das angenommene Paket bleibt, wie es ist.')
+        expect(result.detail).toBe('Der Vorschlag für den Katalog-Eintrag (!9) ist zurückgezogen. Das Paket selbst bleibt angenommen, im Katalog steht es nicht.')
         expect(sent(calls).some((call) => call === 'POST /projects/7/merge_requests')).toBe(false)
     })
 

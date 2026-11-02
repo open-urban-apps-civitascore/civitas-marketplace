@@ -99,7 +99,7 @@ describe('a version the catalogue team took out', () => {
 
     it('calls a version replaced by a newer listed one replaced, not taken out', () => {
         const context = { openRequests: [], index: indexOf([{ id: ID, version: '1.1.0' }]), merged: [merged(5, '1.0.2'), merged(6, '1.1.0')] }
-        expect(catalogStatusIn(context, 'baeume', '1.0.2', ID)).toEqual({ state: 'none' })
+        expect(catalogStatusIn(context, 'baeume', '1.0.2', ID)).toEqual({ state: 'none', newerListed: '1.1.0' })
         expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'listed' })
     })
 
@@ -107,7 +107,7 @@ describe('a version the catalogue team took out', () => {
         const context = { openRequests: [], index: indexOf([{ id: ID, version: '1.1.0', maintainer: ' Stadt Musterstadt ' }]), merged: [] }
         expect(catalogStatusIn(context, 'baeume', '1.1.0', ID)).toEqual({ state: 'listed', maintainer: 'Stadt Musterstadt' })
         // Only a listed version: one the index does not list is not told by whom it would be.
-        expect(catalogStatusIn(context, 'baeume', '1.0.0', ID)).toEqual({ state: 'none' })
+        expect(catalogStatusIn(context, 'baeume', '1.0.0', ID)).toEqual({ state: 'none', newerListed: '1.1.0' })
     })
 
     it('counts only proposals that name this package, and judges nothing without an index', () => {
@@ -151,6 +151,16 @@ describe('a "no" to the entry, in the catalogue’s order (U3 of 2026-10-22)', (
         expect(catalogStatusIn({ ...none, index: indexOf([{ id: ID, version: '1.1.4' }]) }, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'listed' })
         // Closed proposals that would have brought back what the team took out stay taken out (!27, !29, !30).
         expect(catalogStatusIn({ ...none, merged: [merged(5, '1.1.4')] }, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'withdrawn', takenOut: { version: '1.1.4' } })
+    })
+
+    it('names the newer version the catalogue lists, also one pinned by hand from another repository', () => {
+        const pinned = { openRequests: [], index: indexOf([{ id: ID, version: '1.1.5' }]), merged: [] }
+        expect(catalogStatusIn(pinned, 'baeume', '1.1.4', ID, declined)).toEqual({ state: 'declined', mrUrl: declined.mrUrl, declined, newerListed: '1.1.5' })
+        // An open proposal still waits for an answer, and a revoked row lists nothing.
+        const open = { ...pinned, openRequests: [{ iid: 33, state: 'opened', source_branch: 'catalog/baeume-1.1.4', web_url: 'https://gitlab.example/mr/33' }] }
+        expect(catalogStatusIn(open, 'baeume', '1.1.4', ID)).toEqual({ state: 'mr-open', mrUrl: 'https://gitlab.example/mr/33' })
+        expect(catalogStatusIn({ ...pinned, index: indexOf([{ id: ID, version: '1.1.5', revoked: true }]) }, 'baeume', '1.1.4', ID).newerListed).toBeUndefined()
+        expect(catalogStatusIn({ ...pinned, index: indexOf([{ id: ID, version: '1.1.3' }]) }, 'baeume', '1.1.4', ID)).toEqual({ state: 'none' })
     })
 
     it('keeps what the team took out of another version beside it', () => {

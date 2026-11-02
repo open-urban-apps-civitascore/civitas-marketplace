@@ -51,7 +51,7 @@ describe('an empty tab', () => {
                 'Was das Katalog-Team nicht angenommen hat, bleibt hier 30 Tage lang und steht von Anfang an auch unter „Beendet“.',
         )
         expect(TAB_LEADS.published).toContain('Herausnehmen kann einen Eintrag nur das Katalog-Team.')
-        expect(TAB_LEADS.ended).toBe('Was zurückgezogen, nicht angenommen, entfernt oder aus dem Katalog genommen wurde, mit Datum und Namen. Die Angaben kommen aus GitLab, dort bleibt alles erhalten.')
+        expect(TAB_LEADS.ended).toBe('Was zurückgezogen, nicht angenommen, entfernt oder aus dem Katalog genommen wurde, mit Datum und Namen, soweit GitLab sie kennt. Dort bleibt alles erhalten.')
     })
 })
 

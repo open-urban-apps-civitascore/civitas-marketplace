@@ -58,6 +58,8 @@ export interface CatalogStatus {
     /** For `mr-open`: merging it would bring back a version taken out. */
     bringsBack?: boolean
     maintainer?: string
+    /** On `none` and `declined`: the newer version the catalogue lists, also one pinned by hand from elsewhere. */
+    newerListed?: string
 }
 
 export interface BundleTrees {
@@ -424,6 +426,8 @@ export function catalogStatusIn(context: CatalogContext, slug: string, version: 
         return { state: 'listed', ...(maintainer ? { maintainer } : {}) }
     }
     if (out?.thisVersion) return { state: 'withdrawn', ...takenOut }
-    if (declined) return { state: 'declined', mrUrl: declined.mrUrl, declined, ...takenOut }
-    return { state: 'none', ...takenOut }
+    const row = context.index ? indexRowOf(context.index, id) : undefined
+    const newer = row && !row.revoked && row.version && isNewerVersion(row.version, version) ? { newerListed: row.version } : {}
+    if (declined) return { state: 'declined', mrUrl: declined.mrUrl, declined, ...takenOut, ...newer }
+    return { state: 'none', ...takenOut, ...newer }
 }

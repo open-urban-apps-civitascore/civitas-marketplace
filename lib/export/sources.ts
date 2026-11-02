@@ -11,6 +11,8 @@ export interface ExportInstallation {
 }
 export interface ExportSource extends DatasetListing {
     catalog?: { id: string; displayName: string; description: string; version: string; maintainer: string; license: string; keywords: string[]; metadata: ExportMetadata }
+    /** The package the one active installation made this dataset from, also once its catalogue entry is gone. */
+    installedFrom?: string
     notice?: string
     /**
      * Whether an active installation made this dataset: installed from the
@@ -41,10 +43,11 @@ export function exportSources(datasets: DatasetListing[], installations: ExportI
         const known = installations ? { installed: matches.length > 0 } : {}
         const ids = new Set(matches.map((row) => row.packageId))
         if (ids.size > 1) return { ...dataset, ...known, notice: 'Mehrere Katalogzuordnungen: bitte die Angaben selbst ergänzen.' }
+        const from = ids.size === 1 ? { installedFrom: [...ids][0] as string } : {}
         const entry = catalog.find((row) => ids.has(row.id) && !row.revoked)
-        if (!entry) return { ...dataset, ...known, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }
+        if (!entry) return { ...dataset, ...known, ...from, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }
         const { id, displayName, description, version, maintainer, license, keywords, themes } = entry
-        return { ...dataset, ...known, catalog: { id, displayName, description, version, maintainer, license, keywords,
+        return { ...dataset, ...known, ...from, catalog: { id, displayName, description, version, maintainer, license, keywords,
             // `contact`, `media` and `implementation` are the previous operator's
             // own account of their deployment and start empty — see above.
             metadata: exportMetadataSchema.parse({ themes }),

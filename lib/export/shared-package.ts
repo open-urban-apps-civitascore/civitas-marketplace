@@ -70,7 +70,8 @@ function entryDecided(row: SharedPackageRow): boolean {
 export function usedVersions(pkg: SharedPackage): string[] {
     const proposed = pkg.versions.filter((fact) => !NOT_USED_UP.has(fact.outcome) || entryDecided(fact.row)).map((fact) => fact.version)
     const takenOut = pkg.versions.flatMap((fact) => (fact.row.catalog?.takenOut ? [fact.row.catalog.takenOut.version] : []))
-    return [...new Set([...proposed, ...takenOut])]
+    const listed = pkg.versions.flatMap((fact) => (fact.row.catalog?.newerListed ? [fact.row.catalog.newerListed] : []))
+    return [...new Set([...proposed, ...takenOut, ...listed])]
 }
 
 export function sameVersionAgain(pkg: SharedPackage | undefined, version: string): boolean {

@@ -227,4 +227,13 @@ describe('sharing metadata', () => {
         expect(exportSources(datasets, installations, []).map((source) => source.installed)).toEqual([true, false, false])
         expect(exportSources(datasets, undefined, []).map((source) => source.installed)).toEqual([undefined, undefined, undefined])
     })
+
+    it('keeps the package an installation came from, also once its catalogue entry is gone, and only an unambiguous one', () => {
+        const [gone] = exportSources([{ id: 'installed', name: 'Jungbaum test2' }], [{ dataSetId: 'installed', packageId: 'urn:x:usecase:jungbaum-test-2' }], [])
+        expect(gone).toMatchObject({ installedFrom: 'urn:x:usecase:jungbaum-test-2', notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' })
+        expect(gone.catalog).toBeUndefined()
+        const two = [{ dataSetId: 'installed', packageId: 'urn:x:usecase:a' }, { dataSetId: 'installed', packageId: 'urn:x:usecase:b' }]
+        expect(exportSources([{ id: 'installed', name: 'A' }], two, [])[0].installedFrom).toBeUndefined()
+        expect(exportSources([{ id: 'own', name: 'A' }], [{ dataSetId: 'own', packageId: 'urn:x:usecase:a', uninstalledAt: '2026-09-20' }], [])[0].installedFrom).toBeUndefined()
+    })
 })

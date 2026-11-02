@@ -28,6 +28,7 @@ export type ShareOutcome =
     /** Accepted, but the whole entry was taken out at an earlier version: nobody can move it on. */
     | 'entry-revoked'
     | 'listed'
+    /** A newer version took its place, in the folder or in the catalogue. */
     | 'replaced'
     | 'taken-out'
     | 'removed'
@@ -101,6 +102,7 @@ export function rowOutcome(row: SharedPackageRow, progress: ShareProgress = rowP
     if (bundle?.state === 'on-base') {
         if (catalog?.state === 'withdrawn') return catalog.takenOut && catalog.takenOut.version !== row.version ? 'entry-revoked' : 'taken-out'
         if (catalog?.state === 'mr-open' && catalog.bringsBack) return 'brings-back'
+        if (catalog?.newerListed) return 'replaced'
         // A "no" beats the folder; of two the later; an open entry proposal is newer than both.
         const entryNo = catalog?.state === 'declined' ? catalog.declined : undefined
         const removalNo = catalog?.state !== 'mr-open' ? bundle.removal?.declined : undefined
@@ -202,8 +204,6 @@ export interface ShareTabs {
     inProgress: TabRow[]
     published: TabRow[]
     ended: EndedEntry[]
-    /** Other instances' shares (demo, dev and local share one account): counted, not listed. */
-    elsewhere: Record<ShareTab, number>
     /** Datasets „Auswählen“ greys out: submitted, not in the catalogue yet; see `FREE_TO_CHOOSE`. */
     busy: ReadonlyMap<string, TabRow[]>
     /** Open proposals per package short name, from any dataset and instance: the server refuses a share beside them. */
@@ -285,6 +285,7 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
             ...(change && current(change) ? { declinedChange: declineOf(change) } : {}),
         }
     })
+    // Another instance's shares are neither listed nor counted: what it got accepted shows in the catalogue.
     const shown = (origin: InstanceMatch) => origin !== 'other'
     const onlyWhileCurrent = (entry: (typeof read)[number]) => ONLY_WHILE_CURRENT.has(entry.outcome) || entryUsedUp(entry.outcome, entry.row)
     const tabOf = (entry: (typeof read)[number]) => (onlyWhileCurrent(entry) && !entry.declined?.current ? undefined : TAB_OF[entry.outcome])
@@ -326,23 +327,17 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         }
     }
 
-    const elsewhere: Record<ShareTab, number> = { 'in-progress': 0, published: 0, ended: 0 }
     const inProgress: TabRow[] = []
     const published: TabRow[] = []
     for (const entry of read) {
         const tab = tabOf(entry)
-        if (tab !== 'in-progress' && tab !== 'published') continue
-        if (!shown(entry.origin)) {
-            elsewhere[tab]++
-            continue
-        }
+        if ((tab !== 'in-progress' && tab !== 'published') || !shown(entry.origin)) continue
         ;(tab === 'in-progress' ? inProgress : published).push(tabRow(entry))
     }
 
     const ended: EndedEntry[] = []
     const end = (entry: EndedEntry) => {
         if (shown(entry.origin)) ended.push(entry)
-        else elsewhere.ended++
     }
     for (const { row, outcome, origin } of read) {
         for (const proposal of proposalsOf(row)) {
@@ -391,7 +386,6 @@ export function shareTabs(rows: readonly SharedPackageRow[], { instance, person,
         inProgress,
         published,
         ended,
-        elsewhere,
         busy,
         openByPackage,
         counts: {

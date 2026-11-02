@@ -93,9 +93,12 @@ describe('a row of „Beendet“', () => {
             who: 'vorgeschlagen von Ewa, angenommen von daniel',
             url: `${WEB}/9`,
         })
-        const byHand = endedLine(entry({ ending: 'removed', what: 'version', byHand: true }))
-        expect(byHand).toMatchObject({ ending: 'Entfernt', when: 'Datum unbekannt', who: 'von Hand bei GitLab', url: `${WEB}/4` })
+        // By hand: no date to tell, and the folder's history shows the deletion, not the proposal that once added it.
+        const byHand = endedLine(entry({ ending: 'removed', what: 'version', byHand: true, row: { ...single, folderUrl: 'https://gitlab.example/group/catalog/-/commits/main/packages/baeume' } }))
+        expect(byHand).toMatchObject({ ending: 'Entfernt', who: 'von Hand bei GitLab', url: 'https://gitlab.example/group/catalog/-/commits/main/packages/baeume' })
+        expect(byHand.when).toBeUndefined()
         expect(byHand.what).toBeUndefined()
+        expect(endedLine(entry({ ending: 'removed', what: 'version', byHand: true })).url).toBe(`${WEB}/4`)
         // A removal turned down stays what it was about.
         expect(endedLine(entry({ ending: 'not-accepted', what: 'removal', proposal: proposal('removal', 9, 'closed', { closedBy: 'daniel' }) })).what).toBe('Entfernen')
     })
@@ -121,16 +124,19 @@ describe('a row of „Beendet“', () => {
     })
 
     it('says that the catalogue team took a version out, with their reason', () => {
-        const line = endedLine(entry({ ending: 'taken-out', what: 'version', version: '1.0.2', reason: 'Doppelt eingetragen' }))
+        const history = 'https://gitlab.example/group/catalog/-/commits/main/index.json'
+        const line = endedLine(entry({ ending: 'taken-out', what: 'version', version: '1.0.2', reason: 'Doppelt eingetragen' }), { rows: [], inProgress: [], catalogHistory: history })
         // With one full stop, as „In Arbeit“ and „Auswählen“ tell the same reason; the catalogue's own one is not doubled.
-        expect(line).toMatchObject({ version: '1.0.2', ending: 'Aus dem Katalog genommen', when: 'Datum unbekannt', who: 'Katalog-Team', reason: 'Grund: Doppelt eingetragen.' })
-        expect(text(render(createElement(EndedRow, { line })))).toContain('Grund: Doppelt eingetragen.')
+        expect(line).toMatchObject({ version: '1.0.2', ending: 'Aus dem Katalog genommen', who: 'vom Katalog-Team', reason: 'Grund: Doppelt eingetragen.', url: history })
+        // The catalogue's history tells when; the card does not guess.
+        expect(line.when).toBeUndefined()
+        expect(text(render(createElement(EndedRow, { line })))).toBe('Bäume Version 1.0.2 Aus dem Katalog genommen vom Katalog-Team Grund: Doppelt eingetragen. In GitLab ansehen Neue Version teilen')
         expect(endedLine(entry({ ending: 'taken-out', what: 'version', reason: 'Doppelt eingetragen!' })).reason).toBe('Grund: Doppelt eingetragen!')
     })
 
     it('leaves out whom nobody can tell', () => {
         expect(endedLine(entry({ proposal: proposal('bundle', 4, 'closed') })).who).toBeUndefined()
-        expect(text(render(createElement(EndedRow, { line: endedLine(entry({})) })))).toBe('Bäume Version 1.1.0 Paket · Zurückgezogen Datum unbekannt In GitLab ansehen')
+        expect(text(render(createElement(EndedRow, { line: endedLine(entry({})) })))).toBe('Bäume Version 1.1.0 Paket · Zurückgezogen In GitLab ansehen')
     })
 })
 
@@ -352,8 +358,7 @@ describe('the list „Beendet“', () => {
         expect(text(list({ lines: Array.from({ length: 31 }, (_, index) => line(index)) }))).not.toContain('Ältere in GitLab ansehen')
     })
 
-    it('counts what other instances ended, and says when nothing ended or GitLab could not be read', () => {
-        expect(text(list({ lines: [line(0)], elsewhere: 2 }))).toContain('2 weitere Einträge stammen von anderen Instanzen.')
+    it('says when nothing ended or GitLab could not be read', () => {
         expect(text(list({}))).toBe('Noch nichts beendet.')
         const failed = text(list({ error: 'GitLab-Fehler (500)' }))
         expect(failed).toBe('Was beendet ist, ließ sich gerade nicht abfragen (GitLab-Fehler (500)).')

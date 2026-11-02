@@ -56,7 +56,8 @@ export interface EndedLine {
     what?: string
     proposal?: number
     ending: string
-    when: string
+    /** Unset where GitLab tells no date: the catalogue's own changes, a folder deleted by hand. */
+    when?: string
     /** Proposers by display name, reviewers by GitLab username. */
     who?: string
     reason?: string
@@ -82,7 +83,7 @@ function whoOf(entry: EndedEntry): string | undefined {
             return parts.length ? parts.join(', ') : undefined
         }
         case 'taken-out':
-            return 'Katalog-Team'
+            return 'vom Katalog-Team'
     }
 }
 
@@ -98,6 +99,14 @@ export interface EndedContext {
     rows: readonly SharedPackageRow[]
     inProgress: readonly TabRow[]
     instance?: string
+    catalogHistory?: string
+}
+
+/** Where GitLab keeps what happened: a change by hand has no proposal to show. */
+function urlOf(entry: EndedEntry, context?: EndedContext): string {
+    if (entry.ending === 'taken-out' && context?.catalogHistory) return context.catalogHistory
+    if (entry.byHand && entry.row.folderUrl) return entry.row.folderUrl
+    return entry.proposal?.url ?? entry.row.bundleMr.url
 }
 
 const higherFirst = (a: TabRow, b: TabRow) => (isNewerVersion(a.row.version, b.row.version) ? -1 : isNewerVersion(b.row.version, a.row.version) ? 1 : 0)
@@ -160,15 +169,19 @@ export function endedLine(entry: EndedEntry, context?: EndedContext): EndedLine 
         // 0 for a row built without its proposals: no number told then.
         ...(entry.proposal?.iid ? { proposal: entry.proposal.iid } : {}),
         ending: ENDING_LABELS[entry.ending],
-        when: entry.at ? DAY.format(new Date(entry.at)) : 'Datum unbekannt',
+        ...(entry.at ? { when: DAY.format(new Date(entry.at)) } : {}),
         ...(who ? { who } : {}),
         ...(reason ? { reason } : {}),
         ...(context && ofUnknownInstance(entry.origin, context.instance) ? { unknownInstance: true } : {}),
-        url: entry.proposal?.url ?? entry.row.bundleMr.url,
+        url: urlOf(entry, context),
         ...(action ? { action } : {}),
     }
 }
 
 export function endedWhat(line: Pick<EndedLine, 'what' | 'ending' | 'proposal'>): string {
     return [line.what, line.ending, line.proposal ? `Vorschlag !${line.proposal}` : undefined].filter(Boolean).join(' · ')
+}
+
+export function endedWhen(line: Pick<EndedLine, 'when' | 'who'>): string | undefined {
+    return [line.when, line.who].filter(Boolean).join(' · ') || undefined
 }

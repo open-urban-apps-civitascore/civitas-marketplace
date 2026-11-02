@@ -138,15 +138,13 @@ const LISTS: Record<ShareTab, ReactNode> = {
     'in-progress': createElement(InProgress, {
         drafts: [DRAFT],
         rows: tabs.inProgress,
-        elsewhere: tabs.elsewhere['in-progress'],
         loaded: 1,
         onReload: () => {},
         onDiscard: () => {},
     }),
-    published: createElement(Published, { rows: tabs.published, elsewhere: tabs.elsewhere.published, now: NOW, instance: HERE }),
+    published: createElement(Published, { rows: tabs.published, now: NOW, instance: HERE }),
     ended: createElement(Ended, {
         lines: tabs.ended.map((entry) => ({ key: entry.key, line: endedLine(entry, { rows: ROWS, inProgress: tabs.inProgress, instance: HERE }) })),
-        elsewhere: tabs.elsewhere.ended,
         older: `${WEB}?scope=all&state=all&author_username=walkable.cities.2021`,
     }),
 }
@@ -183,7 +181,6 @@ const LABELS: Record<ShareTab, string[]> = {
         'Erneut versuchen',
         'Über das Marktplatz-Konto geschlossen, ohne Begründung.',
         'Vorschlag ansehen',
-        '1 weiterer Eintrag stammt von einer anderen Instanz.',
     ],
     published: [
         'Seit 14.10. im Katalog · eingereicht von Ewa · Herausgeber: Open Urban Apps',
@@ -229,10 +226,11 @@ describe('every tab of „Teilen“, rendered to plain text', () => {
         for (const label of LABELS[tab]) expect(said, label).toContain(label)
     })
 
-    it('shows each share in the tab it belongs in, and another instance’s nowhere but in a count', () => {
+    it('shows each share in the tab it belongs in, and another instance’s nowhere, not even counted', () => {
         expect(readable(PAGES.published)).not.toContain('Paket pegel')
         expect(readable(PAGES['in-progress'])).toContain('Paket pegel')
         expect(Object.values(PAGES).some((html) => readable(html).includes('Paket fremd'))).toBe(false)
+        expect(Object.values(PAGES).some((html) => /anderen? Instanz|portal\.dev/.test(readable(html)))).toBe(false)
         // „Veröffentlicht“ has none of the old chips, nor the entry proposal, which belongs to „In Arbeit“.
         expect(readable(renderToStaticMarkup(createElement(Fragment, null, LISTS.published)))).not.toMatch(/Paket: |Entfernen: |Stand: |Eintrag in Prüfung|Katalog-Eintrag vorschlagen|\bv\d/)
     })

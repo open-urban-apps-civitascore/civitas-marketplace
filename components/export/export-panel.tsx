@@ -84,7 +84,8 @@ const NOTHING_READ: ListingState = { state: 'read', rows: [], busy: new Map() }
 
 function listingStateOf(enabled: boolean, view: ReturnType<typeof useShareView>): ListingState {
     if (!enabled) return NOTHING_READ
-    if (view.rows === null) return { state: 'loading' }
+    // The tab's last reading lists at once, but choices wait for this visit's.
+    if (view.rows === null || view.loaded === 0) return { state: 'loading' }
     if (view.error) return { state: 'failed' }
     return { state: 'read', rows: view.rows, busy: view.tabs.busy, open: view.tabs.openByPackage, ...(view.instance ? { instance: view.instance } : {}) }
 }

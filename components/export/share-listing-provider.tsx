@@ -21,7 +21,7 @@ interface ShareListingContextValue {
 const ShareListingContext = createContext<ShareListingContextValue | null>(null)
 
 /**
- * Lives in the /export layout, which stays mounted across tabs and the wizard: GitLab is asked once per visit.
+ * Lives in the /export layout, which stays mounted across tabs and the wizard: the listing is asked once per visit.
  * Reads only once a page asks; who may see it is each page's own check, as layouts do not rerun on navigation.
  */
 export function ShareListingProvider({
@@ -67,6 +67,7 @@ export function useShareView(enabled: boolean) {
         tabs,
         instance: listing.instance,
         older: enabled ? listing.older : undefined,
+        catalogHistory: listing.catalogHistory,
         drafts,
         draftsReady,
         discardDraft,

@@ -58,8 +58,8 @@ describe('„So geht es weiter“ after a "no"', () => {
         const review = stages(html)[1]
         expect(review).toContain('aria-current="step"')
         // The warn triangle, never the ring of the person's next step (U8).
-        expect(review).toMatch(/<svg[^>]*class="[^"]*lucide-triangle-alert[^"]*text-amber-600[^"]*" aria-hidden="true"/)
-        expect(review).not.toContain('lucide-circle')
+        expect(review).toMatch(/<span data-mark="declined" class="[^"]*text-amber-600[^"]*"><svg[^>]*lucide-triangle-alert/)
+        expect(review).not.toContain('data-mark="yours"')
         // After their words the proposal, where a reason cut at 300 characters goes on (decision 4).
         expect(text(review)).toBe(
             'Paket-Prüfung Das Katalog-Team - nicht angenommen am 21.10. Grund (spaudanjo): „Die Datenquelle ist nicht öffentlich.“ Vorschlag ansehen ' +
@@ -88,7 +88,7 @@ describe('„So geht es weiter“ after a "no"', () => {
         expect(listing).toContain('lucide-triangle-alert')
         expect(text(html)).not.toContain('Das Katalog-Team - nicht angenommen')
         // Stage 3 is done; the proposal turned down is linked once, after the words at the stage that turned it down.
-        expect(catalog).toContain('lucide-circle-check')
+        expect(catalog).toContain('data-mark="done"')
         expect(catalog).not.toContain(`href="${WEB}/32"`)
         expect(listing).toContain(`href="${WEB}/32"`)
         expect(html).not.toContain('bg-primary')
@@ -134,9 +134,30 @@ describe('„So geht es weiter“ after a "no"', () => {
 
     it('keeps the person’s next step as it was where nothing was turned down', () => {
         const html = steps({ bundle: { state: 'on-base', verification: verified }, catalog: { state: 'none' } })
-        expect(stages(html)[2]).toContain('lucide-circle')
+        expect(stages(html)[2]).toContain('data-mark="yours"')
         expect(stages(html)[2]).toContain('bg-primary')
         expect(html).not.toContain('lucide-triangle-alert')
+    })
+
+    it('numbers the steps on one line, says how many there are while nothing is submitted, and draws no rule per row', () => {
+        const start = steps({})
+        const marks = [...start.matchAll(/data-mark="(\w+)"[^>]*>(\d?)/g)].map((match) => [match[1], match[2]])
+        expect(marks).toEqual([['yours', '1'], ['later', '2'], ['later', '3'], ['later', '4']])
+        expect(text(start)).toContain('Vier Schritte bis in den Katalog - den ersten machst du hier.')
+        // Three joins between four steps, and no hairline under each row.
+        expect(start.match(/w-px flex-1/g)).toHaveLength(3)
+        expect(stages(start).some((stage) => stage.includes('border-t'))).toBe(false)
+        // Once submitted, the first is done, and the lead about it would be stale.
+        const submitted = createElement(ShareSteps, {
+            progress: shareProgress({ version: '1.0.0', bundleMrState: 'opened' }),
+            busy: false,
+            canCheck: true,
+            version: '1.0.0',
+            onPropose: () => {},
+            onCheck: () => {},
+            onCatalog: () => {},
+        })
+        expect(text(renderToStaticMarkup(submitted))).not.toContain('Vier Schritte')
     })
 })
 

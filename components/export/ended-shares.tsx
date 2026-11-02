@@ -6,29 +6,27 @@ import { PackagePlus } from 'lucide-react'
 
 import { useShareView } from '@/components/export/share-listing-provider'
 import { ShareRow } from '@/components/export/share-row'
-import { elsewhereLine, EmptyTab } from '@/components/export/share-tab-states'
+import { EmptyTab } from '@/components/export/share-tab-states'
 import { Button, buttonClass, ExternalAnchor } from '@/components/ui/button'
 import { Notice, Pending } from '@/components/ui/notice'
-import { ENDED_PAGE, endedLine, endedRowId, endedWhat, type EndedAction, type EndedLine } from '@/lib/export/ended-lines'
+import { ENDED_PAGE, endedLine, endedRowId, endedWhat, endedWhen, type EndedAction, type EndedLine } from '@/lib/export/ended-lines'
 import { inProgressLinkText } from '@/lib/export/in-progress-items'
 
 export function EndedShares() {
     const view = useShareView(true)
     if (view.rows === null) return <Pending>Stand bei GitLab wird abgefragt …</Pending>
-    const context = { rows: view.rows, inProgress: view.tabs.inProgress, instance: view.instance }
+    const context = { rows: view.rows, inProgress: view.tabs.inProgress, instance: view.instance, catalogHistory: view.catalogHistory }
     const lines = view.tabs.ended.map((entry) => ({ key: entry.key, line: endedLine(entry, context) }))
-    return <Ended lines={lines} elsewhere={view.tabs.elsewhere.ended} error={view.error} older={view.older} />
+    return <Ended lines={lines} error={view.error} older={view.older} />
 }
 
 /** `older` is set only where the listing stopped before the account's oldest proposal. */
 export function Ended({
     lines,
-    elsewhere = 0,
     error,
     older: olderUrl,
 }: {
     lines: { key: string; line: EndedLine }[]
-    elsewhere?: number
     error?: string
     older?: string
 }) {
@@ -78,12 +76,12 @@ export function Ended({
                     )}
                 </div>
             )}
-            {elsewhere > 0 && <p className="text-sm text-muted-foreground">{elsewhereLine(elsewhere)}</p>}
         </div>
     )
 }
 
 export function EndedRow({ id, line }: { id?: string; line: EndedLine }) {
+    const when = endedWhen(line)
     return (
         <ShareRow
             id={id}
@@ -93,7 +91,7 @@ export function EndedRow({ id, line }: { id?: string; line: EndedLine }) {
             status={
                 <div className="flex flex-col gap-0.5">
                     <p className="text-sm text-foreground">{endedWhat(line)}</p>
-                    <p className="text-xs text-muted-foreground">{line.who ? `${line.when} · ${line.who}` : line.when}</p>
+                    {when && <p className="text-xs text-muted-foreground">{when}</p>}
                 </div>
             }
             reasons={line.reason ? [{ text: line.reason }] : undefined}
