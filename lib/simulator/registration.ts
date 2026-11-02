@@ -1,9 +1,10 @@
 import { isSqlSimulation } from '@/lib/catalog/types'
-import type { BundledDataSource, UseCaseEntry } from '@/lib/catalog/types'
+import type { BundledDataSource, BundledSimulation, SimulationStream, UseCaseEntry } from '@/lib/catalog/types'
 import { slugify } from '@/lib/export/urn'
 import type { InstallationReceipt, InstalledArtifactLine } from '@/lib/install-payload'
 import type {
     ArtifactRef,
+    SampleScenario,
     SimulationInput,
     SimulationOrigin,
     SimulationStatus,
@@ -85,19 +86,7 @@ export function planSimulations(
                     input: {
                         ...describe(simulation.label ?? simulation.sourceRef),
                         transport: { kind: 'sql' as const, table, ...(readDsn ? { readDsn } : {}) },
-                        scenario: {
-                            ...(simulation.intervalSeconds !== undefined
-                                ? { intervalSeconds: simulation.intervalSeconds }
-                                : {}),
-                            table: simulation.table,
-                            fields: simulation.fields,
-                            ...(simulation.cadence !== undefined ? { cadence: simulation.cadence } : {}),
-                            ...(simulation.seedRows !== undefined ? { seedRows: simulation.seedRows } : {}),
-                            ...(simulation.insertsPerTick !== undefined
-                                ? { insertsPerTick: simulation.insertsPerTick }
-                                : {}),
-                            maxRows: simulation.maxRows,
-                        },
+                        scenario: scenarioOf(simulation),
                         enabled: true,
                     },
                 },
@@ -120,12 +109,7 @@ export function planSimulations(
                     url: brokerUrl,
                     topic: topicFor(stream.name),
                 },
-                scenario: {
-                    ...(simulation.intervalSeconds !== undefined
-                        ? { intervalSeconds: simulation.intervalSeconds }
-                        : {}),
-                    fields: stream.fields,
-                },
+                scenario: scenarioOf(simulation, stream),
                 enabled: true,
             },
         }))
@@ -250,11 +234,28 @@ function topicPlanner(
     if (!subscription) {
         throw new Error(`Simulation '${sourceRef}': Datenquelle nennt keine MQTT-Topics`)
     }
-    if (subscription.endsWith('/+') || subscription.endsWith('/#')) {
-        const prefix = subscription.slice(0, -2)
-        return (streamName) => `${prefix}/${streamName}`
+    return (streamName) => streamTopic(subscription, streamName)
+}
+
+/** What the simulator runs: a table's whole scenario, or one stream's fields (the first by default). */
+export function scenarioOf(simulation: BundledSimulation, stream?: SimulationStream): SampleScenario {
+    const interval = simulation.intervalSeconds !== undefined ? { intervalSeconds: simulation.intervalSeconds } : {}
+    if (!isSqlSimulation(simulation)) return { ...interval, fields: (stream ?? simulation.streams[0])?.fields ?? {} }
+    const { table, fields, cadence, seedRows, insertsPerTick, maxRows } = simulation
+    return {
+        ...interval,
+        table,
+        fields,
+        ...(cadence !== undefined ? { cadence } : {}),
+        ...(seedRows !== undefined ? { seedRows } : {}),
+        ...(insertsPerTick !== undefined ? { insertsPerTick } : {}),
+        maxRows,
     }
-    return () => subscription
+}
+
+/** Its own subtopic under a `x/+` or `x/#` subscription, else the subscription itself. */
+export function streamTopic(subscription: string, streamName: string): string {
+    return subscription.endsWith('/+') || subscription.endsWith('/#') ? `${subscription.slice(0, -2)}/${streamName}` : subscription
 }
 
 function firstUrlOf(source: BundledDataSource | undefined): string | undefined {

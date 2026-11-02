@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { checkPackage } from '@/lib/export/package-check'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
-import { demoSources, simulationMembers, topicMatches } from '@/lib/export/simulations'
+import { demoSources, draftRegistrations, generatedId, simulationMembers, topicMatches } from '@/lib/export/simulations'
 import { transformSnapshot, type ExportOptions } from '@/lib/export/transform'
 import type { SimulationDetail, SimulationInput } from '@/lib/simulator/client'
 
@@ -198,5 +198,90 @@ describe('demoSources: a source without a Topic', () => {
         const emptyTopic = snapshot()
         emptyTopic.sources[0]!.configuration = { urls: ['tcp://broker:1883'], topics: [''] }
         expect(demoSources(emptyTopic, details)[0]!.problem).toBe('no-topic')
+    })
+})
+
+describe('demo data drafted from the structure, where the simulator has none', () => {
+    it('offers a draft per source without streams, chosen by its own id, and none beside streams', () => {
+        const [feed, db] = demoSources(snapshot(), [])
+        expect(feed.generated).toEqual({ id: generatedId('src-feed'), summary: '3 Datenströme mit je 4 Feldern, eine Nachricht alle 10 Sekunden' })
+        expect(db.generated).toEqual({ id: generatedId('src-db'), summary: '200 Zeilen mit 2 Spalten, einmal angelegt' })
+        expect(demoSources(snapshot(), details).some((source) => source.generated || source.notGenerated)).toBe(false)
+    })
+
+    it('says why where no draft fits, and offers none for a source without a Topic', () => {
+        const keyless = snapshot()
+        keyless.structures[1]!.model = { title: 'Zeile', type: 'object', properties: { gattung: { type: 'string' } } }
+        keyless.sources[0]!.configuration = { urls: ['tcp://broker:1883'], topics: [] }
+        const [feed, db] = demoSources(keyless, [])
+        expect(db.generated).toBeUndefined()
+        expect(db.notGenerated).toContain('jede Zeile eindeutig')
+        expect([feed.problem, feed.generated, feed.notGenerated]).toEqual(['no-topic', undefined, undefined])
+    })
+
+    it('packages a ticked draft, leaves an unticked one, and misses no stream for it', () => {
+        const ticked = simulationMembers(snapshot(), [], new Set([generatedId('src-feed')]))
+        expect(ticked.warnings).toEqual([])
+        expect(ticked.simulations).toMatchObject([{ sourceRef: 'Bodenfeuchte-Feed', topicBase: 'openurbanapps/bodenfeuchte', streams: [{}, {}, {}] }])
+        expect(simulationMembers(snapshot(), [], new Set()).simulations).toEqual([])
+    })
+
+    it('makes a package the install accepts, with stream names unique across it', () => {
+        const twin = snapshot()
+        twin.sources.push({ ...twin.sources[0]!, id: 'src-twin', name: 'Bodenfeuchte Feed' })
+        const chosen = new Set([generatedId('src-feed'), generatedId('src-twin'), generatedId('src-db')])
+        const { simulations, warnings } = simulationMembers(twin, [], chosen)
+        expect(warnings).toEqual([])
+        const names = simulations.flatMap((simulation) => ('streams' in simulation ? simulation.streams.map((stream) => stream.name) : []))
+        expect(names).toHaveLength(6)
+        expect(new Set(names).size).toBe(6)
+        const pkg = transformSnapshot(twin, {
+            publisher: 'openurbanapps', slug: 'jungbaum-geteilt', version: '1.0.0', displayName: 'Jungbaum geteilt', description: 'Test',
+            maintainer: 'Test', license: 'EUPL-1.2', keywords: [], domain: 'environment', simulations,
+            provenance: { datasetId: 'ds-copy', datasetName: 'Jungbaum geteilt', exportedAt: '2026-11-01' },
+        })
+        expect(checkPackage(pkg.files)).toEqual([])
+    })
+})
+
+describe('draftRegistrations: a draft put into the simulator to adjust it there', () => {
+    const planned = draftRegistrations(snapshot(), 'src-feed', undefined)
+    const registrations = 'registrations' in planned ? planned.registrations : []
+
+    it('registers each station switched off, on its own topic, tied to the source', () => {
+        expect(registrations.map((one) => one.id)).toEqual(['share--src-feed--bodenfeuchte-feed-1', 'share--src-feed--bodenfeuchte-feed-2', 'share--src-feed--bodenfeuchte-feed-3'])
+        expect(registrations[0]!.input).toMatchObject({
+            name: 'Jungbaum geteilt · Bodenfeuchte-Feed 1',
+            enabled: false,
+            transport: { kind: 'mqtt', url: 'tcp://demo-data-generator-simulator-broker.core.svc.cluster.local:1883', topic: 'openurbanapps/bodenfeuchte/bodenfeuchte-feed-1' },
+            origin: { dataSet: { id: 'ds-copy' }, dataSource: { id: 'src-feed', name: 'Bodenfeuchte-Feed' }, stream: 'bodenfeuchte-feed-1' },
+        })
+        const override = draftRegistrations(snapshot(), 'src-feed', 'tcp://localhost:1883')
+        expect('registrations' in override && override.registrations[0]!.input.transport).toMatchObject({ url: 'tcp://localhost:1883' })
+    })
+
+    it('comes back as the source’s streams, which then travel as the draft did', () => {
+        const registered = registrations.map(({ id, input }) => detail(id, input))
+        const [feed] = demoSources(snapshot(), registered)
+        expect(feed.streams.map((stream) => [stream.label, stream.matchedBy])).toEqual([
+            ['Bodenfeuchte-Feed 1', 'origin'],
+            ['Bodenfeuchte-Feed 2', 'origin'],
+            ['Bodenfeuchte-Feed 3', 'origin'],
+        ])
+        expect(feed.generated).toBeUndefined()
+        const drafted = simulationMembers(snapshot(), [], new Set([generatedId('src-feed')])).simulations
+        const readBack = simulationMembers(snapshot(), registered, new Set(registrations.map((one) => one.id))).simulations
+        expect(readBack).toEqual(drafted)
+    })
+
+    it('fills a table once, and says why it registers nothing', () => {
+        const table = draftRegistrations(snapshot(), 'src-db', undefined)
+        expect('registrations' in table && table.registrations).toMatchObject([
+            { id: 'share--src-db--jungbaumkataster-db', input: { enabled: false, transport: { kind: 'sql', table: 'kataster.jungbaeume' }, scenario: { cadence: 'fillToLimit', maxRows: 200 } } },
+        ])
+        expect(draftRegistrations(snapshot(), 'elsewhere', undefined)).toEqual({ note: 'die Datenquelle gehört nicht (mehr) zu diesem Datensatz' })
+        const brokerless = snapshot()
+        brokerless.sources[0]!.configuration = { topics: ['openurbanapps/bodenfeuchte/+'] }
+        expect(draftRegistrations(brokerless, 'src-feed', undefined)).toEqual({ note: 'der Simulator kennt keinen Broker für diese Datenquelle' })
     })
 })

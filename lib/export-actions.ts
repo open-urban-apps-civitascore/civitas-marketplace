@@ -76,9 +76,19 @@ import {
 } from '@/lib/export/status'
 import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import { datasourceHref } from '@/lib/portal-links'
-import { demoSources, simulationMembers, type DemoSource } from '@/lib/export/simulations'
-import { getSimulation, isSimulatorConfigured, listSimulations, SimulatorError, type SimulationDetail } from '@/lib/simulator/client'
-import { simulatorUiUrl } from '@/lib/simulator/ui-links'
+import { demoSources, draftFor, draftRegistrations, isGeneratedId, simulationMembers, type DemoSource } from '@/lib/export/simulations'
+import {
+    deleteSimulation,
+    fetchSample,
+    getSimulation,
+    isSimulatorConfigured,
+    listSimulations,
+    registerSimulation,
+    SimulatorError,
+    type SimulationDetail,
+} from '@/lib/simulator/client'
+import { scenarioOf } from '@/lib/simulator/registration'
+import { simulationEditUiHref, simulatorUiUrl } from '@/lib/simulator/ui-links'
 import { getAccessToken, requireSession } from '@/lib/session'
 import { fetchShareRight, proposerName, shareRefusal } from '@/lib/export/share-permission'
 
@@ -192,7 +202,7 @@ function parseDemoStreams(raw: string): string[] | undefined {
 }
 
 /** The list carries no scenarios, so each is read; the simulator caps registrations at 50. */
-async function readSimulations(): Promise<{ details: SimulationDetail[]; problem?: string }> {
+async function readSimulations(): Promise<{ details: SimulationDetail[]; problem?: string; unread?: true }> {
     if (!isSimulatorConfigured()) return { details: [], problem: 'Der Simulator ist an diese Instanz nicht angebunden.' }
     try {
         const listed = await listSimulations()
@@ -200,7 +210,7 @@ async function readSimulations(): Promise<{ details: SimulationDetail[]; problem
         return { details: details.filter((detail): detail is SimulationDetail => !!detail) }
     } catch (error) {
         if (!(error instanceof SimulatorError)) throw error
-        return { details: [], problem: `Der Simulator antwortet nicht: ${error.message}` }
+        return { details: [], problem: `Der Simulator antwortet nicht: ${error.message}`, unread: true }
     }
 }
 
@@ -214,7 +224,8 @@ async function buildPackage(
     exportedBy: string | undefined,
 ): Promise<ExportedPackage> {
     const snapshot = await readUseCase(accessToken, form.datasetId)
-    const demo = form.demoStreams.length ? await readSimulations() : { details: [] }
+    // Drafts need no simulator; only streams made there are read back.
+    const demo = form.demoStreams.some((id) => !isGeneratedId(id)) ? await readSimulations() : { details: [] }
     const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
     const pkg = transformSnapshot(snapshot, {
         ...form.options,
@@ -1013,9 +1024,55 @@ export async function inspectExportSource(datasetId: string): Promise<{
 }
 
 async function demoInventory(snapshot: Awaited<ReturnType<typeof readUseCase>>): Promise<DemoInventory> {
-    const { details, problem } = await readSimulations()
+    const { details, problem, unread } = await readSimulations()
     const ui = simulatorUiUrl()
-    // The portal link is built here: only the server knows the portal's address.
-    const sources = demoSources(snapshot, details).map((source) => (source.problem ? { ...source, portalHref: datasourceHref(source.id) } : source))
+    // Streams that could not be read are not none: a draft would take their place.
+    if (unread) return { sources: [], problem, ...(ui ? { simulatorUi: ui } : {}) }
+    const sources = await Promise.all(
+        demoSources(snapshot, details).map(async (source): Promise<DemoSource> => {
+            // The portal link is built here: only the server knows the portal's address.
+            if (source.problem) return { ...source, portalHref: datasourceHref(source.id) }
+            if (!source.generated || problem) return source
+            const sample = await draftSample(snapshot, source.id)
+            return sample ? { ...source, generated: { ...source.generated, sample } } : source
+        }),
+    )
     return { sources, ...(problem ? { problem } : {}), ...(ui ? { simulatorUi: ui } : {}) }
+}
+
+const SAMPLE_RECORDS = 3
+
+/** Without a preview the draft still goes into the package: a sample is shown, never required. */
+async function draftSample(snapshot: InstanceSnapshot, sourceId: string): Promise<Record<string, unknown>[] | undefined> {
+    const source = snapshot.sources.find((candidate) => candidate.id === sourceId)
+    const draft = source ? draftFor(snapshot, source) : undefined
+    if (!draft || 'note' in draft) return undefined
+    try {
+        return await fetchSample(scenarioOf(draft.simulation), SAMPLE_RECORDS)
+    } catch {
+        return undefined
+    }
+}
+
+/** Puts a source's draft into the simulator, switched off, and says where to adjust it. */
+export async function adjustDemoInSimulator(datasetId: string, sourceId: string): Promise<{ href: string } | { error: string }> {
+    await requireSession()
+    const ui = simulatorUiUrl()
+    if (!ui || !isSimulatorConfigured()) return { error: 'Der Simulator ist an diese Instanz nicht angebunden.' }
+    try {
+        const snapshot = await readUseCase(await getAccessToken(), datasetId)
+        const planned = draftRegistrations(snapshot, sourceId, process.env.SIMULATOR_BROKER_URL)
+        if ('note' in planned) return { error: `Nicht im Simulator angelegt: ${planned.note}.` }
+        const done = await Promise.allSettled(planned.registrations.map(({ id, input }) => registerSimulation(id, input)))
+        const failed = done.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+        if (failed) {
+            // All streams or none: half a draft in the simulator would replace the whole one in the box.
+            await Promise.allSettled(planned.registrations.filter((_, index) => done[index].status === 'fulfilled').map(({ id }) => deleteSimulation(id)))
+            throw failed.reason
+        }
+        return { href: simulationEditUiHref(ui, planned.registrations[0].id) }
+    } catch (error) {
+        if (error instanceof PortalReadError || error instanceof SimulatorError) return { error: `Nicht im Simulator angelegt: ${error.message}` }
+        throw error
+    }
 }
