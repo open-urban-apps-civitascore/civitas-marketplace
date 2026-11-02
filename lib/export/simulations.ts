@@ -1,8 +1,10 @@
 import { simulationProblem } from '@/lib/catalog/assemble'
-import type { BundledMqttSimulation, BundledSimulation, BundledSqlSimulation, SimulationStream } from '@/lib/catalog/types'
+import { isSqlSimulation, type BundledMqttSimulation, type BundledSimulation, type BundledSqlSimulation, type SimulationStream } from '@/lib/catalog/types'
 import type { InstanceSnapshot, SnapshotSource } from '@/lib/export/portal-reader'
+import { clipLabel, draftSimulation, type Draft } from '@/lib/export/simulation-draft'
 import { logicalUrn, slugify } from '@/lib/export/urn'
-import type { SimulationDetail } from '@/lib/simulator/client'
+import type { SimulationDetail, SimulationInput } from '@/lib/simulator/client'
+import { scenarioOf, streamTopic } from '@/lib/simulator/registration'
 
 /**
  * Demo data for a shared package, read back from the simulator.
@@ -44,7 +46,25 @@ export interface DemoSource {
     problem?: 'no-topic'
     /** Where the source is fixed in the portal; built on the server, which knows the portal's address. */
     portalHref?: string
+    /** Drafted from the structure, for a source without streams; chosen like one. */
+    generated?: GeneratedDemo
+    /** Why there is no draft. */
+    notGenerated?: string
 }
+
+export interface GeneratedDemo {
+    /** `generated:<source id>`, chosen and unticked like a stream id. */
+    id: string
+    summary: string
+    /** A few records, where the simulator could render them. */
+    sample?: Record<string, unknown>[]
+}
+
+const GENERATED = 'generated:'
+
+export const generatedId = (sourceId: string) => `${GENERATED}${sourceId}`
+
+export const isGeneratedId = (id: string) => id.startsWith(GENERATED)
 
 type Transport = DemoSource['transport']
 
@@ -65,6 +85,29 @@ function topicsOf(source: SnapshotSource): string[] {
  */
 function subscriptionOf(source: SnapshotSource): string | undefined {
     return topicsOf(source)[0] || undefined
+}
+
+/** The same draft each time: the preview shows what the package gets. */
+export function draftFor(snapshot: InstanceSnapshot, source: SnapshotSource): Draft {
+    const transport = transportOf(source)
+    if (!transport) return { note: 'der Simulator speist nur MQTT- und SQL-Quellen' }
+    const model = snapshot.structures.find((candidate) => candidate.versionId === source.structureVersionId)?.model
+    if (!model) return { note: 'die Datenquelle nennt keine Datenstruktur' }
+    const table = typeof source.configuration.table === 'string' ? source.configuration.table : undefined
+    return draftSimulation({ title: source.name, transport, subscription: subscriptionOf(source), table, model })
+}
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+export function draftSummary(simulation: BundledSimulation): string {
+    if (isSqlSimulation(simulation)) {
+        const rows = (n: number | undefined) => `${n} Zeilen mit ${count(Object.keys(simulation.table.columns).length, 'Spalte', 'Spalten')}`
+        return simulation.cadence === 'fillToLimit'
+            ? `${rows(simulation.maxRows)}, einmal angelegt`
+            : `${rows(simulation.seedRows)} zum Start, dann alle ${simulation.intervalSeconds} Sekunden eine neue, höchstens ${simulation.maxRows}`
+    }
+    const fields = Object.keys(simulation.streams[0]?.fields ?? {}).length
+    return `${count(simulation.streams.length, 'Datenstrom', 'Datenströme')} mit je ${count(fields, 'Feld', 'Feldern')}, eine Nachricht alle ${simulation.intervalSeconds} Sekunden`
 }
 
 /** MQTT filter matching: `+` stands for one level, a trailing `#` for any rest. */
@@ -96,15 +139,11 @@ function belongsTo(detail: SimulationDetail, source: SnapshotSource, transport: 
     return undefined
 }
 
-/** A package label's limit; the simulator allows longer names, so a label is cut to fit. */
-const LABEL_MAX = 80
-
 /** The install names a stream `<dataset> · <label>`; the package carries the label alone. */
 function labelOf(detail: SimulationDetail): string {
     const name = (detail.input?.name ?? detail.name ?? detail.id).trim()
     const cut = name.indexOf(' · ')
-    const label = (cut >= 0 ? name.slice(cut + 3) : name).trim() || detail.id
-    return label.length > LABEL_MAX ? `${label.slice(0, LABEL_MAX - 1).trimEnd()}…` : label
+    return clipLabel((cut >= 0 ? name.slice(cut + 3) : name).trim() || detail.id)
 }
 
 /** The streams of the simulator that feed each MQTT or SQL source of the dataset. */
@@ -117,13 +156,17 @@ export function demoSources(snapshot: InstanceSnapshot, details: SimulationDetai
             const matchedBy = belongsTo(detail, source, transport)
             return matchedBy && detail.input?.scenario ? [{ id: detail.id, label: labelOf(detail), matchedBy }] : []
         })
+        const problem = transport === 'mqtt' && !subscriptionOf(source) ? ('no-topic' as const) : undefined
+        const draft = streams.length || problem ? undefined : draftFor(snapshot, source)
         return [{
             id: source.id,
             name: source.name,
             transport,
             ...(structure ? { structureUrn: logicalUrn(structure.modelUrn) } : {}),
             streams: streams.sort((a, b) => a.label.localeCompare(b.label, 'de')),
-            ...(transport === 'mqtt' && !subscriptionOf(source) ? { problem: 'no-topic' as const } : {}),
+            ...(problem ? { problem } : {}),
+            ...(draft && 'simulation' in draft ? { generated: { id: generatedId(source.id), summary: draftSummary(draft.simulation) } } : {}),
+            ...(draft && 'note' in draft ? { notGenerated: draft.note } : {}),
         }]
     })
 }
@@ -159,6 +202,72 @@ function uniqueName(name: string, taken: Set<string>): string {
     return candidate
 }
 
+/** Stream names become simulator ids at install, so they are unique in the whole package. */
+function withUniqueStreams(simulation: BundledSimulation, taken: Set<string>): BundledSimulation {
+    if (isSqlSimulation(simulation)) return simulation
+    return { ...simulation, streams: simulation.streams.map((stream) => ({ ...stream, name: uniqueName(stream.name, taken) })) }
+}
+
+/** Ours, apart from an install's `<installationId>--`. */
+const ADJUST_PREFIX = 'share--'
+
+/**
+ * A draft put into this instance's simulator, switched off, so it can be adjusted there. It then feeds
+ * the source by its recorded origin, and the package reads it back like any other stream.
+ */
+export function draftRegistrations(
+    snapshot: InstanceSnapshot,
+    sourceId: string,
+    brokerUrl: string | undefined,
+): { registrations: { id: string; input: SimulationInput }[] } | { note: string } {
+    const source = snapshot.sources.find((candidate) => candidate.id === sourceId)
+    if (!source) return { note: 'die Datenquelle gehört nicht (mehr) zu diesem Datensatz' }
+    const draft = draftFor(snapshot, source)
+    if ('note' in draft) return draft
+    const structure = snapshot.structures.find((candidate) => candidate.versionId === source.structureVersionId)
+    const origin = {
+        dataSet: { name: snapshot.dataset.name, id: snapshot.dataset.id },
+        dataSource: { name: source.name, id: source.id, ...(source.configurationUrn ? { urn: logicalUrn(source.configurationUrn) } : {}) },
+        ...(structure ? { dataStructure: { name: structure.name, urn: logicalUrn(structure.modelUrn) } } : {}),
+    }
+    const describe = (label: string) => ({
+        // As an install names it, so the package reads the label back alone.
+        name: `${snapshot.dataset.name} · ${label}`,
+        description: `Beim Teilen aus der Datenstruktur „${structure?.name ?? source.name}“ erzeugt.`,
+    })
+    const simulation = draft.simulation
+    if (isSqlSimulation(simulation)) {
+        return {
+            registrations: [{
+                id: `${ADJUST_PREFIX}${source.id}--${slugify(source.name)}`,
+                input: {
+                    ...describe(simulation.label ?? source.name),
+                    origin,
+                    transport: { kind: 'sql', table: source.configuration.table as string },
+                    scenario: scenarioOf(simulation),
+                    enabled: false,
+                },
+            }],
+        }
+    }
+    const urls = source.configuration.urls
+    const url = brokerUrl?.trim() || (Array.isArray(urls) && typeof urls[0] === 'string' ? urls[0] : '')
+    if (!url) return { note: 'der Simulator kennt keinen Broker für diese Datenquelle' }
+    const subscription = subscriptionOf(source) as string
+    return {
+        registrations: simulation.streams.map((stream) => ({
+            id: `${ADJUST_PREFIX}${source.id}--${stream.name}`,
+            input: {
+                ...describe(stream.label ?? stream.name),
+                origin: { ...origin, stream: stream.name },
+                transport: { kind: 'mqtt', url, topic: streamTopic(subscription, stream.name) },
+                scenario: scenarioOf(simulation, stream),
+                enabled: false,
+            },
+        })),
+    }
+}
+
 /**
  * The package's simulation members for the chosen streams. Chosen ids that do
  * not feed a source of this dataset are ignored: the choice comes from a form,
@@ -175,14 +284,22 @@ export function simulationMembers(
 
     const sources = demoSources(snapshot, details)
     const feeding = new Set(sources.flatMap((demo) => demo.streams.map((stream) => stream.id)))
-    const missing = [...chosen].filter((id) => !feeding.has(id))
+    const missing = [...chosen].filter((id) => !feeding.has(id) && !isGeneratedId(id))
     if (missing.length) {
         warnings.push(`${missing.length === 1 ? 'Ein gewählter Datenstrom gehört' : `${missing.length} gewählte Datenströme gehören`} nicht (mehr) zu diesem Datensatz und ${missing.length === 1 ? 'fehlt' : 'fehlen'} im Paket: ${missing.join(', ')}`)
     }
+    const taken = new Set<string>()
     for (const demo of sources) {
         const picked = demo.streams.filter((stream) => chosen.has(stream.id)).map((stream) => byId.get(stream.id) as SimulationDetail)
-        if (!picked.length) continue
         const source = snapshot.sources.find((candidate) => candidate.id === demo.id) as SnapshotSource
+        if (!picked.length) {
+            // What the person saw and ticked, even if streams were made meanwhile: those were not chosen.
+            if (!chosen.has(generatedId(demo.id))) continue
+            const draft = draftFor(snapshot, source)
+            if ('note' in draft) warnings.push(`Demo-Daten für ${demo.name}: ${draft.note} - ausgelassen`)
+            else simulations.push(withUniqueStreams(draft.simulation, taken))
+            continue
+        }
         const model = snapshot.structures.find((candidate) => candidate.versionId === source.structureVersionId)?.model
         if (!model) {
             warnings.push(`Demo-Daten für ${demo.name}: die Quelle nennt keine Struktur - ausgelassen`)
@@ -224,7 +341,6 @@ export function simulationMembers(
             if (intervals.length > 1) {
                 warnings.push(`Demo-Daten für ${demo.name}: die Datenströme senden in verschiedenen Takten (${intervals.join(', ')} s) - das Paket nimmt ${intervals[0]} s für alle`)
             }
-            const taken = new Set<string>()
             const streams: SimulationStream[] = picked.map((detail) => {
                 const recorded = (detail.origin ?? detail.input?.origin)?.stream
                 const fromId = detail.id.includes('--') ? detail.id.slice(detail.id.lastIndexOf('--') + 2) : undefined

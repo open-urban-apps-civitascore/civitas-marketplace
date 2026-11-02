@@ -21,6 +21,11 @@ export function simulationUiHref(base: string, simulationId: string): string {
     return `${base}/simulations/${encodeURIComponent(simulationId)}`
 }
 
+/** The simulator UI's form for changing one simulation. */
+export function simulationEditUiHref(base: string, simulationId: string): string {
+    return `${simulationUiHref(base, simulationId)}/edit`
+}
+
 /**
  * The simulator UI's form for a new stream, started from a source's structure.
  * `source` names the data source the stream is meant for, so the form can take

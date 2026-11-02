@@ -42,7 +42,7 @@ function requireString(record: Record<string, unknown>, field: string, where: st
 }
 
 /** A label ends up in the simulator's name for the stream, which holds 200 characters. */
-const LABEL_MAX = 80
+export const LABEL_MAX = 80
 
 function requireOptionalLabel(value: unknown, where: string): void {
     if (value === undefined) return

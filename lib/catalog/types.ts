@@ -196,6 +196,10 @@ export type GeneratorSpec =
           noise?: number
           integer?: boolean
       }
+    /** `${prefix}${n}`: the only kind that mints a unique key for a table. */
+    | { kind: 'sequence'; prefix?: string; start?: number; padTo?: number }
+    /** Stateless scatter, for coordinates. */
+    | { kind: 'jitter'; center: number; spread: number; precision?: number }
 
 /**
  * One publisher the simulator would run for this use case — one MQTT stream on

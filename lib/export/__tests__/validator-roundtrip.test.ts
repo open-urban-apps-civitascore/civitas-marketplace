@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { checkPackage } from '@/lib/export/package-check'
 import { transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
+import { generatedId, simulationMembers } from '@/lib/export/simulations'
 
 /**
  * The acceptance test that matters: an exported package must satisfy the
@@ -188,6 +189,28 @@ describe.skipIf(!hasPython)('exported package against the real validate-bundle.p
         const run = runShippedValidator(transformSnapshot(snapshot, options))
         expect(run.status).toBe(0)
         expect(run.output).toMatch(/^Package OK/)
+    })
+
+    it('passes with demo data drafted from the structures, a table among them', () => {
+        const withTable: InstanceSnapshot = {
+            ...snapshot,
+            structures: [
+                ...snapshot.structures,
+                {
+                    versionId: 'v4', dataStructureId: 's4', name: 'Baumzeile', modelUrn: 'urn:core:instance:stadt:datastructure:default:baumzeile:hhhhhhhhhh:1.0.0',
+                    model: { type: 'object', required: ['baum_id'], properties: { baum_id: { type: 'string' }, lat: { type: 'number' }, lon: { type: 'number' } } },
+                },
+            ],
+            sources: [...snapshot.sources, { id: 'db', name: 'Baum-DB', connectorType: 'SQL', configuration: { table: 'baeume.zeilen' }, structureVersionId: 'v4' }],
+        }
+        const { simulations, warnings } = simulationMembers(withTable, [], new Set([generatedId('src'), generatedId('db')]))
+        expect(warnings).toEqual([])
+        expect(simulations).toHaveLength(2)
+        const pkg = transformSnapshot(withTable, { ...options, simulations })
+        expect(checkPackage(pkg.files)).toEqual([])
+        const run = runShippedValidator(pkg)
+        expect(run.errors).toEqual([])
+        expect(run.status).toBe(0)
     })
 
     it('passes both checks with a mapped FROST sink', () => {

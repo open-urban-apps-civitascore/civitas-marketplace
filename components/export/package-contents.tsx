@@ -1,13 +1,13 @@
 'use client'
 
-import { Fragment } from 'react'
-import { CircleCheck, CirclePlay, Database, Layers, MapIcon, Radio } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { CircleCheck, CirclePlay, Database, Layers, MapIcon, Radio, SlidersHorizontal, Sparkles } from 'lucide-react'
 
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Flow, FlowGroup, FlowHeading, FlowItem, FlowNote } from '@/components/ui/flow'
 import { InlineNotice } from '@/components/ui/notice'
 import { StatusPill } from '@/components/ui/status-pill'
-import type { DemoInventory, InventoryArtifact } from '@/lib/export-actions'
+import { adjustDemoInSimulator, type DemoInventory, type InventoryArtifact } from '@/lib/export-actions'
 import type { DemoSource } from '@/lib/export/simulations'
 import type { ExportSource } from '@/lib/export/sources'
 import { newSimulationUiHref } from '@/lib/simulator/ui-links'
@@ -41,6 +41,7 @@ export function PackageContents({
     onToggleDemo: (streamId: string) => void
     onReloadDemo: () => void
 }) {
+    const adjust = useAdjustInSimulator(source.id, onReloadDemo)
     const platform = artifacts.filter((item) => item.group !== 'map')
     const map = artifacts.filter((item) => item.group === 'map')
     // The API standards say what kind of map service comes along ("OWS"); the rows name them again.
@@ -48,7 +49,7 @@ export function PackageContents({
 
     return (
         <Flow>
-            {demo && <DemoGroup key="demo" demo={demo} excluded={demoExcluded} onToggle={onToggleDemo} onReload={onReloadDemo} />}
+            {demo && <DemoGroup key="demo" demo={demo} excluded={demoExcluded} onToggle={onToggleDemo} onReload={onReloadDemo} adjust={adjust} />}
             <FlowGroup
                 key="platform"
                 icon={Layers}
@@ -117,21 +118,65 @@ function ArtifactRow({ item, kindShown }: { item: InventoryArtifact; kindShown: 
     )
 }
 
-/** Optional demo data: the simulator's streams that feed the dataset's sources, ticked to take them along. */
-function DemoGroup({
+/** „Im Simulator anpassen“ on a drafted source: which one is being put there, and what came of it. */
+export interface DemoAdjust {
+    onAdjust: (sourceId: string) => void
+    pending?: string
+    notice?: { sourceId: string; message: string; href?: string }
+}
+
+/** Puts the draft into the simulator and opens it there; on success the box reads its streams anew. */
+function useAdjustInSimulator(datasetId: string, onReload: () => void): DemoAdjust {
+    const [pending, setPending] = useState<string>()
+    const [notice, setNotice] = useState<DemoAdjust['notice']>()
+    const onAdjust = (sourceId: string) => {
+        // Opened in the click: a window opened after the answer would be blocked.
+        const tab = window.open('', '_blank')
+        if (tab) {
+            tab.opener = null
+            if (tab.document.body) tab.document.body.textContent = 'Demo-Daten werden im Simulator angelegt …'
+        }
+        setPending(sourceId)
+        setNotice(undefined)
+        adjustDemoInSimulator(datasetId, sourceId)
+            .then((answer) => {
+                if ('error' in answer) {
+                    tab?.close()
+                    setNotice({ sourceId, message: answer.error })
+                } else if (tab) {
+                    tab.location.href = answer.href
+                    onReload()
+                } else {
+                    setNotice({ sourceId, message: 'Im Simulator angelegt - dein Browser hat das neue Fenster blockiert.', href: answer.href })
+                }
+            })
+            .catch(() => {
+                tab?.close()
+                setNotice({ sourceId, message: 'Die Anfrage an den Server ist fehlgeschlagen.' })
+            })
+            .finally(() => setPending(undefined))
+    }
+    return { onAdjust, pending, notice }
+}
+
+/** Optional demo data: the simulator's streams that feed the dataset's sources, or drafts, ticked to take them along. */
+export function DemoGroup({
     demo,
     excluded,
     onToggle,
     onReload,
+    adjust,
 }: {
     demo: DemoInventory
     excluded: ReadonlySet<string>
     onToggle: (streamId: string) => void
     onReload: () => void
+    adjust: DemoAdjust
 }) {
     const usable = demo.sources.filter((source) => !source.problem)
-    const total = usable.reduce((count, source) => count + source.streams.length, 0)
-    const chosen = usable.reduce((count, source) => count + source.streams.filter((stream) => !excluded.has(stream.id)).length, 0)
+    const ids = usable.flatMap((source) => [...source.streams.map((stream) => stream.id), ...(source.generated ? [source.generated.id] : [])])
+    const chosen = ids.filter((id) => !excluded.has(id)).length
+    const drafted = usable.some((source) => source.generated)
 
     return (
         <FlowGroup
@@ -139,11 +184,11 @@ function DemoGroup({
             tone="neutral"
             title="Demo-Daten"
             subtitle="Simulator - freiwillig"
-            meta={total > 0 ? `${chosen} von ${total} ausgewählt` : undefined}
+            meta={ids.length > 0 ? `${chosen} von ${ids.length} ausgewählt` : undefined}
             footer={
                 <div className="flex flex-col items-start gap-1 pb-1">
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                        Angehakte Datenströme kommen ins Paket. Eine Installation startet sie für ihre eigenen Datenquellen.
+                        Angehakte Demo-Daten kommen ins Paket. Eine Installation startet sie für ihre eigenen Datenquellen.
                     </p>
                     <Button variant="ghost" className="text-xs" onClick={onReload}>
                         Erneut prüfen
@@ -151,15 +196,26 @@ function DemoGroup({
                 </div>
             }
         >
-            {demo.problem ? (
+            {demo.problem && (
                 <FlowNote>
-                    <InlineNotice tone="neutral">{demo.problem}</InlineNotice>
+                    <InlineNotice tone="neutral">
+                        {demo.problem}
+                        {drafted && ' Die erzeugten Demo-Daten kommen trotzdem ins Paket, nur ohne Vorschau.'}
+                    </InlineNotice>
                 </FlowNote>
-            ) : demo.sources.length === 0 ? (
-                <FlowNote>Dieser Datensatz hat keine MQTT- oder SQL-Quelle, für die der Simulator Daten erzeugen könnte.</FlowNote>
+            )}
+            {demo.sources.length === 0 ? (
+                !demo.problem && <FlowNote>Dieser Datensatz hat keine MQTT- oder SQL-Quelle, für die der Simulator Daten erzeugen könnte.</FlowNote>
             ) : (
                 demo.sources.map((source) => (
-                    <DemoSourceRows key={source.id} source={source} simulatorUi={demo.simulatorUi} excluded={excluded} onToggle={onToggle} />
+                    <DemoSourceRows
+                        key={source.id}
+                        source={source}
+                        simulatorUi={demo.problem ? undefined : demo.simulatorUi}
+                        excluded={excluded}
+                        onToggle={onToggle}
+                        adjust={adjust}
+                    />
                 ))
             )}
         </FlowGroup>
@@ -171,15 +227,25 @@ function DemoSourceRows({
     simulatorUi,
     excluded,
     onToggle,
+    adjust,
 }: {
     source: DemoSource
     simulatorUi?: string
     excluded: ReadonlySet<string>
     onToggle: (streamId: string) => void
+    adjust: DemoAdjust
 }) {
     const transport = source.transport === 'mqtt' ? 'MQTT' : 'SQL'
     // Without a Topic the package cannot say where its streams publish: shown, but not offered.
     const blocked = source.problem === 'no-topic'
+    const generated = source.generated
+    const notice = adjust.notice?.sourceId === source.id ? adjust.notice : undefined
+    const newStreamLink = simulatorUi && source.structureUrn && (
+        <>
+            {' '}
+            <ExternalAnchor href={newSimulationUiHref(simulatorUi, source.structureUrn, source.id)}>Im Simulator anlegen</ExternalAnchor>
+        </>
+    )
 
     return (
         <>
@@ -213,17 +279,114 @@ function DemoSourceRows({
                     note={`für Datenquelle „${source.name}“ · ${transport}${stream.matchedBy === 'address' ? ' · über Topic oder Tabelle zugeordnet' : ''}`}
                 />
             ))}
-            {!blocked && source.streams.length === 0 && (
+            {generated && (
+                <>
+                    <FlowItem
+                        control={
+                            <input
+                                type="checkbox"
+                                className="size-4 shrink-0 accent-primary"
+                                checked={!excluded.has(generated.id)}
+                                onChange={() => onToggle(generated.id)}
+                            />
+                        }
+                        icon={<Sparkles className="size-4" />}
+                        name="Erzeugte Demo-Daten"
+                        note={`für Datenquelle „${source.name}“ · ${transport} · ${generated.summary}`}
+                    />
+                    <FlowNote>
+                        <p>Aus der Datenstruktur vorgeschlagen{generated.sample?.length ? ' - so sehen die ersten Nachrichten aus:' : '.'}</p>
+                        {!!generated.sample?.length && <SampleTable records={generated.sample} />}
+                        {simulatorUi && !excluded.has(generated.id) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <Button
+                                    icon={SlidersHorizontal}
+                                    className="text-xs"
+                                    pending={adjust.pending === source.id}
+                                    disabled={adjust.pending !== undefined}
+                                    onClick={() => adjust.onAdjust(source.id)}
+                                >
+                                    Im Simulator anpassen
+                                </Button>
+                                <span>Legt sie dort ausgeschaltet an. Was du dort änderst, kommt beim Einreichen ins Paket.</span>
+                            </div>
+                        )}
+                        {notice && (
+                            <div className="mt-2">
+                                <InlineNotice tone={notice.href ? 'neutral' : 'warn'}>
+                                    {notice.message}
+                                    {notice.href && (
+                                        <>
+                                            {' '}
+                                            <ExternalAnchor href={notice.href}>Im Simulator öffnen</ExternalAnchor>
+                                        </>
+                                    )}
+                                </InlineNotice>
+                            </div>
+                        )}
+                    </FlowNote>
+                </>
+            )}
+            {source.notGenerated && (
                 <FlowNote>
-                    Für „{source.name}“ gibt es noch keine Demo-Daten.
-                    {simulatorUi && source.structureUrn && (
-                        <>
-                            {' '}
-                            <ExternalAnchor href={newSimulationUiHref(simulatorUi, source.structureUrn, source.id)}>Im Simulator anlegen</ExternalAnchor>
-                        </>
-                    )}
+                    Für „{source.name}“ gibt es noch keine Demo-Daten, und erzeugen lassen sie sich nicht: {source.notGenerated}.{newStreamLink}
+                </FlowNote>
+            )}
+            {!blocked && source.streams.length === 0 && !generated && !source.notGenerated && (
+                <FlowNote>
+                    Für „{source.name}“ gibt es noch keine Demo-Daten.{newStreamLink}
                 </FlowNote>
             )}
         </>
+    )
+}
+
+/** Nested fields as dotted columns, as the structure names them. */
+function flatten(record: Record<string, unknown>, prefix = ''): [string, unknown][] {
+    return Object.entries(record).flatMap(([key, value]): [string, unknown][] =>
+        value && typeof value === 'object' && !Array.isArray(value) ? flatten(value as Record<string, unknown>, `${prefix}${key}.`) : [[`${prefix}${key}`, value]],
+    )
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+
+function cellText(value: unknown): string {
+    if (typeof value === 'number') return value.toLocaleString('de-DE', { maximumFractionDigits: 2 })
+    if (typeof value === 'string' && ISO_TIME.test(value)) {
+        const time = new Date(value)
+        if (!Number.isNaN(time.getTime())) return time.toLocaleTimeString('de-DE')
+    }
+    if (typeof value === 'boolean') return value ? 'ja' : 'nein'
+    return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function SampleTable({ records }: { records: Record<string, unknown>[] }) {
+    const rows = records.map((record) => new Map(flatten(record)))
+    const columns = [...new Set(rows.flatMap((row) => [...row.keys()]))]
+    return (
+        <div className="mt-1.5 overflow-x-auto rounded-md border">
+            <table className="w-full text-left text-xs">
+                <thead className="border-b text-muted-foreground">
+                    <tr>
+                        {columns.map((column) => (
+                            <th key={column} scope="col" className="whitespace-nowrap px-2 py-1 font-medium">
+                                {column}
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((row, index) => (
+                        <tr key={index}>
+                            {columns.map((column) => (
+                                <td key={column} className="whitespace-nowrap px-2 py-1 tabular-nums text-foreground">
+                                    {row.has(column) ? cellText(row.get(column)) : ''}
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
     )
 }

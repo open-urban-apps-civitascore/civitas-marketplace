@@ -534,7 +534,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     }, [pending])
     const reloadInventory = () => { setInventory(null); setInventoryAttempt((n) => n + 1) }
     const demoChosen = (inventory?.demo?.sources ?? []).filter((demoSource) => !demoSource.problem)
-        .flatMap((demoSource) => demoSource.streams.map((stream) => stream.id)).filter((id) => !demoExcluded.has(id))
+        .flatMap((demoSource) => [...demoSource.streams.map((stream) => stream.id), ...(demoSource.generated ? [demoSource.generated.id] : [])])
+        .filter((id) => !demoExcluded.has(id))
     const toggleDemo = (id: string) => {
         setDirty(true)
         setDemoExcluded((excluded) => {
@@ -734,7 +735,7 @@ function Preview({ preview }: { preview: NonNullable<ExportActionResult['preview
 
             <p className="text-sm">
                 {preview.demo.streams
-                    ? `Demo-Daten: ${preview.demo.streams === 1 ? 'ein Datenstrom' : `${preview.demo.streams} Datenströme`} aus dem Simulator. Eine Installation startet sie für ihre eigenen Datenquellen.`
+                    ? `Demo-Daten: ${preview.demo.streams === 1 ? 'ein Datenstrom' : `${preview.demo.streams} Datenströme`}. Eine Installation startet sie im Simulator für ihre eigenen Datenquellen.`
                     : 'Das Paket bringt keine Demo-Daten mit. Nach der Installation fließen erst Daten, wenn eine echte Quelle angebunden ist.'}
             </p>
 
