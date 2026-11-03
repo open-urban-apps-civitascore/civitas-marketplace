@@ -6,6 +6,7 @@ import { IconTile } from '@/components/ui/icon-tile'
 import { Eyebrow, Field, FieldList, NeutralBadge } from '@/components/ui/layout'
 import type { CatalogSummary } from '@/lib/catalog/types'
 import { buildUseCaseListing } from '@/lib/use-case-catalog/listing'
+import { cn } from '@/lib/utils'
 import {
     collaborationLabel,
     COST_BAND_LABELS,
@@ -102,8 +103,12 @@ export function UseCaseInfobox({
                     <Field label={FIELD_LABELS.contact}>
                         {contact.name && <span className="block">{contact.name}</span>}
                         {contact.role && <span className="block text-xs font-normal text-muted-foreground">{contact.role}</span>}
+                        {/* An e-mail alone is enough, the name is often in it; then it is the line itself. */}
                         {contact.email && (
-                            <a href={`mailto:${contact.email}`} className="block text-xs font-normal text-primary underline-offset-2 hover:underline">
+                            <a
+                                href={`mailto:${contact.email}`}
+                                className={cn('block break-all font-normal text-primary underline-offset-2 hover:underline', contact.name && 'text-xs')}
+                            >
                                 {contact.email}
                             </a>
                         )}
