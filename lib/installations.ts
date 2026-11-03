@@ -1,4 +1,5 @@
 import type { InstallationReceipt } from '@/lib/install-payload'
+import { installedDataSet, type DataSetLine } from '@/lib/installation-dataset'
 import {
     activeInstallationOf,
     partitionInstallations,
@@ -11,11 +12,17 @@ interface InstallationRow {
     /** The id of the package as the install sent it: the catalogue id of the entry. */
     packageId?: string
     uninstalledAt?: string | null
-    /** The dataset the install produced, if any. */
-    dataSetId?: string
-    dataSetName?: string
-    /** One line per artifact the install created. */
-    artifacts?: { artifactType?: string }[]
+    /** One line per artifact the install created; `shellId` is the portal's id of the copy. */
+    artifacts?: DataSetLine[]
+}
+
+/** The dataset the install produced, if any (see installedDataSet). */
+function dataSetOf(row: InstallationRow): { dataSetId?: string; dataSetName?: string } {
+    const { id, name } = installedDataSet(row.artifacts)
+    return {
+        ...(id ? { dataSetId: id } : {}),
+        ...(name ? { dataSetName: name } : {}),
+    }
 }
 
 /** What a page needs to know about the active installation of an entry. */
@@ -84,8 +91,7 @@ export async function fetchInstallationFacts(
         return {
             id: row.id,
             ...(row.packageId ? { packageId: row.packageId } : {}),
-            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
-            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            ...dataSetOf(row),
             active: !row.uninstalledAt,
         }
     } catch {
@@ -112,8 +118,7 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
         if (!row) return null
         return {
             id: row.id,
-            ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
-            ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+            ...dataSetOf(row),
             hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
         }
     } catch {

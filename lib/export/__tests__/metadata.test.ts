@@ -23,6 +23,10 @@ function entry() {
         version: '1.0.0', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: ['baum'], metadata,
         repoUrl: 'https://gitlab.example/stadt/baeume', path: 'packages/baeume', commitSha: 'a'.repeat(40) })
 }
+/** An installation as the platform lists it: the dataset is its `DATA_SET` line, not a field of its own. */
+function installation(dataSetId: string, packageId: string, uninstalledAt?: string) {
+    return { artifacts: [{ artifactType: 'DATA_SET', shellId: dataSetId }], packageId, ...(uninstalledAt ? { uninstalledAt } : {}) }
+}
 
 describe('sharing metadata', () => {
     it('round-trips every descriptive schema field, including explicit false and all media fields', () => {
@@ -196,9 +200,9 @@ describe('sharing metadata', () => {
         const parsed = pinnedRowSchema.parse(entry())
         const row = { ...parsed, deploymentRef: { ...parsed.deploymentRef, releaseTag: parsed.deploymentRef.releaseTag ?? null, path: parsed.deploymentRef.path ?? '.' } }
         const sources = exportSources([{ id: 'local', name: 'Lokale Bäume' }, { id: 'own', name: 'Bäume' }], [
-            { dataSetId: 'local', packageId: row.id },
-            { dataSetId: 'inaccessible', packageId: row.id },
-            { dataSetId: 'own', packageId: row.id, uninstalledAt: '2026-09-20' },
+            installation('local', row.id),
+            installation('inaccessible', row.id),
+            installation('own', row.id, '2026-09-20'),
         ], [row])
         expect(sources).toHaveLength(2)
         // Package fields carry over; the previous operator's account of THEIR
@@ -213,27 +217,27 @@ describe('sharing metadata', () => {
         expect(sources[0].catalog).not.toHaveProperty('curation')
         expect(sources[1].catalog).toBeUndefined()
         expect(exportSources([{ id: 'local', name: 'Bäume' }], [
-            { dataSetId: 'local', packageId: row.id }, { dataSetId: 'local', packageId: 'another' },
+            installation('local', row.id), installation('local', 'another'),
         ], [row])[0].catalog).toBeUndefined()
     })
 
     it('tells installed datasets from ones made here, and says nothing when the installations are unknown', () => {
         const datasets = [{ id: 'installed', name: 'A' }, { id: 'removed', name: 'B' }, { id: 'own', name: 'C' }]
         const installations = [
-            { dataSetId: 'installed', packageId: 'urn:x:usecase:a' },
+            installation('installed', 'urn:x:usecase:a'),
             // Uninstalled: whatever is left of it is no installation any more.
-            { dataSetId: 'removed', packageId: 'urn:x:usecase:b', uninstalledAt: '2026-09-20' },
+            installation('removed', 'urn:x:usecase:b', '2026-09-20'),
         ]
         expect(exportSources(datasets, installations, []).map((source) => source.installed)).toEqual([true, false, false])
         expect(exportSources(datasets, undefined, []).map((source) => source.installed)).toEqual([undefined, undefined, undefined])
     })
 
     it('keeps the package an installation came from, also once its catalogue entry is gone, and only an unambiguous one', () => {
-        const [gone] = exportSources([{ id: 'installed', name: 'Jungbaum test2' }], [{ dataSetId: 'installed', packageId: 'urn:x:usecase:jungbaum-test-2' }], [])
+        const [gone] = exportSources([{ id: 'installed', name: 'Jungbaum test2' }], [installation('installed', 'urn:x:usecase:jungbaum-test-2')], [])
         expect(gone).toMatchObject({ installedFrom: 'urn:x:usecase:jungbaum-test-2', notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' })
         expect(gone.catalog).toBeUndefined()
-        const two = [{ dataSetId: 'installed', packageId: 'urn:x:usecase:a' }, { dataSetId: 'installed', packageId: 'urn:x:usecase:b' }]
+        const two = [installation('installed', 'urn:x:usecase:a'), installation('installed', 'urn:x:usecase:b')]
         expect(exportSources([{ id: 'installed', name: 'A' }], two, [])[0].installedFrom).toBeUndefined()
-        expect(exportSources([{ id: 'own', name: 'A' }], [{ dataSetId: 'own', packageId: 'urn:x:usecase:a', uninstalledAt: '2026-09-20' }], [])[0].installedFrom).toBeUndefined()
+        expect(exportSources([{ id: 'own', name: 'A' }], [installation('own', 'urn:x:usecase:a', '2026-09-20')], [])[0].installedFrom).toBeUndefined()
     })
 })

@@ -29,4 +29,10 @@ describe('describeReleaseFailure', () => {
         const segment = describeReleaseFailure('release', 403, 'Forbidden', 'permission_denied')
         expect(segment).toContain('Ihrer Rolle fehlt das Recht, Datensätze freizugeben')
     })
+
+    it('names the artifact the chain stopped at, and the right it needs', () => {
+        const segment = describeReleaseFailure('source', 403, 'Forbidden', 'permission_denied')
+        expect(segment).toContain('Datenquelle abgelehnt (403): Ihrer Rolle fehlt das Recht, Datenquellen freizugeben.')
+        expect(segment).toContain('bleibt ein Entwurf')
+    })
 })
