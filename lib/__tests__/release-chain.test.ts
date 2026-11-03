@@ -24,10 +24,11 @@ function fakePlatform(state: FakeState): { api: PlatformApi; posts: string[] } {
     })
     const api: PlatformApi = {
         async get(path) {
-            let match = path.match(/^\/v1\/datastructures\/([^/]+)\/versions\?size=200$/)
-            if (match) return answer(200, { content: state.versions[match[1]] ?? [] })
+            let match = path.match(/^\/v1\/datastructures\/([^/]+)\/versions(\?.*)?$/)
+            if (match) return answer(405, { detail: "Request method 'GET' is not supported" })
+
             match = path.match(/^\/v1\/datastructures\/([^/]+)$/)
-            if (match) return answer(200, { dataStructureStatus: state.structures[match[1]] })
+            if (match) return answer(200, { dataStructureStatus: state.structures[match[1]], dataStructureVersions: state.versions[match[1]] ?? [] })
             match = path.match(/^\/v1\/datasources\/([^/]+)$/)
             if (match) return answer(200, { dataSourceStatus: state.sources[match[1]] })
             if (path === '/v1/datasets/ds') {

@@ -89,10 +89,10 @@ export async function releaseUseCase(api: PlatformApi, targets: ReleaseTargets):
 
     for (const structureId of targets.structureIds) {
         const structure = `/v1/datastructures/${at(structureId)}`
-        const listing = await api.get(`${structure}/versions?size=200`)
+        const listing = await api.get(structure)
         if (!ok(listing)) return refused('version', listing)
-        const { content } = body(listing)
-        for (const version of Array.isArray(content) ? content : []) {
+        const { dataStructureVersions } = body(listing)
+        for (const version of Array.isArray(dataStructureVersions) ? dataStructureVersions : []) {
             if (!isRecord(version) || version.dataStructureVersionStatus !== 'DRAFT' || typeof version.id !== 'string') continue
             const answer = await api.post(`${structure}/versions/${at(version.id)}/release`)
             if (!ok(answer)) return refused('version', answer)
@@ -142,7 +142,7 @@ export async function releaseUseCase(api: PlatformApi, targets: ReleaseTargets):
  */
 export async function awaitRelease(api: PlatformApi, dataSetId: string, wait: WaitOptions): Promise<SagaOutcome> {
     const deadline = wait.now() + wait.timeoutMs
-    for (;;) {
+    for (; ;) {
         const answer = await api.get(`/v1/datasets/${at(dataSetId)}`)
         const dataset = ok(answer) ? body(answer) : undefined
         if (dataset && dataset.dataSetStatus !== undefined && !dataset.pendingSagaType) {
