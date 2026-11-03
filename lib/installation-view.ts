@@ -1,8 +1,9 @@
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
 import { installationTitle, readAllInstallations } from '@/lib/installation-list'
 import { installationMapHref, isMapPreviewConfigured, packageMapOf } from '@/lib/installation-map'
+import type { DataSetLine } from '@/lib/installation-dataset'
 import { fetchInstalledDashboards, type InstalledDashboardLink } from '@/lib/installed-dashboards'
-import type { ActiveInstallation } from '@/lib/installations'
+import { dataSetOf, type ActiveInstallation } from '@/lib/installations'
 import { getAccessToken } from '@/lib/session'
 import { isSimulatorConfigured, listSimulations } from '@/lib/simulator/client'
 import { streamsOfInstallation, type InstallationStream } from '@/lib/simulator/registration'
@@ -20,9 +21,8 @@ interface InstallationRow {
     packageId?: string
     packageVersion?: string
     uninstalledAt?: string | null
-    dataSetId?: string
-    dataSetName?: string
-    artifacts?: { artifactType?: string; name?: string }[]
+    /** One line per artifact the install made; the `DATA_SET` line names the dataset (installedDataSet). */
+    artifacts?: DataSetLine[]
 }
 
 export interface InstallationView {
@@ -61,15 +61,15 @@ export async function loadInstallationView(installationId: string): Promise<Inst
 
     const installation: ActiveInstallation = {
         id: row.id,
-        ...(row.dataSetId ? { dataSetId: row.dataSetId } : {}),
-        ...(row.dataSetName ? { dataSetName: row.dataSetName } : {}),
+        ...dataSetOf(row),
         hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
     }
+    const { dataSetId } = installation
     const [dataset, dashboards, streams, packageMap] = await Promise.all([
-        row.dataSetId ? fetchDatasetOverview(row.dataSetId, accessToken) : Promise.resolve(null),
+        dataSetId ? fetchDatasetOverview(dataSetId, accessToken) : Promise.resolve(null),
         row.packageId ? fetchInstalledDashboards(row.packageId, row.id) : Promise.resolve([]),
         readInstallationStreams(row.id),
-        row.packageId && row.dataSetId && isMapPreviewConfigured() ? packageMapOf(row.packageId) : Promise.resolve(null),
+        row.packageId && dataSetId && isMapPreviewConfigured() ? packageMapOf(row.packageId) : Promise.resolve(null),
     ])
 
     return {

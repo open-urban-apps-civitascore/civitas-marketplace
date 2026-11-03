@@ -11,6 +11,8 @@
  * stays testable without the framework.
  */
 
+import { installedDataSet, type DataSetLine } from '@/lib/installation-dataset'
+
 const PAGE_SIZE = 200
 
 /** A guard against a platform that ignores `page`. Far beyond any instance today. */
@@ -74,20 +76,20 @@ export function activeInstallationOf<
 
 /**
  * The name an installation goes by on the page "Installiert" and in its
- * overview. A use case installs a dataset, and the dataset names it. A data
- * structure installs none, but its package holds the structure alone, so the
- * one artifact names it. The package id comes after that, and the record's own
- * id last, so the heading is never empty.
+ * overview. A use case installs a dataset, and the dataset names it (its
+ * `DATA_SET` line, see installedDataSet). A data structure installs none, but
+ * its package holds the structure alone, so the one artifact names it. The
+ * package id comes after that, and the record's own id last, so the heading is
+ * never empty.
  */
 export function installationTitle(row: {
     id: string
     packageId?: string
-    dataSetName?: string
-    artifacts?: { name?: string }[]
+    artifacts?: DataSetLine[]
 }): string {
     const artifacts = row.artifacts ?? []
     const onlyArtifactName = artifacts.length === 1 ? artifacts[0].name : undefined
-    return row.dataSetName || onlyArtifactName || row.packageId || row.id
+    return installedDataSet(artifacts).name || onlyArtifactName || row.packageId || row.id
 }
 
 /**

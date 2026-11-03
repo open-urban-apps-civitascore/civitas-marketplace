@@ -1,5 +1,6 @@
 import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry } from '@/lib/catalog/types'
+import { installedDataSet, type DataSetLine } from '@/lib/installation-dataset'
 import { readAllInstallations } from '@/lib/installation-list'
 import { getAccessToken } from '@/lib/session'
 
@@ -68,8 +69,8 @@ interface InstallationRow {
     id: string
     packageId?: string
     uninstalledAt?: string | null
-    dataSetId?: string
-    dataSetName?: string
+    /** One line per artifact the install made; the `DATA_SET` line names the dataset (installedDataSet). */
+    artifacts?: DataSetLine[]
 }
 
 /** Null when the installation is unknown, uninstalled, has no dataset, or publishes no map. */
@@ -77,10 +78,11 @@ export async function loadInstallationMap(installationId: string): Promise<Insta
     const list = await readAllInstallations<InstallationRow>(await getAccessToken())
     if (!list.ok) return null
     const row = list.rows.find((candidate) => candidate.id === installationId && !candidate.uninstalledAt)
-    if (!row?.dataSetId || !row.packageId) return null
+    const { id: dataSetId, name: dataSetName } = installedDataSet(row?.artifacts)
+    if (!row || !dataSetId || !row.packageId) return null
     const map = await packageMapOf(row.packageId)
     if (!map) return null
-    return { ...map, installationId: row.id, datasetId: row.dataSetId, title: row.dataSetName ?? map.layerTitle }
+    return { ...map, installationId: row.id, datasetId: dataSetId, title: dataSetName ?? map.layerTitle }
 }
 
 /**

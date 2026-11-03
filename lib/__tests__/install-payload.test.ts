@@ -389,12 +389,11 @@ describe('summarizeInstallation', () => {
     it('counts what the platform recorded, kind by kind', () => {
         const summary = summarizeInstallation(
             {
-                dataSetName: 'Verkehrszählung',
                 artifacts: [
                     line('DATA_STRUCTURE'),
                     line('DATA_STRUCTURE'),
                     line('DATA_SOURCE'),
-                    line('DATA_SET'),
+                    line('DATA_SET', 'Verkehrszählung'),
                     line('MAPPING'),
                     line('DATA_SINK'),
                     line('PIPELINE'),
@@ -409,7 +408,8 @@ describe('summarizeInstallation', () => {
 
     it('names a kind that came out as zero instead of leaving it out', () => {
         const summary = summarizeInstallation(
-            { artifacts: [line('DATA_STRUCTURE'), line('DATA_SET')] },
+            // A dataset line without a name: the summary falls back to the package's.
+            { artifacts: [line('DATA_STRUCTURE'), { artifactType: 'DATA_SET' }] },
             'Paketname',
         )
         expect(summary).toContain('Dataset „Paketname“')

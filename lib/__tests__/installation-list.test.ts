@@ -143,8 +143,10 @@ describe('installationTitle', () => {
             installationTitle({
                 id: 'installation',
                 packageId: 'urn:openurbanapps:usecase:verkehrszaehlung',
-                dataSetName: 'Verkehrszählung',
-                artifacts: [{ name: 'Zählstellen-Feed' }],
+                artifacts: [
+                    { artifactType: 'DATA_SET', name: 'Verkehrszählung' },
+                    { artifactType: 'DATA_SOURCE', name: 'Zählstellen-Feed' },
+                ],
             }),
         ).toBe('Verkehrszählung')
     })
@@ -171,7 +173,7 @@ describe('installationTitle', () => {
     })
 
     it('never leaves the heading empty', () => {
-        expect(installationTitle({ id: 'installation', dataSetName: '' })).toBe('installation')
+        expect(installationTitle({ id: 'installation', artifacts: [{ artifactType: 'DATA_SET', name: '' }] })).toBe('installation')
     })
 })
 

@@ -2,6 +2,7 @@ import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry } from '@/lib/catalog/types'
 import { fetchDatasetOverview } from '@/lib/datapool-of-dataset'
 import { fetchDatapools } from '@/lib/datapools'
+import { installedDataSet } from '@/lib/installation-dataset'
 import { partitionInstallations, readAllInstallations } from '@/lib/installation-list'
 import type { InstallationReceipt } from '@/lib/install-payload'
 import { getAccessToken } from '@/lib/session'
@@ -149,8 +150,9 @@ export const READ_TOOLS: ReadTool[] = [
             const { active, history } = partitionInstallations(list.rows)
             if (active.length === 0) return `Nichts installiert. Früher deinstalliert: ${history.length}.`
             // The pool and status live on the dataset, not on the installation record.
+            const dataSets = active.map((row) => installedDataSet(row.artifacts))
             const overviews = await Promise.all(
-                active.map((row) => (row.dataSetId ? fetchDatasetOverview(row.dataSetId, accessToken) : null)),
+                dataSets.map(({ id }) => (id ? fetchDatasetOverview(id, accessToken) : null)),
             )
             const lines = active.map((row, index) => {
                 const kinds = new Map<string, number>()
@@ -163,7 +165,7 @@ export const READ_TOOLS: ReadTool[] = [
                 const pool = overview?.datapool ? `, Datenpool „${overview.datapool.name}“` : ''
                 const status = overview?.status ? `, Status ${overview.status}` : ''
                 const origin = row.packageId?.startsWith('urn:openurbanapps:usecase:assistent-') ? ' [vom Assistenten erzeugt]' : ''
-                return `- Paket ${row.packageId ?? '?'} v${row.packageVersion ?? '?'}${origin}: Datensatz „${row.dataSetName ?? '–'}“${pool}${status}${row.installedAt ? `, installiert ${row.installedAt}` : ''}${made ? ` (${made})` : ''}`
+                return `- Paket ${row.packageId ?? '?'} v${row.packageVersion ?? '?'}${origin}: Datensatz „${dataSets[index].name ?? '–'}“${pool}${status}${row.installedAt ? `, installiert ${row.installedAt}` : ''}${made ? ` (${made})` : ''}`
             })
             return [`Aktiv (${active.length}):`, ...lines, `Früher deinstalliert: ${history.length}.`].join('\n')
         },

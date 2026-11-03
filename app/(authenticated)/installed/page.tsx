@@ -45,8 +45,6 @@ interface InstallationRow {
     /** The id of the installed package: the catalogue id of the entry. */
     packageId?: string
     packageVersion?: string
-    dataSetId?: string
-    dataSetName?: string
     createdBy?: string
     artifacts: InstalledArtifactRow[]
 }

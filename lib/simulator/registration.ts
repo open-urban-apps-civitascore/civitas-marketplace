@@ -2,6 +2,7 @@ import { isSqlSimulation } from '@/lib/catalog/types'
 import type { BundledDataSource, BundledSimulation, SimulationStream, UseCaseEntry } from '@/lib/catalog/types'
 import { slugify } from '@/lib/export/urn'
 import type { InstallationReceipt, InstalledArtifactLine } from '@/lib/install-payload'
+import { installedDataSet } from '@/lib/installation-dataset'
 import type {
     ArtifactRef,
     SampleScenario,
@@ -188,11 +189,12 @@ function describeStream({
         version: installation?.packageVersion ?? entry.manifest.version,
     }
     const dataSetUrn = installation?.artifacts?.find((line) => line.artifactType === 'DATA_SET')?.urn
-    const dataSet: ArtifactRef | undefined = installation?.dataSetName
+    const { id: dataSetId, name: dataSetName } = installedDataSet(installation?.artifacts)
+    const dataSet: ArtifactRef | undefined = dataSetName
         ? {
-              name: fit(installation.dataSetName),
+              name: fit(dataSetName),
               ...(dataSetUrn && dataSetUrn.length <= URN_MAX ? { urn: dataSetUrn } : {}),
-              ...(installation.dataSetId ? { id: installation.dataSetId } : {}),
+              ...(dataSetId ? { id: dataSetId } : {}),
           }
         : undefined
     const element = source?.document.element

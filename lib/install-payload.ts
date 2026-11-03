@@ -17,6 +17,7 @@ import {
     logicalUrn,
     parseCoreUrn,
 } from '@/lib/export/urn'
+import { installedDataSet } from '@/lib/installation-dataset'
 
 /**
  * The portal caps every description at this length: `MAX_DESCRIPTION_LENGTH` in its
@@ -634,14 +635,13 @@ export function buildInstallationRequest(
 
 /**
  * What `POST /v1/installations` answers, and `GET /v1/installations/{id}` returns later: the
- * installation and one line per artifact it made.
+ * installation and one line per artifact it made. The dataset is one of those lines (`DATA_SET`),
+ * not a field of the installation: read it with installedDataSet.
  */
 export interface InstallationReceipt {
     id?: string
     packageId?: string
     packageVersion?: string
-    dataSetId?: string
-    dataSetName?: string
     artifacts?: InstalledArtifactLine[]
 }
 
@@ -692,7 +692,7 @@ export function summarizeInstallation(receipt: InstallationReceipt, fallbackName
     const geo = GEO_SUMMARY_KINDS.filter(([type]) => count(type) > 0)
         .map(([type, label]) => ` · ${count(type)} ${label}`)
         .join('')
-    return `Dataset „${receipt.dataSetName ?? fallbackName}“ als Entwurf angelegt · ${counts}${geo}`
+    return `Dataset „${installedDataSet(lines).name ?? fallbackName}“ als Entwurf angelegt · ${counts}${geo}`
 }
 
 /** What an install made, one entry per kind, for the success view. */

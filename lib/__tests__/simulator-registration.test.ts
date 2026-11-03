@@ -133,10 +133,8 @@ describe('stream names and origin', () => {
         return {
             id: INSTALLATION_ID,
             packageVersion: entry.manifest.version,
-            dataSetId: 'ds-0001',
-            dataSetName,
             artifacts: [
-                { artifactType: 'DATA_SET', name: dataSetName, urn: 'urn:core:standard:musterhausen:dataset:x:set:ds0001' },
+                { artifactType: 'DATA_SET', name: dataSetName, urn: 'urn:core:standard:musterhausen:dataset:x:set:ds0001', shellId: 'ds-0001' },
                 ...entry.bundle.dataSources.map((source, index) => ({
                     artifactType: 'DATA_SOURCE',
                     name: `${String(source.document.title)} (Instanz)`,

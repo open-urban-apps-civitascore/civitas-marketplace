@@ -16,8 +16,8 @@ interface InstallationRow {
     artifacts?: DataSetLine[]
 }
 
-/** The dataset the install produced, if any (see installedDataSet). */
-function dataSetOf(row: InstallationRow): { dataSetId?: string; dataSetName?: string } {
+/** The dataset the install produced, if any (see installedDataSet), in the fields of ActiveInstallation. */
+export function dataSetOf(row: { artifacts?: readonly DataSetLine[] }): { dataSetId?: string; dataSetName?: string } {
     const { id, name } = installedDataSet(row.artifacts)
     return {
         ...(id ? { dataSetId: id } : {}),

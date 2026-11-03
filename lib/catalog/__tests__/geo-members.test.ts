@@ -170,9 +170,8 @@ describe('install summary', () => {
     it('names the geo kinds only where the package had them', () => {
         const withMap = summarizeInstallation(
             {
-                dataSetName: 'Kiez-Bäume',
                 artifacts: [
-                    { artifactType: 'DATA_SET' },
+                    { artifactType: 'DATA_SET', name: 'Kiez-Bäume' },
                     { artifactType: 'NAMED_API' },
                     { artifactType: 'LAYER' },
                 ],
@@ -184,7 +183,7 @@ describe('install summary', () => {
         expect(withMap).not.toContain('Stil')
 
         const withoutMap = summarizeInstallation(
-            { dataSetName: 'Kiez-Bäume', artifacts: [{ artifactType: 'DATA_SET' }] },
+            { artifacts: [{ artifactType: 'DATA_SET', name: 'Kiez-Bäume' }] },
             'Kiez-Bäume',
         )
         expect(withoutMap).not.toContain('API')
