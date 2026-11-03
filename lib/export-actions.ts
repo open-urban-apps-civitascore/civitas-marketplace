@@ -85,6 +85,7 @@ import {
     listSimulations,
     registerSimulation,
     SimulatorError,
+    type SampleScenario,
     type SimulationDetail,
 } from '@/lib/simulator/client'
 import { scenarioOf } from '@/lib/simulator/registration'
@@ -1032,9 +1033,10 @@ async function demoInventory(snapshot: Awaited<ReturnType<typeof readUseCase>>):
         demoSources(snapshot, details).map(async (source): Promise<DemoSource> => {
             // The portal link is built here: only the server knows the portal's address.
             if (source.problem) return { ...source, portalHref: datasourceHref(source.id) }
-            if (!source.generated || problem) return source
-            const sample = await draftSample(snapshot, source.id)
-            return sample ? { ...source, generated: { ...source.generated, sample } } : source
+            const first = details.find((detail) => detail.id === source.streams[0]?.id)
+            const scenario = problem ? undefined : source.generated ? draftScenario(snapshot, source.id) : first?.input?.scenario
+            const sample = scenario ? await sampleOf(scenario) : undefined
+            return sample ? { ...source, sample } : source
         }),
     )
     return { sources, ...(problem ? { problem } : {}), ...(ui ? { simulatorUi: ui } : {}) }
@@ -1042,13 +1044,16 @@ async function demoInventory(snapshot: Awaited<ReturnType<typeof readUseCase>>):
 
 const SAMPLE_RECORDS = 3
 
-/** Without a preview the draft still goes into the package: a sample is shown, never required. */
-async function draftSample(snapshot: InstanceSnapshot, sourceId: string): Promise<Record<string, unknown>[] | undefined> {
+function draftScenario(snapshot: InstanceSnapshot, sourceId: string): SampleScenario | undefined {
     const source = snapshot.sources.find((candidate) => candidate.id === sourceId)
     const draft = source ? draftFor(snapshot, source) : undefined
-    if (!draft || 'note' in draft) return undefined
+    return draft && 'simulation' in draft ? scenarioOf(draft.simulation) : undefined
+}
+
+/** A sample is shown, never required: whatever goes wrong costs only the sample. */
+async function sampleOf(scenario: SampleScenario): Promise<Record<string, unknown>[] | undefined> {
     try {
-        return await fetchSample(scenarioOf(draft.simulation), SAMPLE_RECORDS)
+        return await fetchSample(scenario, SAMPLE_RECORDS)
     } catch {
         return undefined
     }

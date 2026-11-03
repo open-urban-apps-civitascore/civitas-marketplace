@@ -8,6 +8,7 @@ vi.mock('@/lib/export/portal-reader', async (importOriginal) => ({
 vi.mock('@/lib/simulator/client', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/lib/simulator/client')>(),
     listSimulations: vi.fn(async () => []),
+    getSimulation: vi.fn(async () => undefined),
     fetchSample: vi.fn(async () => [{ sensorId: 'BF-001', feuchte: { value: 41.5 } }]),
     registerSimulation: vi.fn(async () => {}),
     deleteSimulation: vi.fn(async () => {}),
@@ -15,7 +16,7 @@ vi.mock('@/lib/simulator/client', async (importOriginal) => ({
 import { adjustDemoInSimulator, exportAction, inspectExportSource } from '@/lib/export-actions'
 import { readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
 import { generatedId } from '@/lib/export/simulations'
-import { deleteSimulation, fetchSample, listSimulations, registerSimulation, SimulatorError } from '@/lib/simulator/client'
+import { deleteSimulation, fetchSample, getSimulation, listSimulations, registerSimulation, SimulatorError, type SimulationDetail } from '@/lib/simulator/client'
 
 function form(metadata: unknown, intent = 'preview') {
     const data = new FormData()
@@ -113,17 +114,31 @@ describe('demo data drafted from the structure', () => {
         const without = await inspectExportSource('local')
         expect(without.demo?.problem).toBe('Der Simulator ist an diese Instanz nicht angebunden.')
         expect(without.demo?.sources[0]?.generated).toMatchObject({ id: generatedId('feed') })
-        expect(without.demo?.sources[0]?.generated?.sample).toBeUndefined()
+        expect(without.demo?.sources[0]?.sample).toBeUndefined()
         expect(fetchSample).not.toHaveBeenCalled()
 
         vi.stubEnv('SIMULATOR_API_URL', 'http://simulator:4300')
         const sampled = await inspectExportSource('local')
-        expect(sampled.demo?.sources[0]?.generated?.sample).toEqual([{ sensorId: 'BF-001', feuchte: { value: 41.5 } }])
+        expect(sampled.demo?.sources[0]?.sample).toEqual([{ sensorId: 'BF-001', feuchte: { value: 41.5 } }])
         // A preview that fails, however, costs the preview, not the draft.
         vi.mocked(fetchSample).mockRejectedValueOnce(new SyntaxError('Unexpected token < in JSON'))
         const unsampled = await inspectExportSource('local')
         expect(unsampled.demo?.sources[0]?.generated).toMatchObject({ id: generatedId('feed') })
-        expect(unsampled.demo?.sources[0]?.generated?.sample).toBeUndefined()
+        expect(unsampled.demo?.sources[0]?.sample).toBeUndefined()
+    })
+
+    it('gives a source with streams the first messages of its first stream, once adjusted too', async () => {
+        vi.mocked(readUseCase).mockResolvedValue(UNSIMULATED)
+        vi.stubEnv('SIMULATOR_API_URL', 'http://simulator:4300')
+        const scenario = { intervalSeconds: 10, fields: { sensorId: { kind: 'constant' as const, value: 'F-001' } } }
+        vi.mocked(listSimulations).mockResolvedValueOnce([{ id: 'share--feed--feed-1' } as SimulationDetail])
+        vi.mocked(getSimulation).mockResolvedValueOnce({
+            id: 'share--feed--feed-1', name: 'Bodenfeuchte · Feed 1', origin: { dataSource: { name: 'Feed', id: 'feed' } },
+            input: { name: 'Bodenfeuchte · Feed 1', transport: { kind: 'mqtt', url: 'tcp://broker:1883', topic: 'stadt/feuchte/feed-1' }, scenario, enabled: false },
+        } as unknown as SimulationDetail)
+        const inventory = await inspectExportSource('local')
+        expect(inventory.demo?.sources[0]).toMatchObject({ streams: [{ id: 'share--feed--feed-1', label: 'Feed 1' }], sample: [{ sensorId: 'BF-001', feuchte: { value: 41.5 } }] })
+        expect(fetchSample).toHaveBeenCalledWith(scenario, 3)
     })
 
     it('is not offered while the simulator does not answer: its streams are unknown, not none', async () => {

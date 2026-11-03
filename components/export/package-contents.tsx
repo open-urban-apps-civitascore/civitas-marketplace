@@ -10,7 +10,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { adjustDemoInSimulator, type DemoInventory, type InventoryArtifact } from '@/lib/export-actions'
 import type { DemoSource } from '@/lib/export/simulations'
 import type { ExportSource } from '@/lib/export/sources'
-import { newSimulationUiHref } from '@/lib/simulator/ui-links'
+import { newSimulationUiHref, simulationEditUiHref } from '@/lib/simulator/ui-links'
 import { ARTIFACT_KINDS, byKind, partsCount } from '@/lib/ui/artifact-kinds'
 import { datasetStatusLabel } from '@/lib/ui/dataset-status'
 
@@ -279,6 +279,27 @@ function DemoSourceRows({
                     note={`für Datenquelle „${source.name}“ · ${transport}${stream.matchedBy === 'address' ? ' · über Topic oder Tabelle zugeordnet' : ''}`}
                 />
             ))}
+            {!blocked && source.streams.length > 0 && (!!source.sample?.length || simulatorUi) && (
+                <FlowNote>
+                    {!!source.sample?.length && (
+                        <>
+                            <p>So sehen die ersten Nachrichten von „{source.streams[0].label}“ aus:</p>
+                            <SampleTable records={source.sample} />
+                        </>
+                    )}
+                    {simulatorUi && (
+                        <p className="mt-2">
+                            Im Simulator bearbeiten:{' '}
+                            {source.streams.map((stream, index) => (
+                                <Fragment key={stream.id}>
+                                    {index > 0 && ' · '}
+                                    <ExternalAnchor href={simulationEditUiHref(simulatorUi, stream.id)}>{stream.label}</ExternalAnchor>
+                                </Fragment>
+                            ))}
+                        </p>
+                    )}
+                </FlowNote>
+            )}
             {generated && (
                 <>
                     <FlowItem
@@ -295,8 +316,8 @@ function DemoSourceRows({
                         note={`für Datenquelle „${source.name}“ · ${transport} · ${generated.summary}`}
                     />
                     <FlowNote>
-                        <p>Aus der Datenstruktur vorgeschlagen{generated.sample?.length ? ' - so sehen die ersten Nachrichten aus:' : '.'}</p>
-                        {!!generated.sample?.length && <SampleTable records={generated.sample} />}
+                        <p>Aus der Datenstruktur vorgeschlagen{source.sample?.length ? ' - so sehen die ersten Nachrichten aus:' : '.'}</p>
+                        {!!source.sample?.length && <SampleTable records={source.sample} />}
                         {simulatorUi && !excluded.has(generated.id) && (
                             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <Button

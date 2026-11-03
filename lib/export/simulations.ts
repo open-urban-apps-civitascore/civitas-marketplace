@@ -50,14 +50,14 @@ export interface DemoSource {
     generated?: GeneratedDemo
     /** Why there is no draft. */
     notGenerated?: string
+    /** The first records of the draft, or of the first stream, where the simulator could render them. */
+    sample?: Record<string, unknown>[]
 }
 
 export interface GeneratedDemo {
     /** `generated:<source id>`, chosen and unticked like a stream id. */
     id: string
     summary: string
-    /** A few records, where the simulator could render them. */
-    sample?: Record<string, unknown>[]
 }
 
 const GENERATED = 'generated:'

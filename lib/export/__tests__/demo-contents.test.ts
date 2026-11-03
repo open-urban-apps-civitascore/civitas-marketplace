@@ -15,14 +15,11 @@ const FEED: DemoSource = {
     transport: 'mqtt',
     structureUrn: 'urn:core:platform:civitas:datastructure:environment:bodenfeuchtemessung:abc1234567',
     streams: [],
-    generated: {
-        id: generatedId('src-feed'),
-        summary: '3 Datenströme mit je 3 Feldern, eine Nachricht alle 10 Sekunden',
-        sample: [
-            { sensorId: 'BF-001', timestamp: '2026-11-01T14:05:10Z', feuchte: { value: 42.125 } },
-            { sensorId: 'BF-001', timestamp: '2026-11-01T14:05:20Z', feuchte: { value: 43.5 } },
-        ],
-    },
+    generated: { id: generatedId('src-feed'), summary: '3 Datenströme mit je 3 Feldern, eine Nachricht alle 10 Sekunden' },
+    sample: [
+        { sensorId: 'BF-001', timestamp: '2026-11-01T14:05:10Z', feuchte: { value: 42.125 } },
+        { sensorId: 'BF-001', timestamp: '2026-11-01T14:05:20Z', feuchte: { value: 43.5 } },
+    ],
 }
 
 const UI = 'https://simulator.example'
@@ -57,11 +54,27 @@ describe('drafted demo data in „Was kommt ins Paket?“', () => {
     })
 
     it('still goes into the package without a simulator, only without a preview or adjusting', () => {
-        const said = text(render({ sources: [{ ...FEED, generated: { ...FEED.generated!, sample: undefined } }], problem: 'Der Simulator ist an diese Instanz nicht angebunden.' }))
+        const said = text(render({ sources: [{ ...FEED, sample: undefined }], problem: 'Der Simulator ist an diese Instanz nicht angebunden.' }))
         expect(said).toContain('Der Simulator ist an diese Instanz nicht angebunden. Die erzeugten Demo-Daten kommen trotzdem ins Paket, nur ohne Vorschau.')
         expect(said).toContain('Aus der Datenstruktur vorgeschlagen.')
         expect(said).not.toContain('Im Simulator anpassen')
         expect(said).toContain('1 von 1 ausgewählt')
+    })
+
+    it('stays in view once adjusted: the streams show their first messages and lead back into the simulator', () => {
+        const adjusted: DemoSource = {
+            ...FEED,
+            generated: undefined,
+            streams: [1, 2].map((n) => ({ id: `share--src-feed--bodenfeuchte-feed-${n}`, label: `Bodenfeuchte-Feed ${n}`, matchedBy: 'origin' as const })),
+        }
+        const html = render({ sources: [adjusted], simulatorUi: UI })
+        const said = text(html)
+        expect(said).toContain('So sehen die ersten Nachrichten von „Bodenfeuchte-Feed 1“ aus:')
+        expect(said).toContain('sensorId timestamp feuchte.value')
+        expect(said).toContain('Im Simulator bearbeiten: Bodenfeuchte-Feed 1 · Bodenfeuchte-Feed 2')
+        expect(html).toContain(`href="${UI}/simulations/share--src-feed--bodenfeuchte-feed-2/edit"`)
+        // Without a simulator page to go to, only the messages.
+        expect(text(render({ sources: [adjusted] }))).not.toContain('Im Simulator bearbeiten')
     })
 
     it('says why there is none, with the way into the simulator', () => {
