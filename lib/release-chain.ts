@@ -1,9 +1,9 @@
 /**
  * The release of an installed use case, in the order the platform demands. An install leaves every
  * artifact a draft, and the dataset's release checks that each source of its pipelines is released,
- * and each structure version its flows reach together with its structure. So the chain releases
- * each structure version, each structure, each source, and then stages and releases the dataset.
- * Every step looks first and releases only what is still a draft: the platform refuses to release
+ * and each structure version its flows reach. So the chain releases each structure version and each
+ * source, and then stages and releases the dataset. A structure has no status of its own, only its
+ * versions have one. Every step looks first and releases only what is still a draft: the platform refuses to release
  * anything twice, and so a second run goes on where a first one stopped.
  *
  * The release starts a saga that provisions sinks, routes and pipelines. The platform tells how it
@@ -30,7 +30,7 @@ export interface PlatformApi {
 }
 
 /** The step a refusal came at; the dataset's own two are `stage` and `release`. */
-export type ReleaseStep = 'version' | 'structure' | 'source' | 'stage' | 'release'
+export type ReleaseStep = 'version' | 'source' | 'stage' | 'release'
 
 export interface ReleaseTargets {
     dataSetId: string
@@ -42,7 +42,6 @@ export interface ReleaseTargets {
 /** What the chain released itself, for the summary: what was released before is not counted. */
 export interface ReleaseCounts {
     versions: number
-    structures: number
     sources: number
 }
 
@@ -84,7 +83,7 @@ const at = encodeURIComponent
  * wrong with what was released so far, and the portal can go on from there.
  */
 export async function releaseUseCase(api: PlatformApi, targets: ReleaseTargets): Promise<ReleaseStart> {
-    const released: ReleaseCounts = { versions: 0, structures: 0, sources: 0 }
+    const released: ReleaseCounts = { versions: 0, sources: 0 }
     const refused = (step: ReleaseStep, answer: PlatformAnswer): ReleaseStart => ({ state: 'refused', released, step, answer })
 
     for (const structureId of targets.structureIds) {
@@ -98,15 +97,6 @@ export async function releaseUseCase(api: PlatformApi, targets: ReleaseTargets):
             if (!ok(answer)) return refused('version', answer)
             released.versions++
         }
-    }
-    for (const structureId of targets.structureIds) {
-        const structure = `/v1/datastructures/${at(structureId)}`
-        const current = await api.get(structure)
-        if (!ok(current)) return refused('structure', current)
-        if (body(current).dataStructureStatus !== 'DRAFT') continue
-        const answer = await api.post(`${structure}/release`)
-        if (!ok(answer)) return refused('structure', answer)
-        released.structures++
     }
     for (const sourceId of targets.sourceIds) {
         const source = `/v1/datasources/${at(sourceId)}`

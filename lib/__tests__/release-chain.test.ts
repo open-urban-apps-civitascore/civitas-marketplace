@@ -5,7 +5,6 @@ import { awaitRelease, releaseUseCase, type PlatformAnswer, type PlatformApi, ty
 /** A platform as far as the release needs it: statuses that the POSTs change, and a saga that ends after some reads. */
 interface FakeState {
     versions: Record<string, { id: string; dataStructureVersionStatus: string }[]>
-    structures: Record<string, string>
     sources: Record<string, string>
     dataset: { dataSetStatus: string; pendingSagaType: string | null; provisioned: boolean }
     /** POST paths answered with this status instead of being carried out. */
@@ -28,7 +27,7 @@ function fakePlatform(state: FakeState): { api: PlatformApi; posts: string[] } {
             if (match) return answer(405, { detail: "Request method 'GET' is not supported" })
 
             match = path.match(/^\/v1\/datastructures\/([^/]+)$/)
-            if (match) return answer(200, { dataStructureStatus: state.structures[match[1]], dataStructureVersions: state.versions[match[1]] ?? [] })
+            if (match) return answer(200, { dataStructureVersions: state.versions[match[1]] ?? [] })
             match = path.match(/^\/v1\/datasources\/([^/]+)$/)
             if (match) return answer(200, { dataSourceStatus: state.sources[match[1]] })
             if (path === '/v1/datasets/ds') {
@@ -50,8 +49,7 @@ function fakePlatform(state: FakeState): { api: PlatformApi; posts: string[] } {
                 for (const row of state.versions[version[1]]) if (row.id === version[2]) row.dataStructureVersionStatus = 'AVAILABLE'
                 return answer(200, {})
             }
-            const structure = path.match(/^\/v1\/datastructures\/([^/]+)\/release$/)
-            if (structure) state.structures[structure[1]] = 'AVAILABLE'
+            if (/^\/v1\/datastructures\/[^/]+\/release$/.test(path)) return answer(404, { detail: 'No such route' })
             const source = path.match(/^\/v1\/datasources\/([^/]+)\/release$/)
             if (source) state.sources[source[1]] = 'AVAILABLE'
             if (path === '/v1/datasets/ds/stage') state.dataset.dataSetStatus = 'READY'
@@ -72,7 +70,6 @@ function installed(): FakeState {
             s1: [{ id: 'v1', dataStructureVersionStatus: 'DRAFT' }],
             s2: [{ id: 'v2', dataStructureVersionStatus: 'AVAILABLE' }],
         },
-        structures: { s1: 'DRAFT', s2: 'AVAILABLE' },
         sources: { src1: 'DRAFT' },
         dataset: { dataSetStatus: 'DRAFT', pendingSagaType: null, provisioned: false },
     }
@@ -99,10 +96,9 @@ describe('releaseUseCase', () => {
 
         const start = await releaseUseCase(api, TARGETS)
 
-        expect(start).toEqual({ state: 'started', released: { versions: 1, structures: 1, sources: 1 } })
+        expect(start).toEqual({ state: 'started', released: { versions: 1, sources: 1 } })
         expect(posts).toEqual([
             '/v1/datastructures/s1/versions/v1/release',
-            '/v1/datastructures/s1/release',
             '/v1/datasources/src1/release',
             '/v1/datasets/ds/stage',
             '/v1/datasets/ds/release',
@@ -122,7 +118,6 @@ describe('releaseUseCase', () => {
     it('goes on where an earlier run stopped', async () => {
         const state = installed()
         state.versions.s1[0].dataStructureVersionStatus = 'AVAILABLE'
-        state.structures.s1 = 'AVAILABLE'
         state.sources.src1 = 'AVAILABLE'
         state.dataset.dataSetStatus = 'READY'
         const { api, posts } = fakePlatform(state)

@@ -334,8 +334,8 @@ async function finishRelease(run: ReleaseRun): Promise<{ completed: boolean; seg
     } catch (error) {
         return { completed: false, segment: ` · Freigabe gestartet, ihr Ende ließ sich NICHT abfragen (${reasonOf(error)})` }
     }
-    const { versions, structures, sources } = run.released
-    const released = `${versions} Strukturversion(en), ${structures} Struktur(en), ${sources} Quelle(n) und den Datensatz freigegeben`
+    const { versions, sources } = run.released
+    const released = `${versions} Strukturversion(en), ${sources} Quelle(n) und den Datensatz freigegeben`
     switch (outcome) {
         case 'completed':
             return { completed: true, segment: ` · Freigabe abgeschlossen: ${released}, die Plattform hat Speicher, Pipelines und APIs eingerichtet` }

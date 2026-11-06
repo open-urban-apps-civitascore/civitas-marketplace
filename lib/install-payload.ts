@@ -846,18 +846,17 @@ export function describeDatapoolCreateFailure(
 /** What the release chain (lib/release-chain.ts) refuses at, before the dataset's own two steps. */
 const ARTIFACT_RELEASE_STEPS = {
     version: { label: 'Version einer Datenstruktur', right: 'Datenstrukturen' },
-    structure: { label: 'Datenstruktur', right: 'Datenstrukturen' },
     source: { label: 'Datenquelle', right: 'Datenquellen' },
 } as const
 
 /**
  * The summary segment for a release after install that did not go through. Which step refused
- * decides what is left: a refused structure or source leaves the dataset a draft with part of what
+ * decides what is left: a refused version or source leaves the dataset a draft with part of what
  * it needs released, a refused stage leaves the draft, a refused release a dataset that is already
  * staged (READY). The portal continues from any of them.
  */
 export function describeReleaseFailure(
-    step: 'version' | 'structure' | 'source' | 'stage' | 'release',
+    step: 'version' | 'source' | 'stage' | 'release',
     httpStatus: number,
     statusText: string,
     body: string,
