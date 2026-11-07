@@ -80,8 +80,7 @@
       },
       "$.Datastreams[].Observations[].result": "$.pm25.value",
       "$.Datastreams[].Observations[].phenomenonTime": "$.timestamp",
-      "$.Datastreams[].Observations[].resultTime": "$.timestamp",
-      "$.Datastreams[].Observations[].resultQuality": "$.pm25.quality"
+      "$.Datastreams[].Observations[].resultTime": "$.timestamp"
     }
   }
 }
