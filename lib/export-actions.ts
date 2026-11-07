@@ -52,7 +52,7 @@ import {
 } from '@/lib/export/new-version'
 import { aboveAll, isNewerVersion, nextPatch, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
-import { parseExportMetadata } from '@/lib/export/metadata'
+import { parseExportMetadata, parseKeywords } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
@@ -167,10 +167,7 @@ function parseForm(formData: FormData): ExportForm | string {
     const maintainer = field(formData, 'maintainer')
     if (!maintainer) return 'Herausgeber fehlt.'
     const license = field(formData, 'license') || 'EUPL-1.2'
-    const keywords = field(formData, 'keywords')
-        .split(',')
-        .map((k) => k.trim().toLowerCase())
-        .filter(Boolean)
+    const keywords = parseKeywords(field(formData, 'keywords'))
     const metadata = parseExportMetadata(field(formData, 'catalogMetadata'))
     if (metadata.error) return metadata.error
     const demoStreams = parseDemoStreams(field(formData, 'demoStreams'))
@@ -712,6 +709,10 @@ async function proposeCatalog(
             bundle,
             catalog,
         }
+    }
+    // From the package it would undo changed texts and drop the seal.
+    if (catalog.state === 'listed') {
+        return { intent: 'catalog', status: 'unchanged', detail: 'Diese Version steht schon im Katalog.', bundle, catalog }
     }
     const dir = packageDir(target, slug)
     const input = catalogInputFromManifest(manifestRaw, { repoUrl: target.url, path: dir, commitSha: bundle.sha })

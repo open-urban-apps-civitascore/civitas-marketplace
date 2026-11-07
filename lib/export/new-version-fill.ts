@@ -1,5 +1,6 @@
 import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
-import { bundleBranch, exportConfig, exportReadiness, packageDir, removalBranch, SHARING_NOT_SET_UP, thisInstance } from '@/lib/export/config'
+import { catalogInputFromManifest, listedRowOf } from '@/lib/export/catalog-entry'
+import { bundleBranch, exportConfig, exportReadiness, packageDir, removalBranch, SHARING_NOT_SET_UP, thisInstance, type ExportConfig } from '@/lib/export/config'
 import { clientFor, currentUser, findMergeRequests, getProject, GitLabError, gitlabMessage, parseProjectUrl, readFile, type GitLabClient } from '@/lib/export/gitlab'
 import { domainOf, readmeSourceOf, shareSourceOf } from '@/lib/export/merge-request-text'
 import { steckbriefFromManifest, type FilledSteckbrief } from '@/lib/export/new-version'
@@ -11,9 +12,22 @@ export interface NewVersionFill {
     status: 'ok' | 'missing' | 'invalid' | 'forbidden' | 'unconfigured' | 'error'
     detail?: string
     steckbrief?: FilledSteckbrief
+    listedAs?: string
 }
 
+export type TextEditFill = { id: string; steckbrief: FilledSteckbrief } | { refusal: string }
+
 const VERSION = /^\d+\.\d+\.\d+$/
+
+async function listedRow({ catalog, token }: ExportConfig, id: string, version: string): Promise<string | undefined> {
+    if (!catalog) return undefined
+    const client: GitLabClient = { ...clientFor(catalog.url, token as string), cache: SHARE_READS }
+    const project = await getProject(client, parseProjectUrl(catalog.url).projectPath)
+    const index = await readFile(client, project.id, 'index.json', catalog.baseBranch)
+    // Better no form than one that silently brings back the package's old text.
+    if (index === undefined) throw new GitLabError('Katalog nicht gefunden', 404)
+    return listedRowOf(index, id, version)
+}
 
 /** Reads at the proposal's last commit, kept after its branch is gone, so a withdrawn version fills too. */
 export async function readNewVersionFill(targetKey: string, slug: string, version: string): Promise<NewVersionFill> {
@@ -44,11 +58,23 @@ export async function readNewVersionFill(targetKey: string, slug: string, versio
         if (!manifest) return { status: 'missing', detail: notShared }
         const origin = instanceMatch(line ?? readmeSourceOf(readme), thisInstance())
         const domain = domainOf(shared.description)
-        const steckbrief = steckbriefFromManifest(manifest, { full: origin === 'this', ...(origin === 'other' ? { elsewhere: true } : {}), ...(domain ? { domain } : {}) })
+        const packaged = catalogInputFromManifest(manifest, { repoUrl: '', path: '', commitSha: '' })
+        if (typeof packaged === 'string') return { status: 'invalid', detail: packaged }
+        const listed = await listedRow(config, packaged.id, version)
+        const steckbrief = steckbriefFromManifest(listed ?? manifest, { full: origin === 'this', ...(origin === 'other' ? { elsewhere: true } : {}), ...(domain ? { domain } : {}) })
         if (typeof steckbrief === 'string') return { status: 'invalid', detail: steckbrief }
-        return { status: 'ok', steckbrief: { ...steckbrief, from: version, targetKey: target.key } }
+        return { status: 'ok', steckbrief: { ...steckbrief, from: version, targetKey: target.key }, ...(listed ? { listedAs: packaged.id } : {}) }
     } catch (error) {
         if (error instanceof GitLabError) return { status: 'error', detail: gitlabMessage(error) }
         throw error
     }
+}
+
+/** Only a listed version, and only the instance that shared it: the check behind the form and its action. */
+export async function readTextEditFill(targetKey: string, slug: string, version: string): Promise<TextEditFill> {
+    const { steckbrief, listedAs, detail } = await readNewVersionFill(targetKey, slug, version)
+    if (!steckbrief) return { refusal: detail ?? 'Die Angaben ließen sich nicht lesen.' }
+    if (!listedAs) return { refusal: `Version ${version} von „${slug}“ steht gerade nicht im Katalog. Texte lassen sich nur bei einem Eintrag im Katalog ändern.` }
+    if (!steckbrief.full) return { refusal: 'Dieses Paket wurde nicht von dieser Instanz geteilt. Seine Texte kann nur die Instanz ändern, die es geteilt hat - oder das Katalog-Team.' }
+    return { id: listedAs, steckbrief }
 }

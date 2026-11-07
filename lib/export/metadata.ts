@@ -84,6 +84,9 @@ export function draftMetadata(draft: MetadataDraft): Record<string, unknown> {
     if (media.length) result.media = media
     return result
 }
+export function parseKeywords(text: string): string[] {
+    return text.split(',').map((keyword) => keyword.trim().toLowerCase()).filter(Boolean)
+}
 export function parseExportMetadata(raw: string): { data: ExportMetadata; error?: never } | { error: string; data?: never } {
     try {
         if (raw.length > 100_000) return { error: 'Katalogangaben sind zu lang (maximal 100.000 Zeichen).' }

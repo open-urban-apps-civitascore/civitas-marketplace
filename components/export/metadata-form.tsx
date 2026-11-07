@@ -5,7 +5,7 @@ import { THEME_LABELS, THEME_ORDER } from '@/lib/catalog/vocabulary'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 
-const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
+export const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 
 export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChange: (value: MetadataDraft) => void }) {
     const changeField = (path: string, text: string) => onChange({ ...value, fields: { ...value.fields, [path]: text } })

@@ -65,7 +65,7 @@ export function mayBeWithdrawn(proposal: Pick<ShareProposal, 'kind' | 'closedByB
     return proposal.kind !== 'removal' && Boolean(proposal.closedByBot) && proposal.reason?.kind === 'unreadable'
 }
 
-export function declineOf(proposal: ShareProposal): Decline {
+export function declineOf(proposal: Omit<ShareProposal, 'kind'>): Decline {
     return {
         iid: proposal.iid,
         mrUrl: proposal.url,

@@ -135,6 +135,15 @@ export function parseCatalogBranch(branch: string): { slug: string; version: str
     return match ? { slug: match[1], version: match[2] } : undefined
 }
 
+export function textBranch(publisher: string, slug: string, version: string): string {
+    return `text/${publisher}/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
+}
+
+export function parseTextBranch(branch: string): { slug: string; version: string } | undefined {
+    const match = /^text\/[^/]+\/(.+)-(\d+\.\d+\.\d+)$/.exec(branch)
+    return match ? { slug: match[1], version: match[2] } : undefined
+}
+
 export function removalBranch(slug: string, version: string): string {
     return `remove/${slug}-${version.replace(/[^A-Za-z0-9.-]/g, '-')}`
 }

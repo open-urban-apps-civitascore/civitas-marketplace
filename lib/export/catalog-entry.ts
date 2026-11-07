@@ -1,4 +1,4 @@
-import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
+import { exportMetadataSchema, METADATA_GROUPS, type ExportMetadata } from '@/lib/export/metadata'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 
 export interface CatalogEntryInput {
@@ -92,6 +92,13 @@ export type CatalogEdit =
     | { status: 'replaced'; content: string; indexVersion: string; previousVersion?: string }
     | { status: 'unchanged'; indexVersion: string }
 
+export type EntryTexts = Pick<CatalogEntryInput, 'displayName' | 'description' | 'keywords'> & { metadata: ExportMetadata }
+
+export type TextEdit =
+    | { status: 'not-listed' }
+    | { status: 'unchanged' }
+    | { status: 'changed'; content: string; indexVersion: string }
+
 function bumpPatch(version: unknown): string {
     if (typeof version !== 'string') return '3.0.1'
     const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim())
@@ -149,14 +156,7 @@ export function applyCatalogEntry(
     }
 
     const next = existingAt >= 0 ? useCases.map((row, i) => (i === existingAt ? merged : row)) : [...useCases, merged]
-    const indexVersion = bumpPatch(index.version)
-    const updated = {
-        ...index,
-        version: indexVersion,
-        updatedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        useCases: next,
-    }
-    const content = `${JSON.stringify(updated, null, 2)}\n`
+    const { content, indexVersion } = rewrittenIndex(index, next, now)
     if (existingAt >= 0) {
         const previous = useCases[existingAt].version
         return {
@@ -167,6 +167,49 @@ export function applyCatalogEntry(
         }
     }
     return { status: 'added', content, indexVersion }
+}
+
+const TEXT_PATHS = ['displayName', 'description', 'keywords', 'themes', 'media', ...METADATA_GROUPS.flatMap((group) => group.fields.map((field) => field.path))]
+const holdsTexts = (path: string) => TEXT_PATHS.some((owned) => owned === path || owned.startsWith(`${path}.`))
+
+function textsOverRow(row: Record<string, unknown>, texts: Record<string, unknown>, path = ''): Record<string, unknown> {
+    const kept = Object.entries(row).flatMap(([key, value]): [string, unknown][] => {
+        const at = path ? `${path}.${key}` : key
+        if (!holdsTexts(at)) return [[key, value]]
+        if (!(key in texts)) return []
+        const [before, after] = [asRecord(value), asRecord(texts[key])]
+        return [[key, before && after ? textsOverRow(before, after, at) : texts[key]]]
+    })
+    return Object.fromEntries([...kept, ...Object.entries(texts).filter(([key]) => !(key in row))])
+}
+
+export function applyTextEdit(
+    indexJson: string,
+    id: string,
+    version: string,
+    { metadata, ...basics }: EntryTexts,
+    now: Date = new Date(),
+): TextEdit {
+    const index = JSON.parse(indexJson) as Record<string, unknown>
+    const useCases = Array.isArray(index.useCases) ? (index.useCases as Record<string, unknown>[]) : []
+    const at = useCases.findIndex((row) => row.id === id && row.version === version && !row.revoked)
+    if (at < 0) return { status: 'not-listed' }
+
+    const edited = textsOverRow(useCases[at], { ...basics, ...metadata })
+    if (canonical(useCases[at]) === canonical(edited)) return { status: 'unchanged' }
+
+    return { status: 'changed', ...rewrittenIndex(index, useCases.map((row, i) => (i === at ? edited : row)), now) }
+}
+
+function rewrittenIndex(index: Record<string, unknown>, useCases: Record<string, unknown>[], now: Date): { content: string; indexVersion: string } {
+    const indexVersion = bumpPatch(index.version)
+    const updated = {
+        ...index,
+        version: indexVersion,
+        updatedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        useCases,
+    }
+    return { content: `${JSON.stringify(updated, null, 2)}\n`, indexVersion }
 }
 
 const EXPORT_OWNED_KEYS: ReadonlySet<string> = new Set([
@@ -213,6 +256,16 @@ export function isListed(indexJson: string, id: string, version: string): boolea
         )
     } catch {
         return false
+    }
+}
+
+export function listedRowOf(indexJson: string, id: string, version: string): string | undefined {
+    try {
+        const index = JSON.parse(indexJson) as { useCases?: { id?: unknown; version?: unknown; revoked?: unknown }[] }
+        const row = index.useCases?.find((candidate) => candidate.id === id && candidate.version === version && !candidate.revoked)
+        return row ? JSON.stringify(row) : undefined
+    } catch {
+        return undefined
     }
 }
 

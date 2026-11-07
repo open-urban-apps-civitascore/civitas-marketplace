@@ -732,6 +732,13 @@ describe('the server’s side', () => {
         )
     })
 
+    it('counts an open text change too: a new version would list the old text', () => {
+        const [open] = openSharesOf([request(9, 'text/stadt/baeume-1.0.0')], 'baeume', BOT)
+        expect(open).toEqual({ kind: 'text', slug: 'baeume', version: '1.0.0', iid: 9, url: `${WEB}/9` })
+        expect(busyRefusal(open)).toContain('Version 1.0.0, Textänderung, Vorschlag !9')
+        expect(openSharesOf([request(9, 'text/stadt/andere-1.0.0')], 'baeume', BOT)).toEqual([])
+    })
+
     it('counts as used up every version of the package the account proposed, but one withdrawn by the mark (R6 in the refusals)', () => {
         const requests = [
             request(1, 'export/baeume-1.0.0', { state: 'merged' }),

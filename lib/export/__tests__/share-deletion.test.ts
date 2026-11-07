@@ -585,6 +585,15 @@ describe('a version the catalogue team took out', () => {
         expect(writes(gitlab.calls)).toEqual([])
     })
 
+    it('is not proposed from its package once listed, which would undo changed texts and the seal', async () => {
+        const index = JSON.stringify({ version: '1.0.0', useCases: [{ id: 'urn:stadt:usecase:baeume', version: '1.1.0', description: 'Im Katalog geändert' }] })
+        const gitlab = fakeGitLab(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index } }))
+        vi.stubGlobal('fetch', gitlab.fetchImpl)
+        const result = await proposeSharedCatalogEntry(WEB, 'baeume', '1.1.0')
+        expect(result).toMatchObject({ intent: 'catalog', status: 'unchanged', catalog: { state: 'listed' } })
+        expect(writes(gitlab.calls)).toEqual([])
+    })
+
     it('is withdrawn with the catalogue team’s reason when its row is marked revoked', async () => {
         const index = JSON.stringify({ version: '1.0.0', useCases: [{ id: 'urn:stadt:usecase:baeume', version: '1.1.0', revoked: true, revokedReason: 'Datenquelle abgeschaltet' }] })
         const gitlab = fakeGitLab(world({ files: { [`${HEAD}|${DIR}/core-ir/manifest.json`]: manifest('1.1.0'), 'main|index.json': index } }))

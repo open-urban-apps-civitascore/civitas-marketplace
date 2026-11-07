@@ -265,6 +265,29 @@ describe('readShareListing', () => {
         expect(count(gitlab.calls, '/projects/8/merge_requests?author_id=42')).toBe(1)
     })
 
+    describe('a change to the texts of a listed version', () => {
+        const ID = 'urn:stadt:usecase:baeume'
+        const index = JSON.stringify({ version: '1.0.0', useCases: [{ id: ID, version: '1.1.0' }] })
+        const packageOf = { ...FILES, 'main|index.json': index, [`${HEAD}|packages/baeume/core-ir/manifest.json`]: JSON.stringify({ id: ID, version: '1.1.0' }) }
+        const change = (state: string, facts: Record<string, unknown> = {}) => ({ iid: 40, state, source_branch: 'text/stadt/baeume-1.1.0', web_url: `${WEB}/-/merge_requests/40`, ...facts })
+        const read = async (botMrs: unknown[]) => {
+            vi.stubGlobal('fetch', fakeGitLab([], { botMrs: [...botMrs, BOT_MRS[1]], openMrs: [], files: packageOf }).fetchImpl)
+            const { rows } = await readShareListing()
+            return rows.find((row) => row.version === '1.1.0')
+        }
+
+        it('is read from what the listing asks anyway, and stays apart from the entry proposals', async () => {
+            const row = await read([change('opened')])
+            expect(row?.catalog?.state).toBe('listed')
+            expect(row?.textChange).toMatchObject({ iid: 40, state: 'opened' })
+            expect(row?.proposals?.map((proposal) => proposal.iid)).not.toContain(40)
+        })
+
+        it('names only the newest, and nothing once it was accepted', async () => {
+            expect((await read([change('merged'), change('closed', { iid: 39 })]))?.textChange).toBeUndefined()
+        })
+    })
+
     it('names a closed request withdrawn only with the marketplace’s mark or note, and reads comments only where someone wrote any, once', async () => {
         const closed = (iid: number, slug: string, closedBy: number, extra: Record<string, unknown> = {}) => ({
             iid,

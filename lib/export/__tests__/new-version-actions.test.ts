@@ -32,7 +32,7 @@ import { newVersionFillUrl, requestNewVersionFill } from '@/lib/export/fill-requ
 import { openMergeRequest } from '@/lib/export/gitlab'
 import { proposerOf, shareSourceLine, shareSourceOf, withdrawalMark } from '@/lib/export/merge-request-text'
 import { followsLine } from '@/lib/export/new-version'
-import { readNewVersionFill } from '@/lib/export/new-version-fill'
+import { readNewVersionFill, readTextEditFill } from '@/lib/export/new-version-fill'
 import { readUseCase } from '@/lib/export/portal-reader'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
@@ -93,10 +93,12 @@ interface Fake {
     secondRequests?: unknown[]
     /** Files per `<path>@<ref>` in the target. */
     files?: Record<string, string>
+    /** The catalogue's index, where a test needs a row in it. */
+    index?: string
 }
 
 /** Target 7 and, where asked, the catalogue 8 and a second place 9; reads only - the writes are mocked. */
-function fakeGitLab({ requests = [], catalogRequests = [], secondRequests = [], files = {} }: Fake) {
+function fakeGitLab({ requests = [], catalogRequests = [], secondRequests = [], files = {}, index = JSON.stringify({ version: '1.0.0', useCases: [] }) }: Fake) {
     const calls: string[] = []
     const fetchImpl = (async (input: string | URL | Request) => {
         const url = new URL(String(input))
@@ -114,7 +116,7 @@ function fakeGitLab({ requests = [], catalogRequests = [], secondRequests = [], 
             const all = ({ 7: requests, 8: catalogRequests, 9: secondRequests }[listed] ?? []) as { source_branch: string; state: string }[]
             return json(all.filter((mr) => (!branch || mr.source_branch === branch) && (query.get('state') !== 'opened' || mr.state === 'opened')))
         }
-        if (path === '/projects/8/repository/files/index.json/raw') return new Response(JSON.stringify({ version: '1.0.0', useCases: [] }), { status: 200 })
+        if (path === '/projects/8/repository/files/index.json/raw') return new Response(index, { status: 200 })
         const file = path.match(/^\/projects\/7\/repository\/files\/(.+)\/raw$/)?.[1]
         if (file) {
             const content = files[`${decodeURIComponent(file)}@${query.get('ref')}`]
@@ -353,6 +355,46 @@ describe('the Steckbrief of a new version, from a shared one (readNewVersionFill
             ...facts,
         })
     const atSha = { [`${DIR}/core-ir/manifest.json@${SHA}`]: manifest }
+
+    describe('with a text changed in the catalogue since', () => {
+        const ID = 'urn:stadt:usecase:baeume'
+        const catalogued = (row: Record<string, unknown>) => JSON.stringify({ version: '4.0.0', useCases: [{
+            id: ID, type: 'usecase', displayName: 'Bäume', description: 'Stadtbäume', version: '1.1.0', maintainer: 'Stadt', license: 'EUPL-1.2', keywords: ['bäume'],
+            ...row,
+        }] })
+        const fill = async (index: string, facts?: Record<string, unknown>) => {
+            vi.stubEnv('CATALOG_REPO_URL', CATALOG)
+            vi.stubEnv('PORTAL_URL', HERE)
+            vi.stubGlobal('fetch', fakeGitLab({ requests: [shared(facts)], files: atSha, index }).fetchImpl)
+            return { read: await readNewVersionFill(TARGET, 'baeume', '1.1.0'), checked: await readTextEditFill(TARGET, 'baeume', '1.1.0') }
+        }
+
+        it('offers the catalogue text, so the next version does not bring the old one back', async () => {
+            const { read, checked } = await fill(catalogued({ description: 'Korrigiert', contact: { email: 'neu@stadt.example' } }))
+            expect(read.listedAs).toBe(ID)
+            expect(read.steckbrief).toMatchObject({ description: 'Korrigiert', metadata: { contact: { email: 'neu@stadt.example' } }, from: '1.1.0' })
+            expect(checked).toMatchObject({ id: ID, steckbrief: { description: 'Korrigiert' } })
+        })
+
+        it('keeps to the package where another version is listed, and allows no text change then', async () => {
+            const { read, checked } = await fill(catalogued({ version: '1.2.0', description: 'Text der neueren Version' }))
+            expect(read.listedAs).toBeUndefined()
+            expect(read.steckbrief?.description).toBe('Stadtbäume')
+            expect(checked).toEqual({ refusal: expect.stringContaining('steht gerade nicht im Katalog') })
+        })
+
+        it('refuses rather than bring back the package’s text where the catalogue has no index', async () => {
+            vi.stubEnv('CATALOG_REPO_URL', CATALOG)
+            const { fetchImpl } = fakeGitLab({ requests: [shared()], files: atSha })
+            vi.stubGlobal('fetch', (async (input: string | URL | Request) => (String(input).includes('/projects/8/repository/files/index.json') ? new Response('', { status: 404 }) : fetchImpl(input))) as typeof fetch)
+            expect(await readNewVersionFill(TARGET, 'baeume', '1.1.0')).toMatchObject({ status: 'error', detail: expect.stringContaining('Katalog nicht gefunden') })
+        })
+
+        it('allows no text change for what another instance shared', async () => {
+            const { checked } = await fill(catalogued({}), { description: ['Proposed by the Open Urban Apps marketplace on behalf of **Ewa**.', '', shareSourceLine({ kind: 'dataset', id: 'local', instance: THERE })].join('\n') })
+            expect(checked).toEqual({ refusal: expect.stringContaining('nicht von dieser Instanz') })
+        })
+    })
 
     it('is not read for a place, short name or version that is no such thing', async () => {
         const gitlab = fakeGitLab({ requests: [shared()], files: atSha })

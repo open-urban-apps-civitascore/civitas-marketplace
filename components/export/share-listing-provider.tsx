@@ -66,6 +66,7 @@ export function useShareView(enabled: boolean) {
         rows,
         tabs,
         instance: listing.instance,
+        person,
         older: enabled ? listing.older : undefined,
         catalogHistory: listing.catalogHistory,
         drafts,

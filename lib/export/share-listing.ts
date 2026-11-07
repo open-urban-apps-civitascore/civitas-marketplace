@@ -9,6 +9,7 @@ import {
     parseBundleBranch,
     parseCatalogBranch,
     parseRemovalBranch,
+    textBranch,
     thisInstance,
     type CatalogRepo,
     type ExportConfig,
@@ -35,6 +36,7 @@ import {
 import { catalogPinOf, displayNameOf, proposerOf, readmeSourceOf, shareSourceOf, type DeclineReason, type ShareSource } from '@/lib/export/merge-request-text'
 import { SHARE_READS } from '@/lib/export/share-cache'
 import { catalogStatusIn, inspectBundleIn, packageFolder, presentRequests, readBaseTrees, type BundleStatus, type CatalogContext, type CatalogStatus } from '@/lib/export/status'
+import { catalogEntryPath } from '@/lib/use-case-catalog/path'
 
 // What the bot account proposed and where each shared version stands, read from GitLab on every visit.
 // Served by `GET /api/shares`, not a server action: Next runs a page's server actions one at a time.
@@ -79,6 +81,8 @@ export interface SharedPackageRow {
     source?: ShareSource
     proposedBy?: string
     proposals?: ShareProposal[]
+    /** The newest proposal to change this listed version's texts, unless accepted. */
+    textChange?: Omit<ShareProposal, 'kind'>
 }
 
 export interface ShareListing {
@@ -262,6 +266,7 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         sourceOf(context, version.slug, mr),
     ])
     const own = proposals.find((proposal) => proposal.kind === 'bundle' && proposal.iid === mr.iid)
+    const textChange = state.catalog?.state === 'listed' && state.packageId ? await textChangeOf(context, state.packageId, version) : undefined
     return {
         key: `${target.key}#${mr.source_branch}`,
         targetKey: target.key,
@@ -276,7 +281,15 @@ async function sharedPackageRow(context: TargetContext, requests: MergeRequestRe
         ...(source ? { source } : {}),
         ...(proposerOf(mr.description) ? { proposedBy: proposerOf(mr.description) } : {}),
         proposals,
+        ...(textChange ? { textChange } : {}),
     }
+}
+
+async function textChangeOf(context: TargetContext, packageId: string, { slug, version }: { slug: string; version: string }): Promise<SharedPackageRow['textChange']> {
+    const side = await context.catalog.catch(() => undefined)
+    const branch = textBranch(catalogEntryPath(packageId).publisher, slug, version)
+    const newest = side?.byBot.find((mr) => mr.source_branch === branch)
+    return side && newest && newest.state !== 'merged' ? proposalFacts(newest, side) : undefined
 }
 
 function historyUrl(projectUrl: string, branch: string, path: string): string {
@@ -356,16 +369,21 @@ function pinsHere(mr: MergeRequestRef, target: ExportTarget, dir: string): boole
     return !pin || (sameProjectUrl(pin.repo, target.url) && pin.path === dir)
 }
 
-async function proposalOf(
-    kind: ShareProposal['kind'],
-    mr: MergeRequestRef,
-    where: { client: GitLabClient; projectId: number; botId: number },
-): Promise<ShareProposal> {
+interface ProposalPlace {
+    client: GitLabClient
+    projectId: number
+    botId: number
+}
+
+async function proposalOf(kind: ShareProposal['kind'], mr: MergeRequestRef, where: ProposalPlace): Promise<ShareProposal> {
+    return { kind, ...(await proposalFacts(mr, where)) }
+}
+
+async function proposalFacts(mr: MergeRequestRef, where: ProposalPlace): Promise<Omit<ShareProposal, 'kind'>> {
     const closedByBot = mr.state === 'closed' && mr.closed_by?.id === where.botId
     const merger = mr.merge_user ?? mr.merged_by
     const closing = mr.state === 'closed' ? await closingOf(where.client, where.projectId, mr) : undefined
     return {
-        kind,
         iid: mr.iid,
         url: mr.web_url,
         state: mr.state,

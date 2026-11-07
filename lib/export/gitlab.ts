@@ -540,8 +540,9 @@ export async function openMergeRequest(
         files: Record<string, string>
         existingPaths: Set<string>
         deletedPaths?: string[]
-        /** Branch whose merge starts the count over (the version's removal); see `heldBy`. */
         restartedBy?: string
+        replacesClosed?: boolean
+        startSha?: string
     },
 ): Promise<MergeRequestOutcome> {
     const requests = await findMergeRequests(client, input.upstream.id, input.branch)
@@ -553,7 +554,7 @@ export async function openMergeRequest(
     // A leftover branch is replaced, never built on: the merge request must show exactly this export.
     if (await branchHead(client, source.id, input.branch)) {
         // A turned-down proposal keeps its branch for a reopen; the callers refuse such a version first.
-        const held = await heldBy(client, input.upstream.id, requests, input.restartedBy)
+        const held = input.replacesClosed ? undefined : await heldBy(client, input.upstream.id, requests, input.restartedBy)
         if (held) throw new HeldBranchError(held)
         await gl(client, `/projects/${source.id}/repository/branches/${encode(input.branch)}`, {
             method: 'DELETE',
@@ -568,7 +569,7 @@ export async function openMergeRequest(
         })),
         ...(input.deletedPaths ?? []).map((path) => ({ action: 'delete' as const, file_path: path })),
     ]
-    const upstreamHead = await branchHead(client, input.upstream.id, input.baseBranch)
+    const upstreamHead = input.startSha ?? (await branchHead(client, input.upstream.id, input.baseBranch))
     const commitBody = {
         branch: input.branch,
         commit_message: input.title,

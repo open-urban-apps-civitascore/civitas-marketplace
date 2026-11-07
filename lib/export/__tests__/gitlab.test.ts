@@ -81,6 +81,20 @@ describe('openMergeRequest', () => {
         expect(await openMergeRequest(acting, input)).toMatchObject({ status: 'created', iid: 7 })
     })
 
+    it('starts from the commit it is given, without asking for the current one', async () => {
+        const gl = fakeGitLab([
+            ['GET', '/projects/10/merge_requests', []],
+            ['GET', '/projects/10/repository/branches/text%2Fs%2Fx-1.0.0', new Response('', { status: 404 })],
+            ['POST', '/projects/10/repository/commits', { id: 'def' }],
+            ['POST', '/projects/10/merge_requests', { iid: 7, web_url: 'https://gitlab.example/mr/7', state: 'opened', source_branch: 'text/s/x-1.0.0' }],
+        ])
+        const client = clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl)
+        await openMergeRequest(client, { upstream: upstream(40), baseBranch: 'main', branch: 'text/s/x-1.0.0', title: 'T', description: 'd', files: { 'index.json': '{}\n' }, existingPaths: new Set(['index.json']), startSha: 'read-at' })
+        const commit = gl.calls.find((c) => c.method === 'POST' && c.path.startsWith('/projects/10/repository/commits'))
+        expect(commit?.body).toMatchObject({ start_sha: 'read-at' })
+        expect(gl.calls.some((c) => c.path.startsWith('/projects/10/repository/branches/main'))).toBe(false)
+    })
+
     it('commits straight onto the upstream when the token may push', async () => {
         const gl = fakeGitLab([
             ['GET', '/projects/10/merge_requests', []],
@@ -332,6 +346,12 @@ describe('openMergeRequest and a proposal the catalogue team turned down (R5)', 
         ['POST', '/projects/10/repository/commits', { id: 'def' }],
         ['POST', '/projects/10/merge_requests', { iid: 33, web_url: 'https://gitlab.example/mr/33', state: 'opened', source_branch: 'catalog/x-1.0.0' }],
     ]
+
+    it('replaces the branch of a turned-down text change, as nothing waits to be reopened there', async () => {
+        const gl = fakeGitLab(routes([closed()]))
+        const outcome = await openMergeRequest(clientFor('https://gitlab.example/group/catalog', 'token', gl.fetchImpl), { ...input, replacesClosed: true })
+        expect(outcome).toMatchObject({ status: 'created', iid: 33 })
+    })
 
     it('keeps its branch and opens nothing, so the team can still reopen it - and names no one, as it cannot tell who closed it', async () => {
         const gl = fakeGitLab(routes([closed()]))

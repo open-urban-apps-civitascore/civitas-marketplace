@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyCatalogEntry, buildCatalogEntry, indexRowOf, isListed, maintainerOf } from '@/lib/export/catalog-entry'
+import { applyCatalogEntry, applyTextEdit, buildCatalogEntry, indexRowOf, isListed, listedRowOf, maintainerOf } from '@/lib/export/catalog-entry'
 
 const SHA = 'b95660bc21b90c67f13bae25ef8452c9a8293227'
 
@@ -103,5 +103,89 @@ describe('maintainerOf', () => {
         expect(maintainerOf(index([{ id: ID, version: '1.0.0' }]), ID)).toBeUndefined()
         expect(maintainerOf(index([]), ID)).toBeUndefined()
         expect(maintainerOf('not json', ID)).toBeUndefined()
+    })
+})
+
+const ENTRY_ID = 'urn:musterstadt:usecase:kiez-baumkataster'
+
+describe('applyTextEdit', () => {
+    const now = new Date('2026-11-07T12:00:00.000Z')
+    const curation = { tier: 'verified', reviewedBy: 'Civitas Connect e. V.', reviewedAt: '2026-10-01' }
+    const row = () => ({
+        ...entry(),
+        themes: ['umwelt-klima'],
+        contact: { email: 'alt@musterstadt.example' },
+        implementation: { operator: 'Stadt Musterstadt' },
+        curation,
+        addedByHand: 'bleibt',
+    })
+    const texts = { displayName: 'Baumkataster im Kiez', description: 'Neu beschrieben', keywords: ['baum'], metadata: { themes: ['umwelt-klima' as const] } }
+    const edited = (edit: ReturnType<typeof applyTextEdit>) => {
+        if (edit.status !== 'changed') throw new Error(`expected a change, got ${edit.status}`)
+        return { index: JSON.parse(edit.content), indexVersion: edit.indexVersion }
+    }
+
+    it('changes the texts and nothing that decides what gets installed or who answers for it', () => {
+        const { index: next, indexVersion } = edited(applyTextEdit(index([row()]), ENTRY_ID, '1.0.0', texts, now))
+        const [after] = next.useCases
+        expect(after).toMatchObject({ displayName: 'Baumkataster im Kiez', description: 'Neu beschrieben', keywords: ['baum'] })
+        const before: Record<string, unknown> = row()
+        for (const key of ['id', 'type', 'version', 'maintainer', 'license', 'deploymentRef', 'curation', 'addedByHand'] as const) {
+            expect(after[key]).toEqual(before[key])
+        }
+        expect(next.version).toBe('3.0.1')
+        expect(indexVersion).toBe('3.0.1')
+        expect(next.updatedAt).toBe('2026-11-07T12:00:00Z')
+    })
+
+    it('removes a block the author cleared, and keeps the row where it was', () => {
+        const other = { id: 'urn:musterstadt:usecase:anderes', version: '2.0.0' }
+        const { index: next } = edited(applyTextEdit(index([other, row()]), ENTRY_ID, '1.0.0', texts, now))
+        expect(next.useCases[0]).toEqual(other)
+        expect(next.useCases[1]).not.toHaveProperty('contact')
+        expect(next.useCases[1]).not.toHaveProperty('implementation')
+    })
+
+    it('says so when nothing changes', () => {
+        const same = { displayName: 'Kiez-Baumkataster', description: 'Bäume im Kiez', keywords: ['baumkataster'], metadata: {} }
+        expect(applyTextEdit(index([entry()]), ENTRY_ID, '1.0.0', same, now)).toEqual({ status: 'unchanged' })
+    })
+
+    it('keeps fields the form does not know inside a block, in their places', () => {
+        const byHand = {
+            ...row(),
+            contact: { website: 'bleibt', email: 'alt@musterstadt.example' },
+            implementation: { operatorOrg: 'musterstadt', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'alt' } },
+        }
+        const metadata = { contact: { email: 'neu@musterstadt.example' }, implementation: { operator: 'Stadt Musterstadt', resources: { note: 'neu' } } }
+        const { index: next } = edited(applyTextEdit(index([byHand]), ENTRY_ID, '1.0.0', { ...texts, metadata }, now))
+        expect(next.useCases[0].contact).toEqual({ website: 'bleibt', email: 'neu@musterstadt.example' })
+        expect(next.useCases[0].implementation).toEqual({ operatorOrg: 'musterstadt', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'neu' } })
+        expect(Object.keys(next.useCases[0].implementation)).toEqual(['operatorOrg', 'operator', 'resources'])
+    })
+
+    it('still takes out a block the form left empty, and calls a row with such fields unchanged', () => {
+        const byHand = { ...entry(), contact: { website: 'x', email: 'alt@musterstadt.example' } }
+        const same = { displayName: 'Kiez-Baumkataster', description: 'Bäume im Kiez', keywords: ['baumkataster'] }
+        expect(applyTextEdit(index([byHand]), ENTRY_ID, '1.0.0', { ...same, metadata: { contact: { email: 'alt@musterstadt.example' } } }, now)).toEqual({ status: 'unchanged' })
+        expect(edited(applyTextEdit(index([byHand]), ENTRY_ID, '1.0.0', { ...same, metadata: {} }, now)).index.useCases[0].contact).toBeUndefined()
+    })
+
+    it('refuses another version and a withdrawn entry, as the person looked at something else', () => {
+        expect(applyTextEdit(index([row()]), ENTRY_ID, '1.0.1', texts, now)).toEqual({ status: 'not-listed' })
+        expect(applyTextEdit(index([{ ...row(), revoked: true }]), ENTRY_ID, '1.0.0', texts, now)).toEqual({ status: 'not-listed' })
+    })
+})
+
+describe('listedRowOf', () => {
+    it('gives the row of exactly this version', () => {
+        const raw = listedRowOf(index([{ ...entry(), description: 'Im Katalog geändert' }]), ENTRY_ID, '1.0.0')
+        expect(JSON.parse(raw as string)).toMatchObject({ id: ENTRY_ID, description: 'Im Katalog geändert' })
+    })
+
+    it('gives nothing for another version, a withdrawn entry or an index nobody can read', () => {
+        expect(listedRowOf(index([entry()]), ENTRY_ID, '2.0.0')).toBeUndefined()
+        expect(listedRowOf(index([{ ...entry(), revoked: true }]), ENTRY_ID, '1.0.0')).toBeUndefined()
+        expect(listedRowOf('not json', ENTRY_ID, '1.0.0')).toBeUndefined()
     })
 })

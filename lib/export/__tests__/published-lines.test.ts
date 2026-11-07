@@ -62,6 +62,55 @@ describe('a row of „Veröffentlicht“', () => {
             catalogHref: '/use-cases/openurbanapps/jungbaumbewaesserung-musterbach',
             gitlabHref: `${WEB}/20`,
             next: { kind: 'new-version', href: '/export/new?source=dataset:ds-musterbach&from=1.1.3&package=musterbach' },
+            textEdit: { kind: 'offer', href: '/export/edit?target=t&slug=musterbach&version=1.1.3' },
+        })
+    })
+
+    describe('changing the texts', () => {
+        const ref = { targetKey: 't', slug: 'musterbach', version: '1.1.3' }
+        const change = (facts: Partial<NonNullable<SharedPackageRow['textChange']>>) => ({ iid: 33, url: `${WEB}/33`, ...facts, state: facts.state ?? 'opened' })
+        const lineWith = (textChange: NonNullable<SharedPackageRow['textChange']>) => publishedLine(published([listed('1.1.3', 20, { textChange })])[0], AT)
+
+        it('is not offered for an entry another instance or nobody known shared', () => {
+            const [tabbed] = published([listed('1.1.3', 20)])
+            expect(publishedLine({ ...tabbed, origin: 'other' }, AT).textEdit).toBeUndefined()
+            expect(publishedLine({ ...tabbed, origin: 'unknown' }, AT).textEdit).toBeUndefined()
+            expect(publishedLine({ ...tabbed, origin: 'unknown' }, { now: NOW }).textEdit).toBeUndefined()
+        })
+
+        it('says while one is open that the catalogue still shows the old text, and offers to withdraw it', () => {
+            const line = lineWith(change({}))
+            expect(line.textEdit).toEqual({ kind: 'open', ref, iid: 33 })
+            expect(line.next).toBeUndefined()
+            expect(line.reasons).toEqual([{
+                text: 'Textänderung in Prüfung (Vorschlag !33). Bis dahin zeigt der Katalog den bisherigen Text, und eine neue Version geht erst danach.',
+                link: { label: 'Vorschlag ansehen', href: `${WEB}/33`, heard: ' (!33)' },
+            }])
+        })
+
+        it('names who proposed it when that is someone else, for the question before withdrawing', () => {
+            const [tabbed] = published([listed('1.1.3', 20, { textChange: change({ proposedBy: 'Karin' }) })])
+            expect(publishedLine(tabbed, { ...AT, person: 'Ewa' }).textEdit).toEqual({ kind: 'open', ref, iid: 33, byOther: 'Karin' })
+            expect(publishedLine(tabbed, { ...AT, person: 'Karin' }).textEdit).toEqual({ kind: 'open', ref, iid: 33 })
+        })
+
+        it('is not offered while a newer version is on its way, as that version would undo it', () => {
+            const [tabbed] = published([listed('1.1.3', 20)])
+            const newer = { key: 't#export/musterbach-1.2.0', version: '1.2.0' }
+            expect(publishedLine({ ...tabbed, newer }, AT).textEdit).toBeUndefined()
+            expect(publishedLine({ ...tabbed, newer: { ...newer, declined: 'package' } }, AT).textEdit?.kind).toBe('offer')
+        })
+
+        it('tells a "no" with its reason for a while, and offers to try again', () => {
+            const line = lineWith(change({ state: 'closed', closedAt: '2026-10-20T10:00:00Z', closedBy: 'daniel', reason: { kind: 'given', text: 'Bitte ohne Werbung' } }))
+            expect(line.textEdit?.kind).toBe('offer')
+            expect(line.reasons?.[0].text).toContain('Vorschlag !33')
+            expect(line.reasons?.[0].text).toContain('Bitte ohne Werbung')
+        })
+
+        it('says nothing about a withdrawn or a long-past one', () => {
+            expect(lineWith(change({ state: 'closed', closedAt: '2026-10-20T10:00:00Z', closedByBot: true, withdrawnBy: 'Ewa' })).reasons).toBeUndefined()
+            expect(lineWith(change({ state: 'closed', closedAt: '2026-08-01T10:00:00Z', closedBy: 'daniel' })).reasons).toBeUndefined()
         })
     })
 
@@ -172,7 +221,7 @@ describe('the list „Veröffentlicht“', () => {
         const html = list({ rows: published([listed('1.1.3', 20)]) })
         expect(text(html)).toBe(
             'Jungbaumbewässerung Musterbach Version 1.1.3 Seit 14.10. im Katalog · eingereicht von Ewa · Herausgeber: Open Urban Apps ' +
-                'Im Katalog ansehen In GitLab ansehen Neue Version teilen',
+                'Im Katalog ansehen In GitLab ansehen Texte ändern Neue Version teilen',
         )
         expect(html).toContain('href="/use-cases/openurbanapps/jungbaumbewaesserung-musterbach"')
         expect(html).toContain('href="/export/new?source=dataset:ds-musterbach&amp;from=1.1.3&amp;package=musterbach"')

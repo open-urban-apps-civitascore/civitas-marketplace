@@ -1,5 +1,9 @@
+import { DECLINE_DAYS, declineOf } from '@/lib/export/declines'
 import { changeNoteOf, inProgressHref, type ReasonLine } from '@/lib/export/in-progress-items'
+import { proposedByOther } from '@/lib/export/merge-request-text'
+import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { ofUnknownInstance, type TabRow, type TurnedDown } from '@/lib/export/share-tabs'
+import { textEditHref, type TextEditRef } from '@/lib/export/text-edit'
 import { newVersionHref } from '@/lib/export/wizard-address'
 import { catalogEntryHref } from '@/lib/use-case-catalog/path'
 
@@ -12,12 +16,15 @@ export interface PublishedLine {
     catalogHref: string
     gitlabHref?: string
     next?: { kind: 'new-version'; href: string } | { kind: 'newer'; version: string; href: string; declined?: TurnedDown }
+    textEdit?: { kind: 'offer'; href: string } | { kind: 'open'; ref: TextEditRef; iid: number; byOther?: string }
 }
 
 export interface PublishedOptions {
     /** When the listing was read, so the line stays the same between renders. */
     now?: number
     instance?: string
+    /** Who is looking, so a colleague's open proposal gets named. */
+    person?: string
 }
 
 const CATALOGUE_PATH = '/use-cases'
@@ -36,7 +43,27 @@ function mergedEntryOf(tabbed: TabRow) {
     return tabbed.row.proposals?.find((proposal) => proposal.kind === 'catalog' && proposal.state === 'merged')
 }
 
-export function publishedLine(tabbed: TabRow, { now, instance }: PublishedOptions = {}): PublishedLine {
+function textChangeNote({ textChange: change, version }: SharedPackageRow, now: number | undefined): ReasonLine | undefined {
+    if (change?.state === 'opened') {
+        return {
+            text: `Textänderung in Prüfung (Vorschlag !${change.iid}). Bis dahin zeigt der Katalog den bisherigen Text, und eine neue Version geht erst danach.`,
+            link: { label: 'Vorschlag ansehen', href: change.url, heard: ` (!${change.iid})` },
+        }
+    }
+    if (!change?.closedAt || change.closedByBot || change.withdrawnBy) return undefined
+    const days = now === undefined ? 0 : (now - Date.parse(change.closedAt)) / (24 * 60 * 60 * 1000)
+    return days <= DECLINE_DAYS ? changeNoteOf(version, declineOf(change)) : undefined
+}
+
+function textEditOf({ row, origin, newer }: TabRow, person: string | undefined): PublishedLine['textEdit'] {
+    if (origin !== 'this') return undefined
+    const ref: TextEditRef = { targetKey: row.targetKey, slug: row.slug, version: row.version }
+    const change = row.textChange
+    if (change?.state === 'opened') return { kind: 'open', ref, iid: change.iid, ...(proposedByOther(change.proposedBy, person) ? { byOther: change.proposedBy } : {}) }
+    return newer && !newer.declined ? undefined : { kind: 'offer', href: textEditHref(ref) }
+}
+
+export function publishedLine(tabbed: TabRow, { now, instance, person }: PublishedOptions = {}): PublishedLine {
     const { row } = tabbed
     const entry = mergedEntryOf(tabbed)
     const listedAt = entry?.mergedAt ? Date.parse(entry.mergedAt) : NaN
@@ -60,13 +87,17 @@ export function publishedLine(tabbed: TabRow, { now, instance }: PublishedOption
               ...(newer.declined ? { declined: newer.declined } : {}),
           }
         : { kind: 'new-version', href: newVersionHref({ ...(row.source?.id ? { datasetId: row.source.id } : {}), slug: row.slug, version: row.version }) }
+    const reasons = [tabbed.declinedChange && changeNoteOf(row.version, tabbed.declinedChange), textChangeNote(row, now)].filter((reason) => reason !== undefined)
+    const textEdit = textEditOf(tabbed, person)
+    const offersNext = !(next.kind === 'new-version' && row.textChange?.state === 'opened')
     return {
         title: row.displayName,
         version: row.version,
         ...(facts.length ? { facts: facts.join(' · ') } : {}),
         ...(earlier ? { earlier } : {}),
-        ...(tabbed.declinedChange ? { reasons: [changeNoteOf(row.version, tabbed.declinedChange)] } : {}),
+        ...(reasons.length ? { reasons } : {}),
         catalogHref,
-        ...(unknown ? {} : { gitlabHref: entry?.url ?? row.bundleMr.url, next }),
+        ...(unknown ? {} : { gitlabHref: entry?.url ?? row.bundleMr.url, ...(offersNext ? { next } : {}) }),
+        ...(textEdit ? { textEdit } : {}),
     }
 }

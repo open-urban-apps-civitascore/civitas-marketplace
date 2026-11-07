@@ -1,5 +1,5 @@
 import { catalogInputFromManifest } from '@/lib/export/catalog-entry'
-import { parseBundleBranch, parseCatalogBranch, parseRemovalBranch } from '@/lib/export/config'
+import { parseBundleBranch, parseCatalogBranch, parseRemovalBranch, parseTextBranch } from '@/lib/export/config'
 import { declinedBy, declinedProposal, declineOf, mayBeWithdrawn, sinceStart, startedOver, type Decline } from '@/lib/export/declines'
 import type { MergeRequestRef } from '@/lib/export/gitlab'
 import { inProgressHref, mayProposeEntry } from '@/lib/export/in-progress-items'
@@ -408,20 +408,20 @@ export function startingBasics(
 }
 
 export interface OpenShare {
-    kind: ShareProposal['kind']
+    kind: ShareProposal['kind'] | 'text'
     slug: string
     version: string
     iid: number
     url: string
 }
 
-const BRANCH_KINDS: [ShareProposal['kind'], (branch: string) => { slug: string; version: string } | undefined][] = [
+const BRANCH_KINDS: [OpenShare['kind'], (branch: string) => { slug: string; version: string } | undefined][] = [
     ['bundle', parseBundleBranch],
     ['catalog', parseCatalogBranch],
     ['removal', parseRemovalBranch],
+    ['text', parseTextBranch],
 ]
 
-/** The account's open proposals of one package, whoever shared them: they all write into its folder. */
 export function openSharesOf(requests: readonly MergeRequestRef[], slug: string, botId: number): OpenShare[] {
     const wanted = slug.trim().toLowerCase()
     return requests.flatMap((mr) => {
@@ -460,7 +460,7 @@ export function entryUsedUpRefusal(followed: FollowedDecline, instead: string): 
     return `Nicht eingereicht: ${followedFact(followed)}. Trag im Steckbrief eine höhere Version ein, zum Beispiel ${instead}.`
 }
 
-const OPEN_STAGE: Record<ShareProposal['kind'], string> = { bundle: 'Paket-Prüfung', catalog: 'Eintrags-Prüfung', removal: 'Entfernen' }
+const OPEN_STAGE: Record<OpenShare['kind'], string> = { bundle: 'Paket-Prüfung', catalog: 'Eintrags-Prüfung', removal: 'Entfernen', text: 'Textänderung' }
 
 export function busyRefusal(open: OpenShare): string {
     return `Nicht eingereicht: Für dieses Paket läuft schon ein Vorschlag (Version ${open.version}, ${OPEN_STAGE[open.kind]}, Vorschlag !${open.iid}). Eine neue Version geht erst, wenn über ihn entschieden oder er zurückgezogen ist.`
