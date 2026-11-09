@@ -66,6 +66,13 @@ export function readDashboardDocument(value: unknown, where = 'Dashboard'): Supe
     return value as unknown as SupersetDashboardDocument
 }
 
+/** The title of the document's one dashboard, or undefined when its file names none. */
+export function dashboardTitle(document: SupersetDashboardDocument): string | undefined {
+    const [, file] = Object.entries(document.files).find(([path]) => path.startsWith('dashboards/')) ?? []
+    const title = file?.dashboard_title
+    return typeof title === 'string' && title.trim() ? title.trim() : undefined
+}
+
 /** A Superset export ZIP in package form. Used by scripts/superset-export-to-member.ts. */
 export function documentFromExport(zip: Buffer, supersetVersion?: string): SupersetDashboardDocument {
     const files: Record<string, Record<string, unknown>> = {}

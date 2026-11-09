@@ -19,6 +19,7 @@ import airStaSinkFrost from './luftqualitaet-sta/frost-observations.datasink.jso
 import airStaMapping from './luftqualitaet-sta/luftmessung-zu-station.mapping.json'
 import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
 import airStaSimulation from './luftqualitaet-sta/luftmessung.simulation.json'
+import airStaDashboard from './luftqualitaet-sta/luftmessung.dashboard.json'
 import treesManifest from './kiez-baumkataster/manifest.json'
 import treesSourceStructure from './kiez-baumkataster/baumkataster-zeile.datastructure.json'
 import treesTargetStructure from './kiez-baumkataster/kiez-baum.datastructure.json'
@@ -82,6 +83,9 @@ export const mockPackages: MockPackage[] = [
             'verkehrsmessung.dashboard.json': trafficDashboard,
         },
     },
+    // The dashboard is a Superset export of 2026-11-08 (FROST observations
+    // through Trino), not in the package repository: the platform's saga
+    // imports it (spike/dashboards-via-saga).
     {
         manifest: airStaManifest as unknown as PackageManifest,
         files: {
@@ -92,6 +96,7 @@ export const mockPackages: MockPackage[] = [
             'frost-observations.datasink.json': airStaSinkFrost,
             'luftqualitaets-import.pipeline.json': airStaPipeline,
             'luftmessung.simulation.json': airStaSimulation,
+            'luftmessung.dashboard.json': airStaDashboard,
         },
     },
     // SQL-sourced, simulation-less package: the seed SQL under

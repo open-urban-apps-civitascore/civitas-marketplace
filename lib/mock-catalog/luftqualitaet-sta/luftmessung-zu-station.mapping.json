@@ -78,7 +78,7 @@
         "op": "const",
         "value": "Feinstaub mit aerodynamischem Durchmesser bis 2,5 µm."
       },
-      "$.Datastreams[].Observations[].result": "$.pm25.value",
+      "$.Datastreams[].Observations[].result": { "op": "toFloat", "input": "$.pm25.value" },
       "$.Datastreams[].Observations[].phenomenonTime": "$.timestamp",
       "$.Datastreams[].Observations[].resultTime": "$.timestamp"
     }

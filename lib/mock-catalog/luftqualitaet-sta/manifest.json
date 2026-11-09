@@ -41,6 +41,9 @@
     ],
     "simulations": [
       { "file": "luftmessung.simulation.json" }
+    ],
+    "dashboards": [
+      { "file": "luftmessung.dashboard.json" }
     ]
   },
   "dependencies": []

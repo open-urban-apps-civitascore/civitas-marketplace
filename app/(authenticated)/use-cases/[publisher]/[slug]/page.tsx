@@ -87,7 +87,7 @@ export default async function UseCaseDetailPage({
               installation.dataSetId
                   ? fetchDatasetOverview(installation.dataSetId, await getAccessToken())
                   : Promise.resolve(null),
-              fetchInstalledDashboards(listing.id, installation.id),
+              fetchInstalledDashboards(installation.dataSetId, await getAccessToken()),
               readInstallationStreams(installation.id),
           ])
         : [null, [], null]

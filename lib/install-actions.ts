@@ -28,6 +28,7 @@ import {
     describeReleaseFailure,
     describeUninstallFailure,
     installSteps,
+    readFailure,
     resolveBrokerOverride,
     resolveDsnOverride,
     summarizeInstallation,
@@ -36,9 +37,12 @@ import {
     type InstallationRequest,
     type InstallStep,
 } from '@/lib/install-payload'
-import { fetchInstalledDashboards } from '@/lib/installed-dashboards'
-import { fetchInstallationFacts, type InstallationFacts } from '@/lib/installations'
-import { datasetHref } from '@/lib/portal-links'
+import {
+    dashboardCreation,
+    fetchInstalledDashboards,
+    type DashboardCreation,
+    type InstalledDashboardLink,
+} from '@/lib/installed-dashboards'
 import { getAccessToken, requireSession } from '@/lib/session'
 import {
     deleteSimulation,
@@ -47,13 +51,6 @@ import {
     registerSimulation,
 } from '@/lib/simulator/client'
 import { planSimulations, registerPlanned, simulationIdPrefix } from '@/lib/simulator/registration'
-import {
-    installDashboard,
-    missingSupersetSettings,
-    removeInstallationDashboards,
-    supersetConfig,
-    type SupersetConfig,
-} from '@/lib/superset/client'
 
 export interface InstallResult {
     status: 'created' | 'conflict' | 'invalid' | 'error'
@@ -196,9 +193,16 @@ export async function installEntry(
     const dataSet = installedDataSet(receipt.artifacts)
     const summary = summarizeInstallation(receipt, dataSet.name ?? entry.manifest.displayName)
     const poolSegment = createdPool ? ` · Datenpool „${createdPool.name}“ neu angelegt` : ''
-    // The first follow-up, so the platform provisions while the demo data and
-    // the dashboards are still being set up. Like them, a refusal is a remark
-    // in the summary, never an install failure.
+    // Before the release: the platform reads a dataset's dashboards when its
+    // saga starts, and for a dataset in draft that is the release saga. A
+    // dashboard is published as its dataset is: a ticked release publishes
+    // both (decision 2026-11-09). A refused dashboard is a remark in the
+    // summary, never an install failure.
+    const dashboardRefusals = isDataStructureEntry(effectiveEntry)
+        ? ''
+        : await registerDashboards(effectiveEntry, dataSet.id, releaseRequested)
+    // Then the release, so the platform provisions while the demo data are
+    // still being set up. Like them, a refusal is a remark in the summary.
     const release =
         releaseRequested && !isDataStructureEntry(effectiveEntry)
             ? await startRelease(receipt, dataSet.id)
@@ -215,14 +219,15 @@ export async function installEntry(
         dataSourceMode === 'demo' && !isDataStructureEntry(effectiveEntry)
             ? await activateDemoStreams(effectiveEntry, receipt)
             : ''
-    // Same rule as the demo data: the install has committed, so a dashboard
-    // that fails to import is a remark in the summary, never an install failure.
-    const dashboardSegment = isDataStructureEntry(effectiveEntry)
-        ? ''
-        : await activateDashboards(effectiveEntry, receipt.id, dataSet, release?.started === true)
     // Last: the saga's end, once the rest is set up.
     const released = release ? await finishRelease(release) : undefined
     const releaseSegment = released?.segment ?? ''
+    // After the saga, because only then does the platform know where Superset
+    // put each dashboard.
+    const dashboardSegment =
+        isDataStructureEntry(effectiveEntry) || (effectiveEntry.bundle.dashboards ?? []).length === 0
+            ? ''
+            : `${dashboardRefusals}${await reportDashboards(dataSet.id, released?.completed === true)}`
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -432,142 +437,74 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
 }
 
 /**
- * Imports the use case's dashboards into Superset, bound to this installation
- * (see lib/superset/rebind). Like the demo activation, every outcome comes
- * back as a summary segment: a dashboard that is missing must say why, and
- * one that arrived must say where.
+ * Hands the use case's dashboards to the platform: one dashboard of the
+ * installed dataset per member, with the member's Superset export as its
+ * bundle (lib/installed-dashboards). The platform's saga creates each one in
+ * Superset and imports its bundle, so the marketplace needs no Superset
+ * account for it.
+ *
+ * Says only what went wrong. A dashboard the platform took is reported after
+ * the release, with its link (reportDashboards).
  */
-async function activateDashboards(
+async function registerDashboards(
     entry: UseCaseEntry,
-    installationId: string | undefined,
-    dataSet: { id?: string; name?: string },
-    releaseStarted: boolean,
+    dataSetId: string | undefined,
+    released: boolean,
 ): Promise<string> {
-    if ((entry.bundle.dashboards ?? []).length === 0) return ''
-    const config = supersetConfig()
-    if (!config) {
-        return ` · Dashboard NICHT eingespielt: ${missingSupersetSettings().join(', ')} nicht konfiguriert`
-    }
-    if (!installationId || !dataSet.id) {
-        return ' · Dashboard NICHT eingespielt: Antwort trägt keine Installations- oder Datensatz-ID'
-    }
-    const outcomes = await importDashboards(
-        entry,
-        { installationId, dataSetId: dataSet.id, dataSetName: dataSet.name ?? entry.manifest.displayName },
-        config,
-    )
-    // Until its dataset is released, a dashboard's table does not exist. After a
-    // release started here it appears once the platform has provisioned it.
-    const hint = releaseStarted
-        ? ' (zeigt Daten, sobald die Freigabe abgeschlossen ist)'
-        : ' (zeigt Daten nach der Freigabe im Portal)'
-    return outcomes.map(({ ok, text }) => ` · ${text}${ok ? hint : ''}`).join('')
-}
-
-interface DashboardTarget {
-    installationId: string
-    dataSetId: string
-    dataSetName: string
-}
-
-/** Imports every dashboard of the entry for one installation: one outcome line each. */
-async function importDashboards(
-    entry: UseCaseEntry,
-    target: DashboardTarget,
-    config: SupersetConfig,
-): Promise<{ ok: boolean; text: string }[]> {
-    const notice = releaseNotice(target.dataSetName, target.dataSetId)
-    const outcomes: { ok: boolean; text: string }[] = []
-    for (const dashboard of entry.bundle.dashboards ?? []) {
+    const dashboards = entry.bundle.dashboards ?? []
+    if (dashboards.length === 0) return ''
+    if (!dataSetId) return ' · Dashboard NICHT angelegt: Antwort trägt keine Datensatz-ID'
+    // Outside the try blocks, as in startRelease: a missing session ends in a
+    // redirect, which must not read as a refused dashboard.
+    const accessToken = await getAccessToken()
+    let refusals = ''
+    for (const dashboard of dashboards) {
+        let creation: DashboardCreation
         try {
-            const installed = await installDashboard(
-                dashboard.content,
-                { installationId: target.installationId, datasetId: target.dataSetId, notice },
-                config,
-            )
-            outcomes.push({ ok: true, text: `Dashboard „${installed.title ?? dashboard.file}“: ${installed.url}` })
+            creation = dashboardCreation(dashboard, released)
         } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error)
-            outcomes.push({ ok: false, text: `Dashboard ${dashboard.file} NICHT eingespielt: ${reason}` })
+            refusals += ` · Dashboard ${dashboard.file} NICHT angelegt: ${reasonOf(error)}`
+            continue
+        }
+        try {
+            const response = await fetch(
+                `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/datasets/${encodeURIComponent(dataSetId)}/visualizations`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(creation),
+                    cache: 'no-store',
+                },
+            )
+            if (response.ok) continue
+            const { detail, reason } = readFailure(await response.text().catch(() => ''))
+            refusals += ` · Dashboard „${creation.name}“ NICHT angelegt: ${response.status} ${detail ?? reason ?? response.statusText}`
+        } catch (error) {
+            refusals += ` · Dashboard „${creation.name}“ NICHT angelegt: Portal-Backend nicht erreichbar (${reasonOf(error)})`
         }
     }
-    return outcomes
-}
-
-export interface ReimportResult {
-    status: 'imported' | 'error'
-    detail: string
+    return refusals
 }
 
 /**
- * Imports the dashboards of an existing installation again: after an import
- * that failed at install time, for an installation older than the Superset
- * configuration, or after a dashboard was deleted in Superset. The
- * installation and its release stay untouched. The import binds to the same
- * derived UUIDs and slug, so it creates the dashboard the page links to, or
- * replaces it with the package's version.
+ * Where each dashboard of the dataset stands after the release, read back
+ * from the platform: its Superset link once the saga has created it there, or
+ * what it still waits for.
  */
-export async function reimportDashboards(
-    _prev: ReimportResult | null,
-    formData: FormData,
-): Promise<ReimportResult> {
-    await requireSession()
-
-    const installationId = formData.get('installationId')
-    if (typeof installationId !== 'string' || installationId.length === 0) {
-        return { status: 'error', detail: 'installationId fehlt' }
-    }
-    // Package and dataset come from the platform's record, read with the
-    // user's token, never from the form.
-    const installation = await fetchInstallationFacts(installationId, await getAccessToken())
-    if (!installation?.active || !installation.packageId || !installation.dataSetId) {
-        return { status: 'error', detail: 'Keine aktive Installation mit Datensatz gefunden.' }
-    }
-    const config = supersetConfig()
-    if (!config) {
-        return { status: 'error', detail: `${missingSupersetSettings().join(', ')} nicht konfiguriert` }
-    }
-
-    let entry: CatalogEntry | undefined
-    try {
-        entry = await resolveCatalogEntry(installation.packageId, { retryFailed: true })
-    } catch (error) {
-        return {
-            status: 'error',
-            detail: `Paket-Quelle nicht verfügbar: ${error instanceof Error ? error.message : String(error)}`,
-        }
-    }
-    if (!entry || isDataStructureEntry(entry) || (entry.bundle.dashboards ?? []).length === 0) {
-        return { status: 'error', detail: 'Das Paket bringt kein Dashboard mit.' }
-    }
-
-    const outcomes = await importDashboards(
-        entry,
-        {
-            installationId,
-            dataSetId: installation.dataSetId,
-            dataSetName: installation.dataSetName ?? entry.manifest.displayName,
-        },
-        config,
-    )
-    return {
-        status: outcomes.every(({ ok }) => ok) ? 'imported' : 'error',
-        detail: outcomes.map(({ text }) => text).join(' · '),
-    }
+async function reportDashboards(dataSetId: string | undefined, releaseCompleted: boolean): Promise<string> {
+    if (!dataSetId) return ''
+    const dashboards = await fetchInstalledDashboards(dataSetId, await getAccessToken())
+    return dashboards.map((dashboard) => ` · ${dashboardStep(dashboard, releaseCompleted)}`).join('')
 }
 
-/**
- * The text tile the import puts on top of every dashboard of the use case.
- * Until the dataset is released its table does not exist, and Superset only
- * says that a relation is missing; the tile says what to do instead. It stays
- * after the release, so it is written to be true in both states.
- */
-function releaseNotice(dataSetName: string, dataSetId: string): string {
-    return [
-        '**Keine Daten zu sehen?**',
-        `Dieses Dashboard zeigt den Datensatz „${dataSetName}“. Daten erscheinen, sobald er im Portal freigegeben ist und seine Pipeline geliefert hat.`,
-        `[Datensatz im Portal öffnen](${datasetHref(dataSetId)})`,
-    ].join('\n\n')
+/** One dashboard as a step of the install summary (installSteps turns a URL into a link). */
+function dashboardStep({ title, externalId, url }: InstalledDashboardLink, releaseCompleted: boolean): string {
+    if (url) return `Dashboard „${title}“: ${url}`
+    if (externalId) return `Dashboard „${title}“ in Superset angelegt (ohne SUPERSET_PUBLIC_URL kein Link)`
+    if (releaseCompleted) {
+        return `Dashboard „${title}“ NICHT in Superset angelegt, obwohl die Freigabe abgeschlossen ist. Die Ursache steht im Log des Config-Adapters`
+    }
+    return `Dashboard „${title}“ im Portal angelegt. Superset übernimmt es, sobald der Datensatz freigegeben ist`
 }
 
 /**
@@ -586,26 +523,6 @@ async function removeDemoStreams(installationId: string): Promise<string> {
         return ids.length > 0 ? ` · ${ids.length} Demo-Stream(s) entfernt` : ''
     } catch (error) {
         return ` · Demo-Stream-Aufräumen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`
-    }
-}
-
-/**
- * Removes what the installation brought into Superset: dashboards, charts and
- * datasets. Runs after the uninstall committed, like the demo-stream sweep,
- * and reports instead of failing: the platform side is gone either way.
- */
-async function removeSupersetObjects(installationId: string, installation: InstallationFacts | null): Promise<string> {
-    const config = supersetConfig()
-    if (!config || !installation?.dataSetId) return ''
-    try {
-        const slugs = installation.packageId
-            ? (await fetchInstalledDashboards(installation.packageId, installationId)).map(({ slug }) => slug)
-            : []
-        const removed = await removeInstallationDashboards(config, { dataSetId: installation.dataSetId, slugs })
-        if (removed.dashboards + removed.charts + removed.datasets === 0) return ''
-        return ` · Superset: ${removed.dashboards} Dashboard(s), ${removed.charts} Chart(s), ${removed.datasets} Dataset(s) entfernt`
-    } catch (error) {
-        return ` · Superset-Aufräumen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`
     }
 }
 
@@ -661,9 +578,6 @@ export async function uninstallInstallation(
     }
 
     const accessToken = await getAccessToken()
-    // Read before the DELETE: the Superset cleanup needs the package (for the
-    // dashboard slug) and the dataset (for the schema).
-    const installation = await fetchInstallationFacts(installationId, accessToken)
     const response = await fetch(
         `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${encodeURIComponent(installationId)}`,
         {
@@ -674,15 +588,17 @@ export async function uninstallInstallation(
     )
 
     if (response.status === 204) {
+        // Superset needs no sweep here. The platform removes a dataset's
+        // dashboards from Superset when it deletes the dataset (the DATASET_DELETE
+        // saga), and a dataset that was never released has none there.
         const cleanup = await removeDemoStreams(installationId)
-        const supersetCleanup = await removeSupersetObjects(installationId, installation)
         revalidatePath('/installed')
         revalidatePath('/datastructures')
         revalidatePath('/use-cases')
         revalidatePath('/(authenticated)/use-cases/[publisher]/[slug]', 'page')
         return {
             status: 'uninstalled',
-            detail: `Deinstalliert${cleanup}${supersetCleanup}`,
+            detail: `Deinstalliert${cleanup}`,
             httpStatus: 204,
         }
     }

@@ -12,8 +12,8 @@ import { streamsOfInstallation, type InstallationStream } from '@/lib/simulator/
  * Everything the "In dieser Instanz" card shows for ONE installation, found by
  * the installation's id rather than by a catalogue entry. That makes it work
  * for every active installation, including the ones the assistant generated,
- * which are in no catalogue: their package id is unknown there, so they simply
- * show no dashboards.
+ * which are in no catalogue. Their dashboards come from the platform, like
+ * every other installation's.
  */
 
 interface InstallationRow {
@@ -67,7 +67,7 @@ export async function loadInstallationView(installationId: string): Promise<Inst
     const { dataSetId } = installation
     const [dataset, dashboards, streams, packageMap] = await Promise.all([
         dataSetId ? fetchDatasetOverview(dataSetId, accessToken) : Promise.resolve(null),
-        row.packageId ? fetchInstalledDashboards(row.packageId, row.id) : Promise.resolve([]),
+        fetchInstalledDashboards(dataSetId, accessToken),
         readInstallationStreams(row.id),
         row.packageId && dataSetId && isMapPreviewConfigured() ? packageMapOf(row.packageId) : Promise.resolve(null),
     ])

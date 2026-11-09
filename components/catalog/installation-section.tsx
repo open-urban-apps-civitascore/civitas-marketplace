@@ -13,7 +13,6 @@ import {
 } from 'lucide-react'
 
 import { RefreshWhilePending } from '@/components/catalog/refresh-while-pending'
-import { ReimportDashboardsButton } from '@/components/catalog/reimport-dashboards-button'
 import { SupersetMark } from '@/components/icons/superset-mark'
 import { UninstallButton } from '@/components/installed/uninstall-button'
 import { Flow, FlowGroup, FlowItem, FlowNote } from '@/components/ui/flow'
@@ -182,23 +181,17 @@ export function InstallationSection({
                 tone="dashboards"
                 title="Dashboards"
                 subtitle="Auswertung"
-                footer={<ReimportDashboardsButton installationId={installation.id} />}
             >
                 {dashboards.map((dashboard) => (
                     <FlowItem
-                        key={dashboard.url}
+                        key={dashboard.id}
                         icon={<SupersetMark className="w-5" />}
                         kind="Dashboard"
                         name={dashboard.title}
                         href={dashboard.url}
                         target="Superset"
-                        note={
-                            releasing
-                                ? 'Zeigt Daten, sobald die Freigabe abgeschlossen ist.'
-                                : awaitingRelease
-                                  ? 'Meldet bis zur Freigabe des Datensatzes eine fehlende Tabelle.'
-                                  : undefined
-                        }
+                        badge={dashboard.released ? undefined : <StatusPill tone="muted">Entwurf</StatusPill>}
+                        note={dashboardNote(dashboard, { releasing, awaitingRelease })}
                     />
                 ))}
             </FlowGroup>
@@ -261,4 +254,29 @@ export function InstallationSection({
             </div>
         </section>
     )
+}
+
+/**
+ * The line under one dashboard: what it still waits for, or nothing.
+ *
+ * The platform creates dashboards in Superset with its saga, and it sets
+ * `externalId` only when the saga has ended. Without it there is no link yet:
+ * - release running: Superset gets the dashboard when the saga ends.
+ * - dataset not released: Superset gets it with the release.
+ * - dataset released: an update saga still runs, or the saga did not create
+ *   it (the config-adapter log says why).
+ *
+ * With it, only an unreleased dataset is worth a line: the dashboard stays in
+ * Superset, but no new data arrive.
+ */
+function dashboardNote(
+    dashboard: InstalledDashboardLink,
+    { releasing, awaitingRelease }: { releasing: boolean; awaitingRelease: boolean },
+): string | undefined {
+    if (!dashboard.externalId) {
+        if (releasing) return 'Superset legt es an, sobald die Freigabe abgeschlossen ist.'
+        if (awaitingRelease) return 'Kommt mit der Freigabe des Datensatzes nach Superset.'
+        return 'Noch nicht in Superset angelegt.'
+    }
+    return awaitingRelease ? 'Zeigt keine neuen Daten, bis der Datensatz wieder freigegeben ist.' : undefined
 }
