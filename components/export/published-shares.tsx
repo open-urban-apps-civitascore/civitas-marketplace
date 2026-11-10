@@ -117,16 +117,16 @@ export function PublishedRow({ line, onTextChanged }: { line: PublishedLine; onT
             origin={line.facts}
             reasons={line.reasons}
             earlier={line.earlier}
-            actions={
+            links={
                 <>
-                    <Link href={line.catalogHref} className={`${PAGE_LINK} text-sm`}>
+                    <Link href={line.catalogHref} className={PAGE_LINK}>
                         Im Katalog ansehen
                     </Link>
-                    {line.gitlabHref && (
-                        <ExternalAnchor href={line.gitlabHref} className="text-sm">
-                            In GitLab ansehen
-                        </ExternalAnchor>
-                    )}
+                    {line.gitlabHref && <ExternalAnchor href={line.gitlabHref}>In GitLab ansehen</ExternalAnchor>}
+                </>
+            }
+            actions={
+                !line.textEdit && !next ? undefined : <>
                     {line.textEdit?.kind === 'offer' && (
                         <Link href={line.textEdit.href} className={buttonClass('secondary')}>
                             <PenLine aria-hidden className="size-4" />

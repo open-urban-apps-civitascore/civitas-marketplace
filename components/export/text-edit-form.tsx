@@ -1,17 +1,18 @@
 'use client'
 
-import { useState, useTransition, type FormEvent } from 'react'
+import { useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode, type Ref } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 
 import { inputClass, MetadataForm } from '@/components/export/metadata-form'
 import { useShareListingReload } from '@/components/export/share-listing-provider'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Section } from '@/components/ui/layout'
 import { Notice, type NoticeTone } from '@/components/ui/notice'
-import { draftMetadata } from '@/lib/export/metadata'
+import { draftMetadata, parseExportMetadata } from '@/lib/export/metadata'
 import type { FilledSteckbrief } from '@/lib/export/new-version'
 import { proposeTextEdit, type TextEditResult } from '@/lib/export/text-edit-actions'
-import { textChanges, textDraftOf, textReading, type TextEditRef } from '@/lib/export/text-edit'
+import { textChanges, textDraftOf, textReading, type TextChange, type TextEditRef } from '@/lib/export/text-edit'
 
 const TONES: Record<TextEditResult['status'], NoticeTone> = {
     ok: 'success',
@@ -24,8 +25,60 @@ const TONES: Record<TextEditResult['status'], NoticeTone> = {
 }
 
 const NONE = 'Keine Angabe'
+const PREVIEW = 'vorschau'
 
-/** The Steckbrief without the package's facts; one page, so what will change stays beside what was typed. */
+function ChangedText({ label, text, quiet }: { label: string; text: string; quiet?: boolean }) {
+    return (
+        <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-xs text-muted-foreground">{label}</span>
+            <span className={`whitespace-pre-line break-words ${quiet ? 'text-muted-foreground' : 'text-foreground'}`}>{text || NONE}</span>
+        </div>
+    )
+}
+
+export function TextEditPreview({
+    changes,
+    pending,
+    answer,
+    headingRef,
+    onBack,
+    onSend,
+}: {
+    changes: TextChange[]
+    pending: boolean
+    answer?: ReactNode
+    headingRef?: Ref<HTMLHeadingElement>
+    onBack: () => void
+    onSend: () => void
+}) {
+    return (
+        <div className="flex flex-col gap-6">
+            <Section title="Das ändert sich" headingRef={headingRef} lead="Das Katalog-Team prüft den Vorschlag, bevor die neuen Texte im Katalog erscheinen. Dein Name erscheint im öffentlichen Vorschlag bei GitLab.">
+                <dl className="flex flex-col gap-5 text-sm">
+                    {changes.map((change) => (
+                        <div key={change.key} className="flex flex-col gap-1.5">
+                            <dt className="font-medium text-foreground">{change.label}</dt>
+                            <dd className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+                                <ChangedText label="Bisher" text={change.before} quiet />
+                                <ChangedText label="Neu" text={change.after} />
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+            </Section>
+            {changes.some((change) => change.key.startsWith('contact.')) && (
+                <Notice tone="neutral">Der neue Kontakt erscheint im Katalog. Im Paket bleibt der bisherige öffentlich lesbar, denn das Paket ändert sich nicht.</Notice>
+            )}
+            {answer}
+            <div className="flex flex-wrap items-center gap-3">
+                <Button disabled={pending} onClick={onBack}>Zurück zum Bearbeiten</Button>
+                <Button variant="primary" pending={pending} onClick={onSend}>Änderung vorschlagen</Button>
+            </div>
+        </div>
+    )
+}
+
+/** The Steckbrief without the package's facts, then what will change before anything is sent. */
 export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbrief: FilledSteckbrief }) {
     const [before] = useState(() => textDraftOf(steckbrief))
     const [draft, setDraft] = useState(before)
@@ -33,10 +86,25 @@ export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbri
     const [pending, startTransition] = useTransition()
     const reloadListing = useShareListingReload()
     const changes = textChanges(before, draft)
+    // In the address, so browser back returns to the fields, not out of the page with what was typed.
+    const previewing = useSearchParams().get('step') === PREVIEW && changes.length > 0
+    const previewHeading = useRef<HTMLHeadingElement>(null)
+    useEffect(() => {
+        if (previewing) previewHeading.current?.focus()
+    }, [previewing])
     const basics = (key: 'displayName' | 'description' | 'keywords', value: string) => setDraft({ ...draft, [key]: value })
 
-    const submit = (event: FormEvent) => {
+    const showPreview = (event: FormEvent) => {
         event.preventDefault()
+        const metadata = parseExportMetadata(JSON.stringify(draftMetadata(draft.metadata)))
+        setResult(metadata.error === undefined ? undefined : { status: 'invalid', detail: metadata.error })
+        if (metadata.error !== undefined) return
+        const query = new URLSearchParams(window.location.search)
+        query.set('step', PREVIEW)
+        window.history.pushState(null, '', `?${query}`)
+    }
+
+    const send = () => {
         startTransition(async () => {
             const data = new FormData()
             for (const [key, value] of Object.entries(edit)) data.set(key, value)
@@ -69,13 +137,17 @@ export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbri
         )
     }
 
+    if (previewing) {
+        return <TextEditPreview changes={changes} pending={pending} answer={answer} headingRef={previewHeading} onBack={() => window.history.back()} onSend={send} />
+    }
+
     return (
-        <form className="flex flex-col gap-6" onSubmit={submit}>
+        <form className="flex flex-col gap-6" onSubmit={showPreview}>
             <Notice tone="neutral">
                 Das Paket bleibt unverändert (Version {edit.version}), ebenso Herausgeber ({steckbrief.maintainer}) und Lizenz ({steckbrief.license}).
                 Wer es installiert, bekommt dasselbe wie bisher. Das Katalog-Team prüft die neuen Texte, bevor sie im Katalog erscheinen.
             </Notice>
-            <fieldset disabled={pending} className="flex flex-col gap-6 disabled:opacity-60">
+            <div className="flex flex-col gap-6">
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h2 className="font-semibold md:col-span-2">Grundangaben</h2>
                     <label className="flex flex-col gap-1 text-sm">
@@ -93,28 +165,11 @@ export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbri
                     </label>
                 </section>
                 <MetadataForm value={draft.metadata} onChange={(metadata) => setDraft({ ...draft, metadata })} />
-            </fieldset>
-
-            {changes.length > 0 && (
-                <Section title="Das ändert sich">
-                    <dl className="flex flex-col gap-4 text-sm">
-                        {changes.map((change) => (
-                            <div key={change.key} className="flex flex-col gap-1">
-                                <dt className="font-medium text-foreground">{change.label}</dt>
-                                <dd className="break-words text-muted-foreground">Bisher: {change.before || NONE}</dd>
-                                <dd className="break-words text-foreground">Neu: {change.after || NONE}</dd>
-                            </div>
-                        ))}
-                    </dl>
-                </Section>
-            )}
-            {changes.some((change) => change.key.startsWith('contact.')) && (
-                <Notice tone="neutral">Der neue Kontakt erscheint im Katalog. Im Paket bleibt der bisherige öffentlich lesbar, denn das Paket ändert sich nicht.</Notice>
-            )}
+            </div>
             {answer}
             <div className="flex flex-wrap items-center gap-3">
                 <Link href="/export/shared" className="text-sm font-medium text-primary underline-offset-2 hover:underline">Abbrechen</Link>
-                <Button type="submit" variant="primary" pending={pending} disabled={changes.length === 0}>Änderung vorschlagen</Button>
+                <Button type="submit" variant="primary" disabled={changes.length === 0}>Änderungen ansehen</Button>
                 {changes.length === 0 && <span className="text-xs text-muted-foreground">Noch nichts geändert.</span>}
             </div>
         </form>

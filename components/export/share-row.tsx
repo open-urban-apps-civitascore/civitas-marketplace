@@ -14,6 +14,7 @@ export function ShareRow({
     title,
     version,
     origin,
+    links,
     track,
     status,
     reasons,
@@ -27,6 +28,8 @@ export function ShareRow({
     title: string
     version?: string
     origin?: string
+    /** Where to read more, apart from `actions`, which change something. */
+    links?: ReactNode
     track?: TrackStep[]
     status?: ReactNode
     reasons?: ReasonLine[]
@@ -55,6 +58,7 @@ export function ShareRow({
                             {version && <span className="font-normal text-muted-foreground"> Version {version}</span>}
                         </Title>
                         {origin && <p className="break-words text-xs text-muted-foreground">{origin}</p>}
+                        {links && <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">{links}</div>}
                     </div>
                 </div>
                 {middle && (

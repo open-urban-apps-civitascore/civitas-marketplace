@@ -5,12 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/session', () => ({ requireSession: vi.fn(), getAccessToken: vi.fn() }))
 vi.mock('@/lib/export/text-edit-actions', () => ({ proposeTextEdit: vi.fn(), withdrawTextEdit: vi.fn() }))
 vi.mock('@/components/export/share-listing-provider', () => ({ useShareListingReload: () => () => {}, useShareView: vi.fn() }))
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }))
 vi.mock('next/link', () => ({
     default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => createElement('a', { href, ...rest }, children),
 }))
 
 import { Published } from '@/components/export/published-shares'
-import { TextEditForm } from '@/components/export/text-edit-form'
+import { TextEditForm, TextEditPreview } from '@/components/export/text-edit-form'
 import { strictProblemsOf } from './wording-rules'
 import type { SharedPackageRow } from '@/lib/export/share-listing'
 import { shareTabs } from '@/lib/export/share-tabs'
@@ -34,13 +35,37 @@ describe('the form „Texte ändern“', () => {
     it('has nothing to propose until something changed, and no field for what stays', () => {
         expect(text(html)).toContain('Noch nichts geändert.')
         expect(text(html)).not.toContain('Das ändert sich')
-        expect(html).toMatch(/<button[^>]*disabled[^>]*>[\s\S]*Änderung vorschlagen/)
+        expect(html).toMatch(/<button[^>]*disabled[^>]*>[\s\S]*Änderungen ansehen/)
+        expect(text(html)).not.toContain('Änderung vorschlagen')
         expect(html).not.toContain('Lizenz *')
         expect(html).not.toContain('Herausgeber *')
     })
 
     it('keeps to the wording of the share pages', () => {
         expect(strictProblemsOf(text(html))).toEqual([])
+    })
+})
+
+describe('the preview before sending', () => {
+    const preview = (changes: Parameters<typeof TextEditPreview>[0]['changes']) =>
+        renderToStaticMarkup(createElement(TextEditPreview, { changes, pending: false, onBack: () => {}, onSend: () => {} }))
+
+    it('shows each change as old and new, says who decides, and sends only from here', () => {
+        const html = preview([{ key: 'description', label: 'Kurzbeschreibung', before: 'Stadtbäume', after: 'Bäume der Stadt' }, { key: 'keywords', label: 'Schlagworte', before: 'baum', after: '' }])
+        const shown = text(html)
+        expect(shown).toContain('Das ändert sich')
+        expect(shown).toContain('Kurzbeschreibung Bisher Stadtbäume Neu Bäume der Stadt')
+        expect(shown).toContain('Schlagworte Bisher baum Neu Keine Angabe')
+        expect(shown).toContain('Das Katalog-Team prüft den Vorschlag')
+        expect(shown).toContain('Dein Name erscheint im öffentlichen Vorschlag bei GitLab.')
+        expect(shown).toContain('Zurück zum Bearbeiten Änderung vorschlagen')
+        expect(shown).not.toContain('bleibt der bisherige')
+        expect(strictProblemsOf(shown)).toEqual([])
+    })
+
+    it('says the old contact stays readable in the package, only when the contact changes', () => {
+        const shown = text(preview([{ key: 'contact.email', label: 'E-Mail', before: 'alt@stadt.example', after: 'neu@stadt.example' }]))
+        expect(shown).toContain('Im Paket bleibt der bisherige öffentlich lesbar')
     })
 })
 
