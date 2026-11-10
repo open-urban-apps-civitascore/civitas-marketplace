@@ -1,13 +1,15 @@
 'use client'
 
 import { Fragment, useState } from 'react'
-import { CircleCheck, CirclePlay, Database, Layers, MapIcon, Radio, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { CircleCheck, CirclePlay, Database, Layers, LayoutDashboard, MapIcon, Radio, SlidersHorizontal, Sparkles } from 'lucide-react'
 
+import { SupersetMark } from '@/components/icons/superset-mark'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Flow, FlowGroup, FlowHeading, FlowItem, FlowNote } from '@/components/ui/flow'
 import { InlineNotice } from '@/components/ui/notice'
 import { StatusPill } from '@/components/ui/status-pill'
 import { adjustDemoInSimulator, type DemoInventory, type InventoryArtifact } from '@/lib/export-actions'
+import type { DashboardChoice } from '@/lib/export/dashboards'
 import type { DemoSource } from '@/lib/export/simulations'
 import type { ExportSource } from '@/lib/export/sources'
 import { newSimulationUiHref } from '@/lib/simulator/ui-links'
@@ -33,6 +35,9 @@ export function PackageContents({
     demoExcluded,
     onToggleDemo,
     onReloadDemo,
+    dashboards = [],
+    dashboardExcluded,
+    onToggleDashboard,
 }: {
     source: ExportSource
     artifacts: InventoryArtifact[]
@@ -40,6 +45,10 @@ export function PackageContents({
     demoExcluded: ReadonlySet<string>
     onToggleDemo: (streamId: string) => void
     onReloadDemo: () => void
+    /** The dataset's dashboards; the platform exports the ticked ones when the package is built. */
+    dashboards?: DashboardChoice[]
+    dashboardExcluded?: ReadonlySet<string>
+    onToggleDashboard?: (dashboardId: string) => void
 }) {
     const adjust = useAdjustInSimulator(source.id, onReloadDemo)
     const platform = artifacts.filter((item) => item.group !== 'map')
@@ -90,6 +99,37 @@ export function PackageContents({
                     {/* Not grouped: a layer sits under its API, which a grouping by kind would tear apart. */}
                     {map.map((item, index) => (
                         <ArtifactRow key={`map:${item.type}:${item.name}:${index}`} item={item} kindShown />
+                    ))}
+                </FlowGroup>
+            )}
+            {dashboards.length > 0 && (
+                <FlowGroup
+                    key="dashboards"
+                    icon={LayoutDashboard}
+                    tone="neutral"
+                    title="Dashboards"
+                    subtitle="Superset, die Plattform exportiert sie"
+                >
+                    {dashboards.map((dashboard) => (
+                        <FlowItem
+                            key={dashboard.id}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    className="size-4 shrink-0 accent-primary"
+                                    checked={dashboard.inSuperset && !dashboardExcluded?.has(dashboard.id)}
+                                    disabled={!dashboard.inSuperset || !onToggleDashboard}
+                                    onChange={() => onToggleDashboard?.(dashboard.id)}
+                                />
+                            }
+                            icon={<SupersetMark className="w-5" />}
+                            name={dashboard.title}
+                            note={
+                                dashboard.inSuperset
+                                    ? 'Charts und Layout, ohne Verbindungsdaten der Instanz.'
+                                    : 'Noch nicht in Superset angelegt. Teilbar, sobald der Datensatz freigegeben ist.'
+                            }
+                        />
                     ))}
                 </FlowGroup>
             )}

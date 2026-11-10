@@ -75,6 +75,7 @@ import {
     type CatalogStatus,
 } from '@/lib/export/status'
 import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
+import { collectSharedDashboards, dashboardChoices, type DashboardChoice } from '@/lib/export/dashboards'
 import { datasourceHref } from '@/lib/portal-links'
 import { demoSources, draftFor, draftRegistrations, isGeneratedId, simulationMembers, type DemoSource } from '@/lib/export/simulations'
 import {
@@ -126,7 +127,9 @@ interface ExportForm {
     datasetId: string
     targetKey: string
     demoStreams: string[]
-    options: Omit<ExportOptions, 'provenance' | 'simulations'>
+    /** The platform's ids of the dashboards to share (lib/export/dashboards.ts). */
+    dashboards: string[]
+    options: Omit<ExportOptions, 'provenance' | 'simulations' | 'dashboards'>
     follows?: FollowsRef & { note: string }
 }
 
@@ -172,8 +175,10 @@ function parseForm(formData: FormData): ExportForm | string {
         .filter(Boolean)
     const metadata = parseExportMetadata(field(formData, 'catalogMetadata'))
     if (metadata.error) return metadata.error
-    const demoStreams = parseDemoStreams(field(formData, 'demoStreams'))
+    const demoStreams = parseIdList(field(formData, 'demoStreams'))
     if (!demoStreams) return 'Demo-Daten: ungültige Auswahl.'
+    const dashboards = parseIdList(field(formData, 'dashboards'))
+    if (!dashboards) return 'Dashboards: ungültige Auswahl.'
     // Checked from the preview on, so the Steckbrief asks for the change note, not the last step.
     const follows = parseFollows(field(formData, 'follows'))
     if (follows === null) return 'Die Angabe zum nicht angenommenen Vorschlag ist ungültig - bitte die Seite neu laden.'
@@ -185,12 +190,14 @@ function parseForm(formData: FormData): ExportForm | string {
         datasetId,
         targetKey,
         demoStreams,
+        dashboards,
         options: { publisher, slug, version, domain, displayName, description, maintainer, license, keywords, metadata: metadata.data },
         ...(follows ? { follows: { ...follows, note: changeNote } } : {}),
     }
 }
 
-function parseDemoStreams(raw: string): string[] | undefined {
+/** A JSON list of ids from the form (demo streams, dashboards); undefined when it is not one. */
+function parseIdList(raw: string): string[] | undefined {
     if (!raw) return []
     try {
         const parsed: unknown = JSON.parse(raw)
@@ -227,9 +234,12 @@ async function buildPackage(
     // Drafts need no simulator; only streams made there are read back.
     const demo = form.demoStreams.some((id) => !isGeneratedId(id)) ? await readSimulations() : { details: [] }
     const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
+    // The platform exports each chosen dashboard; one that fails is left out with a warning.
+    const shared = await collectSharedDashboards(accessToken, snapshot.dataset.id, form.dashboards)
     const pkg = transformSnapshot(snapshot, {
         ...form.options,
         simulations,
+        dashboards: shared.dashboards,
         provenance: {
             datasetId: snapshot.dataset.id,
             datasetName: snapshot.dataset.name,
@@ -239,7 +249,7 @@ async function buildPackage(
         },
     })
     const problems = demo.problem ? [`Demo-Daten fehlen im Paket: ${demo.problem}`] : []
-    return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings] }
+    return { ...pkg, warnings: [...pkg.warnings, ...problems, ...warnings, ...shared.warnings] }
 }
 
 function summarise(pkg: ExportedPackage, target: ExportTarget | undefined, form: ExportForm): PreviewSummary {
@@ -993,12 +1003,13 @@ export interface DemoInventory {
 }
 
 export async function inspectExportSource(datasetId: string): Promise<{
-    artifacts: InventoryArtifact[]; warnings: string[]; error?: string; demo?: DemoInventory
+    artifacts: InventoryArtifact[]; warnings: string[]; error?: string; demo?: DemoInventory; dashboards?: DashboardChoice[]
 }> {
     await requireSession()
     if (!datasetId) return { artifacts: [], warnings: [], error: 'Ungültige Auswahl.' }
     try {
-        const snapshot = await readUseCase(await getAccessToken(), datasetId)
+        const accessToken = await getAccessToken()
+        const snapshot = await readUseCase(accessToken, datasetId)
         return {
             artifacts: [
                 ...snapshot.structures.map((row) => ({ type: 'structure' as const, kind: 'Datenstruktur', name: row.name })),
@@ -1016,6 +1027,7 @@ export async function inspectExportSource(datasetId: string): Promise<{
             ],
             warnings: snapshot.warnings,
             demo: await demoInventory(snapshot),
+            dashboards: await dashboardChoices(snapshot.dataset.id, accessToken),
         }
     } catch (error) {
         if (error instanceof PortalReadError) return { artifacts: [], warnings: [], error: error.message }

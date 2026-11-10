@@ -1,5 +1,6 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
 import type { BundledSimulation, InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
+import { neutralizeDashboard, type SharedDashboard } from '@/lib/export/dashboards'
 import type { InstanceSnapshot, SnapshotMapping } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
@@ -39,6 +40,8 @@ export interface ExportOptions {
     domain: string
     /** Demo data chosen for the package, already in package form (lib/export/simulations.ts). */
     simulations?: BundledSimulation[]
+    /** Dashboards chosen for the package, exported by the platform and checked (lib/export/dashboards.ts). */
+    dashboards?: SharedDashboard[]
     provenance: {
         datasetId: string
         datasetName: string
@@ -401,6 +404,16 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         simulationMembers.push({ file })
     }
 
+    // ── Dashboards: the platform's export, its database connection left behind ──
+    const dashboardMembers: PackageMember[] = []
+    for (const dashboard of options.dashboards ?? []) {
+        const file = nameFile(dashboard.title, 'dashboard')
+        const { document, credentialRemoved } = neutralizeDashboard(dashboard.document)
+        files[`core-ir/${file}`] = json(document)
+        dashboardMembers.push({ file })
+        if (credentialRemoved) stripped.push({ file, field: 'databases: sqlalchemy_uri', reason: 'credential-in-url' })
+    }
+
     // ── Geo members: named APIs, styles, and the layers that publish a sink ──
     // None carries an identity in a package; the install derives theirs. A layer
     // names its sink by title and its styles by name, the way the install binds them.
@@ -476,7 +489,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             dataSinks: sinkMembers,
             pipelines: pipelineMembers,
             simulations: simulationMembers,
-            dashboards: [],
+            dashboards: dashboardMembers,
             ...(apiMembers.length ? { apis: apiMembers } : {}),
             ...(styleMembers.length ? { styles: styleMembers } : {}),
             ...(layerMembers.length ? { layers: layerMembers } : {}),

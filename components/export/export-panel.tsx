@@ -316,6 +316,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const [inventoryAttempt, setInventoryAttempt] = useState(0)
     // Demo streams are taken along unless unticked, so a stream made in the meantime arrives ticked.
     const [demoExcluded, setDemoExcluded] = useState<ReadonlySet<string>>(() => new Set(draft?.demoExcluded ?? []))
+    // Dashboards too: every one Superset has goes along unless unticked.
+    const [dashboardExcluded, setDashboardExcluded] = useState<ReadonlySet<string>>(() => new Set())
     const [pending, startTransition] = useTransition()
     const [result, setResult] = useState<ExportActionResult | null>(null)
     const [preview, setPreview] = useState<ExportActionResult['preview']>()
@@ -444,6 +446,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         data.set('targetKey', targetKey)
         data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
         data.set('demoStreams', JSON.stringify(demoChosen))
+        data.set('dashboards', JSON.stringify(dashboardChosen))
         if (whatChanged) data.set('follows', JSON.stringify(followsRefOf(whatChanged)))
         data.set('intent', intent)
         try {
@@ -545,6 +548,17 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             return next
         })
     }
+    const dashboardChosen = (inventory?.dashboards ?? [])
+        .filter((dashboard) => dashboard.inSuperset && !dashboardExcluded.has(dashboard.id))
+        .map((dashboard) => dashboard.id)
+    const toggleDashboard = (id: string) => {
+        setDashboardExcluded((excluded) => {
+            const next = new Set(excluded)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
     // The package validator refuses a use case without a data structure of its own: say so before the form.
     const lacksStructure = !!inventory && !inventory.error && !inventory.artifacts.some((item) => item.type === 'structure')
     // A refused preview shows its warnings, which usually name the cause, in place of the general answer.
@@ -596,7 +610,8 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 : inventory.error ? <Notice tone="error" title="Der Inhalt ließ sich nicht lesen" live action={<Button onClick={reloadInventory}>Erneut laden</Button>}>{inventory.error}</Notice>
                 : <>
                     <PackageContents source={source} artifacts={inventory.artifacts} demo={inventory.demo}
-                        demoExcluded={demoExcluded} onToggleDemo={toggleDemo} onReloadDemo={reloadInventory} />
+                        demoExcluded={demoExcluded} onToggleDemo={toggleDemo} onReloadDemo={reloadInventory}
+                        dashboards={inventory.dashboards} dashboardExcluded={dashboardExcluded} onToggleDashboard={toggleDashboard} />
                     {lacksStructure && <Notice tone="warn" title="Es fehlt eine eigene Datenstruktur">Ohne eigene Datenstruktur lässt sich das Paket nicht teilen - die Paketprüfung verlangt mindestens eine.</Notice>}
                     {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Inhalt"><NoticeList items={inventory.warnings} /></Notice>}
                     <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
