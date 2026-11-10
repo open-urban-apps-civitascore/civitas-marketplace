@@ -480,12 +480,15 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         }
         const summary = versionSummary(dto.dataStructureVersion)
         if (summary) wantedVersions.set(summary.versionId, summary.dataStructureId)
-        const configuration = isRecord(dto.configuration) ? dto.configuration : {}
+        // The platform nests a source's settings in `connector`, its kind inside as
+        // `connectorType` (DataSourceOutputDTO, ConnectorConfiguration). Sinks keep `configuration`.
+        const connector: Record<string, unknown> = isRecord(dto.connector) ? dto.connector : {}
+        const { connectorType, ...configuration } = connector
         const source: SnapshotSource = {
             id: String(dto.id),
             name: typeof dto.name === 'string' ? dto.name : `Quelle ${sources.length + 1}`,
             description: typeof dto.description === 'string' ? dto.description : undefined,
-            connectorType: typeof dto.connectorType === 'string' ? dto.connectorType : 'MQTT',
+            connectorType: typeof connectorType === 'string' ? connectorType : 'MQTT',
             configuration,
             configurationUrn: typeof dto.configurationUrn === 'string' ? dto.configurationUrn : undefined,
             structureVersionId: summary?.versionId,

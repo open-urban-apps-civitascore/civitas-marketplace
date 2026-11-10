@@ -130,16 +130,15 @@ function instanceRoutes(structures: FakeStructure[] = STRUCTURES): Record<string
         '/v1/datasources/src-kataster': {
             id: 'src-kataster',
             name: 'Jungbaumkataster-DB',
-            connectorType: 'SQL',
-            configuration: { dsn: 'postgres://db:5432/fachverfahren', table: 'kataster.jungbaeume', password: '********' },
+            // As the platform answers: settings in `connector`, the kind inside it.
+            connector: { connectorType: 'SQL', dsn: 'postgres://db:5432/fachverfahren', table: 'kataster.jungbaeume', password: '********' },
             configurationUrn: urnOf('datasource', 'jungbaumkatasterdb', '1.0.0'),
             dataStructureVersion: summary('v-zeile', 's-zeile'),
         },
         '/v1/datasources/src-feed': {
             id: 'src-feed',
             name: 'Bodenfeuchte-Feed',
-            connectorType: 'MQTT',
-            configuration: { urls: ['mqtt://broker:1883'], topics: ['bodenfeuchte/+'] },
+            connector: { connectorType: 'MQTT', urls: ['mqtt://broker:1883'], topics: ['bodenfeuchte/+'] },
             configurationUrn: urnOf('datasource', 'bodenfeuchtefeed', '1.0.0'),
             dataStructureVersion: summary('v-messung', 's-messung'),
         },
