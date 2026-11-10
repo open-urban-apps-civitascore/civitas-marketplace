@@ -191,7 +191,8 @@ export type DashboardExport = { ok: true; document: unknown } | { ok: false; rea
 
 /** Says why the platform gave no export, in the words of the preview. */
 function exportFailure(status: number, detail: string | undefined): string {
-    if (status === 403) return 'keine Berechtigung, dieses Dashboard zu teilen'
+    // The gateway refuses a path it does not know with 403 too, before the backend sees it.
+    if (status === 403) return 'keine Berechtigung, oder die Plattform bietet den Export noch nicht an'
     if (status === 404 || status === 405 || status === 501) {
         return 'die Plattform bietet den Export noch nicht an oder kennt das Dashboard nicht'
     }

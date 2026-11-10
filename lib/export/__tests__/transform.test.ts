@@ -224,6 +224,20 @@ describe('transformSnapshot', () => {
         expect(sink).not.toHaveProperty('dataStructureVersion')
     })
 
+    it('resolves the platform form of a reference, by the id of the source or sink', () => {
+        const byId = snapshot()
+        byId.pipelines[0].model = {
+            nodes: [
+                { id: 'n-source', kind: 'source', sourceRef: 'urn:core:platform:civitas:datasource:common:src-1:latest' },
+                { id: 'n-sink', kind: 'sink', sinkRef: 'urn:core:platform:civitas:datasink:common:sink-1:latest' },
+            ],
+        }
+        const out = transformSnapshot(byId, options)
+        const nodes = (parse(out.files, 'core-ir/kataster-import.pipeline.json').model as { nodes: Record<string, unknown>[] }).nodes
+        expect(nodes.map((node) => node.sourceRef ?? node.sinkRef)).toEqual(['Baumkataster-DB', 'Kiez-Bäume-Tabelle'])
+        expect(out.warnings.filter((w) => w.includes('Ref '))).toEqual([])
+    })
+
     it('warns instead of failing when a reference cannot be resolved', () => {
         const broken = snapshot()
         broken.pipelines[0].model = {

@@ -146,6 +146,17 @@ function json(value: unknown): string {
     return `${JSON.stringify(value, null, 2)}\n`
 }
 
+/**
+ * The platform id a pipeline node names in the platform's own form,
+ * `urn:core:platform:<owner>:<type>:<domain>:<id>:latest`, or undefined. The
+ * platform writes this form for a node it resolves by id; older pipelines name
+ * the configuration URN instead. Both are read, while the platform moves over.
+ */
+function platformIdOf(reference: string, type: 'datasource' | 'datasink'): string | undefined {
+    const parsed = parseCoreUrn(reference)
+    return parsed?.scope === 'platform' && parsed.type === type ? parsed.name : undefined
+}
+
 /** File names must be unique inside core-ir/; a second "Messung" becomes messung-2. */
 function fileNamer() {
     const used = new Set<string>()
@@ -272,7 +283,9 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // ── Sources ──
     const sourceMembers: PackageMember[] = []
     const sourceTitleByUrn = new Map<string, string>()
+    const sourceTitleById = new Map<string, string>()
     for (const source of snapshot.sources) {
+        sourceTitleById.set(source.id, source.name)
         const file = nameFile(source.name, 'datasource')
         const connectionType = source.connectorType.toLowerCase()
         const id = catalogUrn(publisher, 'datasource', domain, source.name)
@@ -332,7 +345,9 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // ── Sinks ──
     const sinkMembers: PackageMember[] = []
     const sinkTitleByUrn = new Map<string, string>()
+    const sinkTitleById = new Map<string, string>()
     for (const sink of snapshot.sinks) {
+        sinkTitleById.set(sink.id, sink.name)
         const file = nameFile(sink.name, 'datasink')
         const connectionType = sink.dataSinkType.toLowerCase()
         const id = catalogUrn(publisher, 'datasink', domain, sink.name)
@@ -370,12 +385,14 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             if (!isRecord(node)) return node
             const copy: Record<string, unknown> = { ...node }
             if (isCoreUrn(copy.sourceRef)) {
-                const title = sourceTitleByUrn.get(logicalUrn(copy.sourceRef))
+                const byId = platformIdOf(copy.sourceRef, 'datasource')
+                const title = sourceTitleByUrn.get(logicalUrn(copy.sourceRef)) ?? (byId ? sourceTitleById.get(byId) : undefined)
                 if (title) copy.sourceRef = title
                 else warnings.push(`${file}: sourceRef ${copy.sourceRef} gehört zu keiner Quelle des Pakets`)
             }
             if (isCoreUrn(copy.sinkRef)) {
-                const title = sinkTitleByUrn.get(logicalUrn(copy.sinkRef))
+                const byId = platformIdOf(copy.sinkRef, 'datasink')
+                const title = sinkTitleByUrn.get(logicalUrn(copy.sinkRef)) ?? (byId ? sinkTitleById.get(byId) : undefined)
                 if (title) copy.sinkRef = title
                 else warnings.push(`${file}: sinkRef ${copy.sinkRef} gehört zu keiner Senke des Pakets`)
             }
@@ -437,7 +454,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         files[`core-ir/${file}`] = json({ name: style.name, sldContent: style.sldContent })
         styleMembers.push({ file })
     }
-    const sinkTitleById = new Map(snapshot.sinks.map((sink) => [sink.id, sink.name]))
+    // Layers name their sink by id, as pipelines in the platform form do (sinkTitleById, above).
     const layerMembers: PackageMember[] = []
     for (const layer of snapshot.layers ?? []) {
         const file = nameFile(layer.layerName, 'layer')

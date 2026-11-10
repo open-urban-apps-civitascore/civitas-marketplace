@@ -55,6 +55,14 @@ describe('CORE URN helpers', () => {
         expect(parseCoreUrn('urn:openurbanapps:usecase:kiez-baumkataster')).toBeUndefined()
     })
 
+    it('strips the version of a platform URN, which has no disambiguator, also when it says latest', () => {
+        const platform = 'urn:core:platform:civitas:datasource:common:08a0b6e7-9942-4e23-8914-49d09e4ff9e1'
+        expect(logicalUrn(`${platform}:latest`)).toBe(platform)
+        expect(logicalUrn(`${platform}:1.2.0`)).toBe(platform)
+        expect(logicalUrn(platform)).toBe(platform)
+        expect(logicalUrn(`${versioned.slice(0, versioned.lastIndexOf(':'))}:latest`)).toBe(logical)
+    })
+
     it('recognises catalogue-authored identities by scope', () => {
         expect(isCatalogAuthored(logical)).toBe(true)
         expect(isCatalogAuthored('urn:core:instance:musterstadt:datastructure:default:x:abcdefghij')).toBe(false)

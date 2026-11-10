@@ -50,10 +50,19 @@ export function isCoreUrn(value: unknown): value is string {
     return parseCoreUrn(value) !== undefined
 }
 
+/**
+ * The URN without its version. A platform-minted URN carries no disambiguator,
+ * `urn:core:platform:<owner>:<type>:<domain>:<id>:<version>`, so its last
+ * segment is the version even where the parser reads it as a disambiguator.
+ * A reference may name the newest version as `:latest`: a pipeline names its
+ * data sources so, its mappings and sinks by a fixed version
+ * (InstallationService, DataSetSagaPublisher).
+ */
 export function logicalUrn(urn: string): string {
     const parsed = parseCoreUrn(urn)
-    if (!parsed?.version) return urn
-    return urn.slice(0, urn.lastIndexOf(':'))
+    if (!parsed) return urn
+    if (parsed.version || parsed.scope === 'platform') return urn.slice(0, urn.lastIndexOf(':'))
+    return urn
 }
 
 /** Scope `standard` marks a catalogue-authored identity that must travel unchanged. */
