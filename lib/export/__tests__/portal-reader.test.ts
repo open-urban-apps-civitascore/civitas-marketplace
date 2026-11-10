@@ -328,6 +328,31 @@ describe('readUseCase', () => {
         expect(snapshot.sinks.filter((s) => s.unnamed)).toHaveLength(1)
     })
 
+    it('names a nameless sink by the title its installation gave it', async () => {
+        const routes = instanceRoutes()
+        routes[`/v1/datasets/${DATASET}/datasinks?size=100`] = {
+            content: SINKS.map((sink) => (sink.id === 'sink-frost-messwerte' ? { ...sink, name: undefined } : sink)),
+            last: true,
+        }
+        routes['/v1/installations?size=200&page=0'] = {
+            content: [
+                { uninstalledAt: '2026-11-01T10:00:00', artifacts: [{ artifactType: 'DATA_SINK', shellId: 'sink-frost-messwerte', name: 'Alt' }] },
+                {
+                    artifacts: [
+                        { artifactType: 'DATA_SET', shellId: DATASET, name: 'Jungbaum-Bewässerung' },
+                        { artifactType: 'DATA_SINK', shellId: 'sink-frost-messwerte', name: 'Sensordaten-Speicher' },
+                    ],
+                },
+            ],
+            last: true,
+        }
+        fakePortal(routes)
+        const snapshot = await readUseCase('token', DATASET)
+        const sink = snapshot.sinks.find((s) => s.id === 'sink-frost-messwerte')
+        expect(sink).toMatchObject({ name: 'Sensordaten-Speicher' })
+        expect(sink?.unnamed).toBeUndefined()
+    })
+
     it('reports a structure list it cannot read instead of failing the inventory', async () => {
         const routes = instanceRoutes()
         routes['/v1/datastructures?size=200&page=0'] = problem(500, 'Interner Fehler')

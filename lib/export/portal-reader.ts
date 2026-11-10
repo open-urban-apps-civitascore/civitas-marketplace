@@ -177,6 +177,27 @@ export async function listExportInstallations(accessToken: string): Promise<Expo
     return listPages<ExportInstallation>(accessToken, '/v1/installations')
 }
 
+/**
+ * The names active installations gave their copies of one kind, by the portal
+ * id of the copy: the titles of the package members. Empty when the
+ * installations cannot be read; a made-up name is the fallback then.
+ */
+async function installedNames(accessToken: string, artifactType: string): Promise<Map<string, string>> {
+    try {
+        const installations = await listExportInstallations(accessToken)
+        return new Map(
+            installations
+                .filter((installation) => !installation.uninstalledAt)
+                .flatMap((installation) => installation.artifacts ?? [])
+                .flatMap((line) =>
+                    line.artifactType === artifactType && line.shellId && line.name ? [[line.shellId, line.name] as const] : [],
+                ),
+        )
+    } catch {
+        return new Map()
+    }
+}
+
 export async function listDatasets(accessToken: string): Promise<DatasetListing[]> {
     const rows = await listPages<Record<string, unknown>>(accessToken, '/v1/datasets')
     return rows.map((row) => ({
@@ -449,11 +470,21 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
         accessToken,
         `/v1/datasets/${datasetId}/datasinks?size=100`,
     )
-    const sinks: SnapshotSink[] = (sinkPage?.content ?? []).map((dto, index) => {
+    const sinkRows = sinkPage?.content ?? []
+    const nameOf = (dto: Record<string, unknown>): string | undefined => {
+        const configuration = isRecord(dto.configuration) ? dto.configuration : {}
+        return (typeof dto.name === 'string' && dto.name) || (typeof configuration.tableName === 'string' && configuration.tableName) || undefined
+    }
+    // A FROST sink has no name on the platform. An installed one takes the title
+    // its package gave it, from the installation's record.
+    const installedSinkNames = sinkRows.some((dto) => !nameOf(dto))
+        ? await installedNames(accessToken, 'DATA_SINK')
+        : new Map<string, string>()
+    const sinks: SnapshotSink[] = sinkRows.map((dto, index) => {
         const configuration = isRecord(dto.configuration) ? dto.configuration : {}
         const summary = versionSummary(configuration.dataStructureVersion)
         if (summary) wantedVersions.set(summary.versionId, summary.dataStructureId)
-        const given = (typeof dto.name === 'string' && dto.name) || (typeof configuration.tableName === 'string' && configuration.tableName)
+        const given = nameOf(dto) ?? installedSinkNames.get(String(dto.id))
         const sink: SnapshotSink = {
             id: String(dto.id),
             name: given || `Senke ${index + 1}`,
