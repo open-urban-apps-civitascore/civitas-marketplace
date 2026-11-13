@@ -25,6 +25,11 @@ vi.mock('@/lib/export/gitlab', async (importOriginal) => ({
 }))
 // The package's own check has tests of its own; here it only has to let a package through.
 vi.mock('@/lib/export/package-check', () => ({ checkPackage: vi.fn(() => []) }))
+// The share's organisation checks have their own tests; here the catalogue has no list.
+vi.mock('@/lib/catalog/source', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/lib/catalog/source')>(),
+    getOrganisations: vi.fn(async () => []),
+}))
 
 import * as fillRoute from '@/app/api/shares/fill/route'
 import { exportAction } from '@/lib/export-actions'

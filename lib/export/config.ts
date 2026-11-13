@@ -106,6 +106,11 @@ export type ExportReadiness = 'ready' | 'missing-targets' | 'missing-token'
 
 export const SHARING_NOT_SET_UP = 'Teilen ist auf dieser Instanz noch nicht eingerichtet - Ablageort oder GitLab-Zugang fehlen. Das richtet der Betrieb ein.'
 
+/** The organisation this instance shares for (`MARKETPLACE_ORGANISATION`, its catalogue code); it presets „Herausgeber“. */
+export function instanceOrganisation(env: EnvLike = process.env): string | undefined {
+    return env.MARKETPLACE_ORGANISATION?.trim().toLowerCase() || undefined
+}
+
 export function exportReadiness(config: ExportConfig): ExportReadiness {
     if (config.targets.length === 0) return 'missing-targets'
     if (!config.token) return 'missing-token'

@@ -1,3 +1,4 @@
+import type { Organisation } from '@/lib/catalog/types'
 import type { MetadataDraft } from '@/lib/export/metadata'
 
 /**
@@ -45,6 +46,8 @@ export interface ShareDraft {
     targetKey: string
     /** Demo streams unticked under the package contents. */
     demoExcluded: string[]
+    /** New organisations proposed in this share. */
+    organisations?: Organisation[]
 }
 
 /** Just enough of the Web Storage API, so tests can hand in a plain object. */
@@ -128,7 +131,8 @@ export function parseDraft(raw: string | null): ShareDraft | undefined {
         !isRecordOfStrings(draft.basics) ||
         !isMetadataDraft(draft.metadata) ||
         typeof draft.targetKey !== 'string' ||
-        !isStringArray(draft.demoExcluded)
+        !isStringArray(draft.demoExcluded) ||
+        (draft.organisations !== undefined && !Array.isArray(draft.organisations))
     ) {
         return undefined
     }

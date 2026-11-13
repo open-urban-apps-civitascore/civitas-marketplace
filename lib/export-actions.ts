@@ -53,7 +53,8 @@ import {
 import { aboveAll, isNewerVersion, nextPatch, takenOutBlocker, takenOutFact } from '@/lib/export/share-stages'
 import { mergeRequestRef } from '@/lib/export/share-state'
 import { parseExportMetadata, parseKeywords } from '@/lib/export/metadata'
-import { getCatalogSummaries } from '@/lib/catalog/source'
+import { getCatalogSummaries, getOrganisations } from '@/lib/catalog/source'
+import { checkOrganisations, parseOrganisationProposals } from '@/lib/export/organisations'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
 import { PortalReadError, readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
@@ -166,6 +167,10 @@ function parseForm(formData: FormData): ExportForm | string {
     if (!description) return 'Kurzbeschreibung fehlt.'
     const maintainer = field(formData, 'maintainer')
     if (!maintainer) return 'Herausgeber fehlt.'
+    const maintainerOrg = field(formData, 'maintainerOrg').toLowerCase()
+    if (maintainerOrg && !SEGMENT.test(maintainerOrg)) return 'Herausgeber: das Kürzel der Organisation ist ungültig.'
+    const organisations = parseOrganisationProposals(field(formData, 'organisations'))
+    if (typeof organisations === 'string') return organisations
     const license = field(formData, 'license') || 'EUPL-1.2'
     const keywords = parseKeywords(field(formData, 'keywords'))
     const metadata = parseExportMetadata(field(formData, 'catalogMetadata'))
@@ -183,7 +188,11 @@ function parseForm(formData: FormData): ExportForm | string {
         datasetId,
         targetKey,
         demoStreams,
-        options: { publisher, slug, version, domain, displayName, description, maintainer, license, keywords, metadata: metadata.data },
+        options: {
+            publisher, slug, version, domain, displayName, description, maintainer, license, keywords, metadata: metadata.data,
+            ...(maintainerOrg ? { maintainerOrg } : {}),
+            ...(organisations.length ? { organisations } : {}),
+        },
         ...(follows ? { follows: { ...follows, note: changeNote } } : {}),
     }
 }
@@ -362,6 +371,12 @@ export async function exportAction(
         return { intent, status: 'invalid', detail: parsed }
     }
     const form = parsed
+    // Before a package carries them: the catalogue's CI would only refuse its entry later.
+    if (form.intent === 'preview' || form.intent === 'bundle') {
+        const organisations = checkOrganisations(form.options, await getOrganisations())
+        if (typeof organisations === 'string') return { intent, status: 'invalid', detail: organisations }
+        form.options = { ...form.options, organisations }
+    }
     const config = exportConfig()
     const target = findTarget(config.targets, form.targetKey)
     const id = `urn:${form.options.publisher}:usecase:${form.options.slug}`
@@ -724,7 +739,7 @@ async function proposeCatalog(
     if (!indexRaw) {
         return { intent: 'catalog', status: 'error', detail: 'Der Katalog ist gerade nicht lesbar - sein Inhaltsverzeichnis fehlt. Bitte dem Betrieb melden.' }
     }
-    const edit = applyCatalogEntry(indexRaw, buildCatalogEntry(input))
+    const edit = applyCatalogEntry(indexRaw, buildCatalogEntry(input), new Date(), input.organisations)
     if (edit.status === 'withdrawn') {
         return {
             intent: 'catalog',
@@ -759,6 +774,23 @@ async function proposeCatalog(
                 (bundle.verification.changedInReview ? ' The review changed the package before the merge.' : ''),
             '',
             `Index version bumped to ${edit.indexVersion}.`,
+            ...(edit.organisations.length
+                ? [
+                      '',
+                      'Also adds to `organisations`. Please check that each e-mail is on the organisation\'s own domain and the website is really theirs:',
+                      ...edit.organisations.map(
+                          (organisation) =>
+                              `- ${organisation.name} (\`${organisation.id}\`)${organisation.website ? `, ${organisation.website}` : ''}${organisation.contact ? `, ${organisation.contact.email}` : ''}`,
+                      ),
+                  ]
+                : []),
+            ...(edit.taken.length
+                ? [
+                      '',
+                      'Not added, the code is already taken in `organisations`. The entry names the organisation as text only; please link it by hand if it is the same one:',
+                      ...edit.taken.map(({ proposed, listedAs }) => `- ${proposed.name} (\`${proposed.id}\`), listed as ${listedAs}`),
+                  ]
+                : []),
             '',
             'Check: `python3 ci/validate-index.py`',
             '',

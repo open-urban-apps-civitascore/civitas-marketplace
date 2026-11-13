@@ -13,7 +13,12 @@ vi.mock('@/lib/simulator/client', async (importOriginal) => ({
     registerSimulation: vi.fn(async () => {}),
     deleteSimulation: vi.fn(async () => {}),
 }))
+vi.mock('@/lib/catalog/source', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/lib/catalog/source')>(),
+    getOrganisations: vi.fn(async () => []),
+}))
 import { adjustDemoInSimulator, exportAction, inspectExportSource } from '@/lib/export-actions'
+import { getOrganisations } from '@/lib/catalog/source'
 import { readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
 import { generatedId } from '@/lib/export/simulations'
 import { deleteSimulation, fetchSample, getSimulation, listSimulations, registerSimulation, SimulatorError, type SimulationDetail } from '@/lib/simulator/client'
@@ -93,6 +98,35 @@ describe('export action schema boundary', () => {
             { id: 'feed', problem: 'no-topic', portalHref: 'https://portal.example.org/datasources/feed' },
             { id: 'sensor', problem: undefined, portalHref: undefined },
         ])
+    })
+})
+
+describe('organisations in a share', () => {
+    const LEIPZIG = { id: 'leipzig', name: 'Stadt Leipzig', website: 'https://leipzig.example', contact: { email: 'digital@leipzig.example' } }
+    const sharing = (maintainer: string) => {
+        const data = form({})
+        data.set('maintainer', maintainer)
+        data.set('maintainerOrg', 'leipzig')
+        data.set('organisations', JSON.stringify([LEIPZIG]))
+        return data
+    }
+
+    it('carries the Herausgeber’s code and the new organisation into the package', async () => {
+        const result = await exportAction(null, sharing('Stadt Leipzig'))
+        expect(result.preview?.manifest).toMatchObject({ maintainer: 'Stadt Leipzig', maintainerOrg: 'leipzig', organisations: [LEIPZIG] })
+    })
+
+    it('refuses a name that is not the chosen organisation’s, before reading anything', async () => {
+        const result = await exportAction(null, sharing('Leipzig'))
+        expect(result).toMatchObject({ status: 'invalid', detail: 'Herausgeber: die gewählte Organisation heißt „Stadt Leipzig“.' })
+        expect(readUseCase).not.toHaveBeenCalled()
+    })
+
+    it('refuses a Herausgeber typed as text once the catalogue has a list, as an open older page would send it', async () => {
+        vi.mocked(getOrganisations).mockResolvedValueOnce([{ id: 'openurbanapps', name: 'Open Urban Apps' }])
+        const result = await exportAction(null, form({}))
+        expect(result).toMatchObject({ status: 'invalid', detail: 'Herausgeber: bitte eine Organisation aus der Liste wählen oder neu vorschlagen.' })
+        expect(readUseCase).not.toHaveBeenCalled()
     })
 })
 

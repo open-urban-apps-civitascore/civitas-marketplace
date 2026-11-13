@@ -24,7 +24,7 @@ const steckbrief = {
 }
 
 describe('the form „Texte ändern“', () => {
-    const html = renderToStaticMarkup(createElement(TextEditForm, { edit: { targetKey: 't', slug: 'baeume', version: '1.2.0' }, steckbrief }))
+    const html = renderToStaticMarkup(createElement(TextEditForm, { edit: { targetKey: 't', slug: 'baeume', version: '1.2.0' }, steckbrief, organisations: [] }))
 
     it('starts from the entry’s texts and says what stays', () => {
         expect(html).toContain('value="Bäume"')

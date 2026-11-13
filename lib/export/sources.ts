@@ -10,7 +10,7 @@ export interface ExportInstallation {
     uninstalledAt?: string | null
 }
 export interface ExportSource extends DatasetListing {
-    catalog?: { id: string; displayName: string; description: string; version: string; maintainer: string; license: string; keywords: string[]; metadata: ExportMetadata }
+    catalog?: { id: string; displayName: string; description: string; version: string; maintainer: string; maintainerOrg?: string; license: string; keywords: string[]; metadata: ExportMetadata }
     /** The package the one active installation made this dataset from, also once its catalogue entry is gone. */
     installedFrom?: string
     notice?: string
@@ -46,8 +46,8 @@ export function exportSources(datasets: DatasetListing[], installations: ExportI
         const from = ids.size === 1 ? { installedFrom: [...ids][0] as string } : {}
         const entry = catalog.find((row) => ids.has(row.id) && !row.revoked)
         if (!entry) return { ...dataset, ...known, ...from, ...(matches.length ? { notice: 'Der ursprüngliche Katalogeintrag ist nicht verfügbar.' } : {}) }
-        const { id, displayName, description, version, maintainer, license, keywords, themes } = entry
-        return { ...dataset, ...known, ...from, catalog: { id, displayName, description, version, maintainer, license, keywords,
+        const { id, displayName, description, version, maintainer, maintainerOrg, license, keywords, themes } = entry
+        return { ...dataset, ...known, ...from, catalog: { id, displayName, description, version, maintainer, ...(maintainerOrg ? { maintainerOrg } : {}), license, keywords,
             // `contact`, `media` and `implementation` are the previous operator's
             // own account of their deployment and start empty — see above.
             metadata: exportMetadataSchema.parse({ themes }),

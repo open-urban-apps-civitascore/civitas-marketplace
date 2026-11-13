@@ -1,5 +1,5 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
-import type { BundledSimulation, InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
+import type { BundledSimulation, InstallParameter, Organisation, PackageManifest, PackageMember } from '@/lib/catalog/types'
 import type { InstanceSnapshot, SnapshotMapping } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
 import { VALIDATE_BUNDLE_SCRIPT } from '@/lib/export/validate-bundle-script'
@@ -33,6 +33,10 @@ export interface ExportOptions {
     displayName: string
     description: string
     maintainer: string
+    /** Code of the organisation `maintainer` names. */
+    maintainerOrg?: string
+    /** New organisations for the catalogue's list, see `PackageManifest.organisations`. */
+    organisations?: Organisation[]
     license: string
     keywords: string[]
     /** URN domain segment for re-identified artifacts. */
@@ -467,6 +471,8 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         description: options.description,
         version: options.version,
         maintainer: options.maintainer,
+        ...(options.maintainerOrg ? { maintainerOrg: options.maintainerOrg } : {}),
+        ...(options.organisations?.length ? { organisations: options.organisations } : {}),
         license: options.license,
         keywords: options.keywords,
         members: {

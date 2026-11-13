@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 
 import { inputClass, MetadataForm } from '@/components/export/metadata-form'
+import type { Organisation } from '@/lib/catalog/types'
 import { useShareListingReload } from '@/components/export/share-listing-provider'
 import { Button, ExternalAnchor } from '@/components/ui/button'
 import { Section } from '@/components/ui/layout'
@@ -79,7 +80,7 @@ export function TextEditPreview({
 }
 
 /** The Steckbrief without the package's facts, then what will change before anything is sent. */
-export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbrief: FilledSteckbrief }) {
+export function TextEditForm({ edit, steckbrief, organisations }: { edit: TextEditRef; steckbrief: FilledSteckbrief; organisations: Organisation[] }) {
     const [before] = useState(() => textDraftOf(steckbrief))
     const [draft, setDraft] = useState(before)
     const [result, setResult] = useState<TextEditResult>()
@@ -164,7 +165,9 @@ export function TextEditForm({ edit, steckbrief }: { edit: TextEditRef; steckbri
                         <textarea rows={4} className={inputClass} value={draft.description} required onChange={(event) => basics('description', event.target.value)} />
                     </label>
                 </section>
-                <MetadataForm value={draft.metadata} onChange={(metadata) => setDraft({ ...draft, metadata })} />
+                {/* Only listed organisations: a new one comes with a share, whose entry adds it. */}
+                <MetadataForm value={draft.metadata} onChange={(metadata) => setDraft({ ...draft, metadata })}
+                    organisations={{ listed: organisations, proposals: [], allowNew: false, onPropose: () => {}, publisher: { name: steckbrief.maintainer, code: steckbrief.maintainerOrg ?? '' }, follows: false }} />
             </div>
             {answer}
             <div className="flex flex-wrap items-center gap-3">

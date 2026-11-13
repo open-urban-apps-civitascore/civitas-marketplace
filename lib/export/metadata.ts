@@ -14,7 +14,8 @@ export type ExportMetadata = z.infer<typeof exportMetadataSchema>
 export interface MetadataField {
     path: string
     label: string
-    kind?: 'multiline' | 'list' | 'email' | 'url'
+    /** `organisation`: written by the operator's picker, never shown as a field of its own. */
+    kind?: 'multiline' | 'list' | 'email' | 'url' | 'organisation'
     options?: Record<string, string>
     hint?: string
 }
@@ -22,6 +23,7 @@ export const METADATA_GROUPS: { title: string; fields: MetadataField[] }[] = [
     { title: 'Umsetzung & Beteiligte', fields: [
         { path: 'implementation.status', label: FIELD_LABELS.status, options: USE_CASE_STATUS_LABELS },
         { path: 'implementation.operator', label: FIELD_LABELS.operator },
+        { path: 'implementation.operatorOrg', label: `${FIELD_LABELS.operator} (Kürzel)`, kind: 'organisation' },
         { path: 'implementation.parties.stakeholders', label: FIELD_LABELS.stakeholders, kind: 'list' },
         { path: 'implementation.parties.serviceProviders', label: FIELD_LABELS.serviceProviders, kind: 'list' },
         { path: 'implementation.stack', label: FIELD_LABELS.stack, kind: 'list' },

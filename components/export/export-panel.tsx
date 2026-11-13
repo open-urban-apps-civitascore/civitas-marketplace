@@ -22,6 +22,7 @@ import {
     followsRefOf,
     nameTakenIn,
     packageRows,
+    restoredBasics,
     sharedPackageOf,
     stageNotice,
     startingBasics,
@@ -33,6 +34,7 @@ import {
     type FollowedDecline,
     type ListingFacts,
     type SteckbriefBasics,
+    type SteckbriefDefaults,
 } from '@/lib/export/new-version'
 import { reviewChangeNotice, shareProgress, takenOutNotice } from '@/lib/export/share-stages'
 import { mergeRequestRef, rememberShareResult, reviewChangeBelow, shareKey, takenOutOf, type ShareStates } from '@/lib/export/share-state'
@@ -42,6 +44,9 @@ import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { MetadataForm } from '@/components/export/metadata-form'
+import { OrganisationField } from '@/components/export/organisation-field'
+import type { Organisation } from '@/lib/catalog/types'
+import { withLeadDefault } from '@/lib/export/organisations'
 import { PackageContents } from '@/components/export/package-contents'
 import { ShareSteps } from '@/components/export/share-steps'
 import { BusySentence, InProgressLink, ListingLine, StageNoticeView } from '@/components/export/source-picker'
@@ -67,7 +72,9 @@ interface PanelProps {
     readiness: ExportReadiness
     mayShare: boolean
     catalogUrl?: string
-    defaults: { publisher: string; maintainer: string }
+    defaults: SteckbriefDefaults
+    /** The catalogue's organisations, for „Herausgeber“ and „Federführende Organisation“. */
+    organisations: Organisation[]
     /** As `draftOwnerTag` gives it; undefined: no drafts at all. */
     draftOwner?: string
 }
@@ -293,7 +300,7 @@ function stamped(payload: ShareDraft, startedAt: { current: string | undefined }
     startedAt.current ??= at
     return { ...payload, savedAt: at, startedAt: startedAt.current }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, blocked, listing, start, onNavigate, onFallBack, onProposed, onContentRead, onDiscarded }: PanelProps & {
+function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, organisations, draftOwner, draft, step, blocked, listing, start, onNavigate, onFallBack, onProposed, onContentRead, onDiscarded }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
     step: WizardStep
@@ -334,14 +341,18 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const catalog = source.catalog
     const filled = start.fill?.answer?.status === 'ok' ? start.fill.answer.steckbrief : undefined
     const startingWith = { ...(filled ? { fill: filled } : {}), ...(start.version ? { version: start.version } : {}) }
-    const [basics, setBasics] = useState<SteckbriefBasics>(() => {
-        const initial = startingBasics(source, defaults, startingWith)
-        for (const key of Object.keys(initial) as (keyof SteckbriefBasics)[]) {
-            const saved = draft?.basics[key]
-            if (typeof saved === 'string') initial[key] = saved
-        }
-        return initial
-    })
+    const [basics, setBasics] = useState<SteckbriefBasics>(() => restoredBasics(startingBasics(source, defaults, startingWith), draft?.basics, organisations))
+    // New organisations proposed in this share: its catalogue entry adds them to the list.
+    const [proposals, setProposals] = useState<Organisation[]>(() => draft?.organisations ?? [])
+    const organisationOptions = {
+        listed: organisations,
+        proposals,
+        allowNew: true,
+        onPropose: (organisation: Organisation) => {
+            setProposals((before) => [...before.filter((known) => known.id !== organisation.id), organisation])
+            setDirty(true)
+        },
+    }
     const [metadata, setMetadata] = useState(() =>
         draft ? restoreMetadata(draft.metadata, metadataDraft(filled?.metadata ?? catalog?.metadata)) : metadataDraft(filled?.metadata ?? catalog?.metadata))
     const [targetKey, setTargetKey] = useState(() =>
@@ -442,7 +453,10 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         for (const [key, value] of Object.entries(basics)) data.set(key, value)
         data.set('datasetId', source.id)
         data.set('targetKey', targetKey)
-        data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
+        const sentMetadata = withLeadDefault(draftMetadata(metadata), basics)
+        data.set('catalogMetadata', JSON.stringify(sentMetadata))
+        const leadCode = (sentMetadata.implementation as { operatorOrg?: string } | undefined)?.operatorOrg
+        data.set('organisations', JSON.stringify(proposals.filter((proposal) => proposal.id === basics.maintainerOrg || proposal.id === leadCode)))
         data.set('demoStreams', JSON.stringify(demoChosen))
         if (whatChanged) data.set('follows', JSON.stringify(followsRefOf(whatChanged)))
         data.set('intent', intent)
@@ -496,6 +510,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         const payload: ShareDraft = {
             datasetId: source.id, datasetName: source.name, savedAt: '', step: resumeAt,
             basics, metadata, targetKey, demoExcluded: [...demoExcluded],
+            ...(proposals.length ? { organisations: proposals } : {}),
         }
         unsaved.current = payload
         const timer = window.setTimeout(() => {
@@ -507,7 +522,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
             unsaved.current = null
         }, 600)
         return () => window.clearTimeout(timer)
-    }, [dirty, step, basics, metadata, targetKey, demoExcluded, source.id, source.name, saveDraft])
+    }, [dirty, step, basics, metadata, targetKey, demoExcluded, proposals, source.id, source.name, saveDraft])
     // Leaving before the timer fires writes the last edits at once.
     useEffect(() => {
         const flush = () => {
@@ -635,12 +650,15 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                 </section>}
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Grundangaben</h3>
-                    {BASIC_FIELDS.map(({ key, label, hint }) =>
-                        <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required={key !== 'keywords'} onChange={(event) => editBasics(key, event.target.value)} />
+                    {BASIC_FIELDS.map(({ key, label, hint }) => key === 'maintainer'
+                        ? <OrganisationField key={key} id="herausgeber" label={label} required value={{ name: basics.maintainer, code: basics.maintainerOrg }} options={organisationOptions}
+                            onChange={(choice) => { setBasics({ ...basics, maintainer: choice.name, maintainerOrg: choice.code }); setDirty(true); setUntouched(false) }} />
+                        : <label key={key} className="flex flex-col gap-1 text-sm"><span>{label}</span><input className={inputClass} value={basics[key]} required={key !== 'keywords'} onChange={(event) => editBasics(key, event.target.value)} />
                             {hint && <span className="text-xs text-muted-foreground">{hint}</span>}</label>)}
                     <label className="flex flex-col gap-1 text-sm md:col-span-2"><span>Kurzbeschreibung *</span><textarea rows={4} className={inputClass} value={basics.description} required onChange={(event) => editBasics('description', event.target.value)} /></label>
                 </section>
-                <MetadataForm value={metadata} onChange={editMetadata} />
+                <MetadataForm value={metadata} onChange={editMetadata}
+                    organisations={{ ...organisationOptions, publisher: { name: basics.maintainer, code: basics.maintainerOrg }, follows: true }} />
                 <section className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
                     <h3 className="font-semibold md:col-span-2">Adresse und Version im Katalog</h3>
                     <p className="text-sm text-muted-foreground md:col-span-2">{catalog || filledFrom ? 'Die nächste Version ist vorgeschlagen. Für eine eigenständige Variante kannst du die Adresse ändern.' : 'Die Adresse ist aus dem Namen des Datensatzes gebildet. Ändern musst du sie nur, wenn sie anders lauten soll.'}</p>

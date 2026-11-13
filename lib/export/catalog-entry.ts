@@ -1,3 +1,5 @@
+import { organisationCodeSchema, organisationSchema } from '@/lib/catalog/schema'
+import type { Organisation } from '@/lib/catalog/types'
 import { exportMetadataSchema, METADATA_GROUPS, type ExportMetadata } from '@/lib/export/metadata'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 
@@ -8,6 +10,9 @@ export interface CatalogEntryInput {
     description: string
     version: string
     maintainer: string
+    maintainerOrg?: string
+    /** Proposed with the package, for the catalogue's list. */
+    organisations?: Organisation[]
     license: string
     keywords: string[]
     repoUrl: string
@@ -48,12 +53,21 @@ export function catalogInputFromManifest(
     if (!metadata.success) {
         return `Der Steckbrief im Manifest ist ungültig: ${metadata.error.issues.map((issue) => issue.message).join('; ')}`
     }
+    const maintainerOrg = organisationCodeSchema.safeParse(manifest.maintainerOrg)
+    const organisations = Array.isArray(manifest.organisations)
+        ? manifest.organisations.flatMap((row) => {
+              const parsed = organisationSchema.safeParse(row)
+              return parsed.success ? [parsed.data] : []
+          })
+        : []
     return {
         id: text('id') as string,
         displayName: text('displayName') as string,
         description: text('description') as string,
         version: text('version') as string,
         maintainer: text('maintainer') as string,
+        ...(maintainerOrg.success ? { maintainerOrg: maintainerOrg.data } : {}),
+        ...(organisations.length ? { organisations } : {}),
         license: text('license') as string,
         keywords: Array.isArray(manifest.keywords)
             ? manifest.keywords.filter((keyword): keyword is string => typeof keyword === 'string')
@@ -72,6 +86,7 @@ export function buildCatalogEntry(input: CatalogEntryInput): Record<string, unkn
         description: input.description,
         version: input.version,
         maintainer: input.maintainer,
+        ...(input.maintainerOrg ? { maintainerOrg: input.maintainerOrg } : {}),
         license: input.license,
         keywords: input.keywords,
         ...(themes ? { themes } : {}),
@@ -88,9 +103,15 @@ export function buildCatalogEntry(input: CatalogEntryInput): Record<string, unkn
 export type CatalogEdit =
     | { status: 'conflict'; indexVersion: string; conflictingId: string }
     | { status: 'withdrawn'; indexVersion: string; reason?: string }
-    | { status: 'added'; content: string; indexVersion: string }
-    | { status: 'replaced'; content: string; indexVersion: string; previousVersion?: string }
+    | { status: 'added'; content: string; indexVersion: string; organisations: Organisation[]; taken: TakenCode[] }
+    | { status: 'replaced'; content: string; indexVersion: string; previousVersion?: string; organisations: Organisation[]; taken: TakenCode[] }
     | { status: 'unchanged'; indexVersion: string }
+
+/** A proposed organisation whose code the list gave to another one meanwhile; the entry names it as text only. */
+export interface TakenCode {
+    proposed: Organisation
+    listedAs: string
+}
 
 export type EntryTexts = Pick<CatalogEntryInput, 'displayName' | 'description' | 'keywords'> & { metadata: ExportMetadata }
 
@@ -111,6 +132,7 @@ export function applyCatalogEntry(
     indexJson: string,
     entry: Record<string, unknown>,
     now: Date = new Date(),
+    organisations: readonly Organisation[] = [],
 ): CatalogEdit {
     const index = JSON.parse(indexJson) as Record<string, unknown>
     const useCases = Array.isArray(index.useCases) ? (index.useCases as Record<string, unknown>[]) : []
@@ -142,6 +164,18 @@ export function applyCatalogEntry(
     }
 
     const existing = existingAt >= 0 ? useCases[existingAt] : undefined
+    const listed = Array.isArray(index.organisations) ? (index.organisations as Record<string, unknown>[]) : []
+    const listedName = (code: string) => listed.find((row) => row.id === code)?.name
+    const fresh = organisations.filter((organisation) => listedName(organisation.id) === undefined)
+    const taken = organisations.flatMap((proposed) => {
+        const listedAs = listedName(proposed.id)
+        return typeof listedAs === 'string' && listedAs !== proposed.name ? [{ proposed, listedAs }] : []
+    })
+    const names = new Map<unknown, unknown>([...listed.map((row) => [row.id, row.name] as const), ...fresh.map((row) => [row.id, row.name] as const)])
+    entry = linkedOnly(withKeptLinks(entry, existing), names)
+    // Only what the entry links to: the list holds no organisation without an entry.
+    const used = new Set([entry.maintainerOrg, asRecord(entry.implementation)?.operatorOrg])
+    const added = fresh.filter((organisation) => used.has(organisation.id))
     const carriedOver = existing
         ? Object.fromEntries(
               Object.entries(existing).filter(
@@ -151,12 +185,12 @@ export function applyCatalogEntry(
         : {}
     const merged = { ...entry, ...carriedOver, ...keptReleaseTag(existing, entry) }
 
-    if (existing && canonical(withoutCuration(existing)) === canonical(merged)) {
+    if (existing && !added.length && canonical(withoutCuration(existing)) === canonical(merged)) {
         return { status: 'unchanged', indexVersion: String(index.version ?? '') }
     }
 
     const next = existingAt >= 0 ? useCases.map((row, i) => (i === existingAt ? merged : row)) : [...useCases, merged]
-    const { content, indexVersion } = rewrittenIndex(index, next, now)
+    const { content, indexVersion } = rewrittenIndex(added.length ? { ...index, organisations: [...listed, ...added] } : index, next, now)
     if (existingAt >= 0) {
         const previous = useCases[existingAt].version
         return {
@@ -164,9 +198,45 @@ export function applyCatalogEntry(
             content,
             indexVersion,
             previousVersion: typeof previous === 'string' ? previous : undefined,
+            organisations: added,
+            taken,
         }
     }
-    return { status: 'added', content, indexVersion }
+    return { status: 'added', content, indexVersion, organisations: added, taken }
+}
+
+/** A package shared before it knew the codes keeps the row's links, as long as the names stay. */
+function withKeptLinks(entry: Record<string, unknown>, existing: Record<string, unknown> | undefined): Record<string, unknown> {
+    if (!existing) return entry
+    const kept = { ...entry }
+    if (!kept.maintainerOrg && existing.maintainerOrg && existing.maintainer === kept.maintainer) kept.maintainerOrg = existing.maintainerOrg
+    const before = asRecord(existing.implementation)
+    const after = asRecord(kept.implementation)
+    if (after && !after.operatorOrg && before?.operatorOrg && before.operator === after.operator) {
+        kept.implementation = { ...after, operatorOrg: before.operatorOrg }
+    }
+    return kept
+}
+
+/**
+ * Only the links the catalogue's CI accepts: a listed code whose name is the text beside it
+ * (the lead may add a department). Any other link goes, and the name stays as text.
+ */
+function linkedOnly(entry: Record<string, unknown>, names: ReadonlyMap<unknown, unknown>): Record<string, unknown> {
+    const linked = { ...entry }
+    const nameOf = (code: unknown) => {
+        const name = names.get(code)
+        return typeof name === 'string' ? name : undefined
+    }
+    if (linked.maintainerOrg !== undefined && nameOf(linked.maintainerOrg) !== linked.maintainer) delete linked.maintainerOrg
+    const implementation = asRecord(linked.implementation)
+    const lead = nameOf(implementation?.operatorOrg)
+    if (implementation?.operatorOrg !== undefined && !(lead && typeof implementation.operator === 'string' && implementation.operator.startsWith(lead))) {
+        const unlinked = { ...implementation }
+        delete unlinked.operatorOrg
+        linked.implementation = unlinked
+    }
+    return linked
 }
 
 const TEXT_PATHS = ['displayName', 'description', 'keywords', 'themes', 'media', ...METADATA_GROUPS.flatMap((group) => group.fields.map((field) => field.path))]
@@ -219,6 +289,7 @@ const EXPORT_OWNED_KEYS: ReadonlySet<string> = new Set([
     'description',
     'version',
     'maintainer',
+    'maintainerOrg',
     'license',
     'keywords',
     'deploymentRef',

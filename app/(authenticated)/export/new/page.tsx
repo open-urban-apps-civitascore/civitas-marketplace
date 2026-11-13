@@ -5,9 +5,9 @@ import { ExportPanel } from '@/components/export/export-panel'
 import { Disclosure } from '@/components/ui/disclosure'
 import { PageHeader } from '@/components/ui/layout'
 import { Notice } from '@/components/ui/notice'
-import { exportConfig, exportReadiness } from '@/lib/export/config'
+import { exportConfig, exportReadiness, instanceOrganisation } from '@/lib/export/config'
 import { listDatasets, listExportInstallations, PortalReadError, type DatasetListing } from '@/lib/export/portal-reader'
-import { getCatalogSummaries } from '@/lib/catalog/source'
+import { getCatalogSummaries, getOrganisations } from '@/lib/catalog/source'
 import { exportSources } from '@/lib/export/sources'
 import { draftOwnerOf } from '@/lib/export/share-drafts'
 import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
@@ -45,9 +45,11 @@ export default async function NewSharePage() {
         datasetsError = error instanceof PortalReadError ? error.message : String(error)
     }
 
-    const [installations, catalog] = await Promise.allSettled([
-        listExportInstallations(accessToken), getCatalogSummaries('usecase'),
+    const [installations, catalog, listed] = await Promise.allSettled([
+        listExportInstallations(accessToken), getCatalogSummaries('usecase'), getOrganisations(),
     ])
+    const organisations = listed.status === 'fulfilled' ? listed.value : []
+    const own = organisations.find((organisation) => organisation.id === instanceOrganisation())
     const sources = exportSources(datasets,
         installations.status === 'fulfilled' ? installations.value : undefined,
         catalog.status === 'fulfilled' ? catalog.value : [])
@@ -100,11 +102,9 @@ export default async function NewSharePage() {
                     readiness={readiness}
                     mayShare={mayShare}
                     catalogUrl={config.catalog?.url}
-                    defaults={{
-                        publisher: 'openurbanapps',
-                        // The name only: the maintainer goes into the public package.
-                        maintainer: session.user?.name ?? '',
-                    }}
+                    // Never the signed-in person: the maintainer goes into the public catalogue.
+                    defaults={{ publisher: 'openurbanapps', maintainer: own?.name ?? '', maintainerOrg: own?.id ?? '' }}
+                    organisations={organisations}
                     // A tag, not the address: drafts are filed under it in the browser. Without
                     // e-mail or name there is nothing to keep two people apart, so no drafts.
                     draftOwner={draftOwnerOf(session.user)}

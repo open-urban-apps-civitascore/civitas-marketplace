@@ -492,7 +492,7 @@ describe('where a dataset stands in „Auswählen“ (plan of 2026-10-18, sectio
         expect(defaultSlugOf(installed)).toBe('baeume')
         expect(stageHint(datasetStage(installed, facts(rows)))).toBe('Version 1.0.2 aus dem Katalog genommen - du teilst eine neue Version')
         expect(wizardStart(installed, facts(rows), {}, ['t'])).toMatchObject({ version: '1.0.3', fill: { slug: 'baeume', version: '1.0.2' } })
-        expect(startingBasics(installed, { publisher: 'x', maintainer: 'y' }).slug).toBe('baeume')
+        expect(startingBasics(installed, { publisher: 'x', maintainer: 'y', maintainerOrg: '' }).slug).toBe('baeume')
 
         // Shared by mistake as a new package and withdrawn: that one never was, the installation's goes on.
         const mistaken = version('1.0.0', 33, 'closed', {
@@ -577,7 +577,8 @@ describe('the Steckbrief a new version starts with', () => {
     it('puts a shared version’s fields over the catalogue’s and the defaults, at the version suggested', () => {
         const filled = steckbriefFromManifest(manifest, { full: true, domain: 'environment' })
         if (typeof filled === 'string') throw new Error(filled)
-        const defaults = { publisher: 'openurbanapps', maintainer: 'Ewa' }
+        // The instance's own organisation, never the signed-in person.
+        const defaults = { publisher: 'openurbanapps', maintainer: 'Open Urban Apps', maintainerOrg: 'openurbanapps' }
         expect(startingBasics(DATASET, defaults, { fill: filled, version: '1.0.2' })).toEqual({
             displayName: 'Baumkataster',
             description: 'Alle Stadtbäume.',
@@ -586,6 +587,8 @@ describe('the Steckbrief a new version starts with', () => {
             version: '1.0.2',
             domain: 'environment',
             maintainer: 'Stadt Musterbach',
+            // The fill names no organisation: the instance's code must not stick to another name.
+            maintainerOrg: '',
             license: 'EUPL-1.2',
             keywords: 'bäume, grün',
             changeNote: '',
@@ -598,7 +601,8 @@ describe('the Steckbrief a new version starts with', () => {
             publisher: 'openurbanapps',
             version: '1.0.0',
             domain: 'general',
-            maintainer: 'Ewa',
+            maintainer: 'Open Urban Apps',
+            maintainerOrg: 'openurbanapps',
             license: 'EUPL-1.2',
             keywords: '',
             changeNote: '',

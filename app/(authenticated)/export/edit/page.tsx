@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { TextEditForm } from '@/components/export/text-edit-form'
 import { PageHeader } from '@/components/ui/layout'
 import { Notice } from '@/components/ui/notice'
+import { getOrganisations } from '@/lib/catalog/source'
 import { exportConfig, exportReadiness, SHARING_NOT_SET_UP } from '@/lib/export/config'
 import { readTextEditFill, type TextEditFill } from '@/lib/export/new-version-fill'
 import { fetchShareRight, shareRefusal } from '@/lib/export/share-permission'
@@ -23,7 +24,7 @@ async function fillOf(query: Query): Promise<TextEditFill> {
 export default async function TextEditPage({ searchParams }: { searchParams: Promise<Query> }) {
     await requireSession()
     const query = await searchParams
-    const fill = await fillOf(query)
+    const [fill, organisations] = await Promise.all([fillOf(query), getOrganisations()])
 
     return (
         <div className="flex flex-col gap-6">
@@ -38,7 +39,7 @@ export default async function TextEditPage({ searchParams }: { searchParams: Pro
             {'refusal' in fill ? (
                 <Notice tone="neutral">{fill.refusal}</Notice>
             ) : (
-                <TextEditForm edit={{ targetKey: one(query.target), slug: one(query.slug), version: one(query.version) }} steckbrief={fill.steckbrief} />
+                <TextEditForm edit={{ targetKey: one(query.target), slug: one(query.slug), version: one(query.version) }} steckbrief={fill.steckbrief} organisations={organisations} />
             )}
         </div>
     )

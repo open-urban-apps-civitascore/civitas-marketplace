@@ -1,3 +1,4 @@
+import type { Organisation } from '@/lib/catalog/types'
 import { catalogInputFromManifest } from '@/lib/export/catalog-entry'
 import { parseBundleBranch, parseCatalogBranch, parseRemovalBranch, parseTextBranch } from '@/lib/export/config'
 import { declinedBy, declinedProposal, declineOf, mayBeWithdrawn, sinceStart, startedOver, type Decline } from '@/lib/export/declines'
@@ -6,6 +7,7 @@ import { inProgressHref, mayProposeEntry } from '@/lib/export/in-progress-items'
 import type { ExportMetadata } from '@/lib/export/metadata'
 import { shareSourceOf, withdrawalMarkIn } from '@/lib/export/merge-request-text'
 import { slugify } from '@/lib/export/names'
+import { organisationNamed } from '@/lib/export/organisations'
 import type { ShareProposal, SharedPackageRow } from '@/lib/export/share-listing'
 import { higherFirst, lastDecided, sameVersionAgain, sharedPackageOf, usedVersions, type SharedPackage } from '@/lib/export/shared-package'
 import { aboveAll, isNewerVersion, nextPatch, STAGES, takenOutNotice } from '@/lib/export/share-stages'
@@ -338,7 +340,14 @@ export function wizardStart(
     }
 }
 
-export type SteckbriefBasics = Record<'displayName' | 'description' | 'slug' | 'publisher' | 'version' | 'domain' | 'maintainer' | 'license' | 'keywords' | 'changeNote', string>
+export type SteckbriefBasics = Record<'displayName' | 'description' | 'slug' | 'publisher' | 'version' | 'domain' | 'maintainer' | 'maintainerOrg' | 'license' | 'keywords' | 'changeNote', string>
+
+/** The instance's own organisation, if it has one; never the signed-in person. */
+export interface SteckbriefDefaults {
+    publisher: string
+    maintainer: string
+    maintainerOrg: string
+}
 
 export interface FilledSteckbrief {
     from: string
@@ -350,6 +359,7 @@ export interface FilledSteckbrief {
     /** Only where its proposal names it: the new version's parts keep their ids. */
     domain?: string
     maintainer: string
+    maintainerOrg?: string
     license: string
     /** Comma-separated. */
     keywords: string
@@ -375,6 +385,7 @@ export function steckbriefFromManifest(
         slug,
         ...(domain ? { domain } : {}),
         maintainer: input.maintainer,
+        ...(input.maintainerOrg ? { maintainerOrg: input.maintainerOrg } : {}),
         license: input.license,
         keywords: input.keywords.join(', '),
         metadata: full ? (input.metadata ?? {}) : themes ? { themes } : {},
@@ -383,9 +394,23 @@ export function steckbriefFromManifest(
     }
 }
 
+/**
+ * A saved draft over the start. One saved before organisations had codes gets the code of
+ * its Herausgeber's exact name, or none: never the instance's code beside another name.
+ */
+export function restoredBasics(initial: SteckbriefBasics, saved: Record<string, string> | undefined, listed: readonly Organisation[]): SteckbriefBasics {
+    if (!saved) return initial
+    const restored = { ...initial }
+    for (const key of Object.keys(initial) as (keyof SteckbriefBasics)[]) {
+        if (typeof saved[key] === 'string') restored[key] = saved[key]
+    }
+    if (typeof saved.maintainerOrg !== 'string') restored.maintainerOrg = organisationNamed(restored.maintainer, listed)?.id ?? ''
+    return restored
+}
+
 export function startingBasics(
     source: Pick<ExportSource, 'name' | 'description' | 'catalog' | 'installedFrom'>,
-    defaults: { publisher: string; maintainer: string },
+    defaults: SteckbriefDefaults,
     start: { fill?: Omit<FilledSteckbrief, 'from' | 'targetKey'>; version?: string } = {},
 ): SteckbriefBasics {
     const { fill, version } = start
@@ -393,6 +418,8 @@ export function startingBasics(
     const installed = installedPackageOf(source)
     // The catalogue's own split, not another regex: a looser one seeds a slug the server rejects on submit.
     const address = installed ? catalogEntryPath(installed) : undefined
+    // Name and code from one place, so they never name two organisations.
+    const who = fill ?? catalog ?? defaults
     return {
         displayName: fill?.displayName ?? catalog?.displayName ?? source.name,
         description: fill?.description ?? catalog?.description ?? source.description ?? '',
@@ -400,7 +427,8 @@ export function startingBasics(
         publisher: fill?.publisher ?? address?.publisher ?? defaults.publisher,
         version: version ?? (catalog ? nextPatch(catalog.version) : '1.0.0'),
         domain: fill?.domain ?? 'general',
-        maintainer: fill?.maintainer ?? catalog?.maintainer ?? defaults.maintainer,
+        maintainer: who.maintainer,
+        maintainerOrg: who.maintainerOrg ?? '',
         license: fill?.license ?? catalog?.license ?? 'EUPL-1.2',
         keywords: fill?.keywords ?? catalog?.keywords.join(', ') ?? '',
         changeNote: '',

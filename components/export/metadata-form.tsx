@@ -1,5 +1,6 @@
 'use client'
 
+import { LeadOrganisationField, type OrganisationChoice, type OrganisationOptions } from '@/components/export/organisation-field'
 import { METADATA_GROUPS, type MetadataDraft } from '@/lib/export/metadata'
 import { THEME_LABELS, THEME_ORDER } from '@/lib/catalog/vocabulary'
 import { Button } from '@/components/ui/button'
@@ -7,7 +8,16 @@ import { Select } from '@/components/ui/select'
 
 export const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40'
 
-export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChange: (value: MetadataDraft) => void }) {
+export function MetadataForm({
+    value,
+    onChange,
+    organisations,
+}: {
+    value: MetadataDraft
+    onChange: (value: MetadataDraft) => void
+    /** The lead organisation as a picker; `follows`: empty means „wie Herausgeber“. */
+    organisations?: OrganisationOptions & { publisher: OrganisationChoice; follows: boolean }
+}) {
     const changeField = (path: string, text: string) => onChange({ ...value, fields: { ...value.fields, [path]: text } })
     return <>
         <fieldset className="rounded-xl border bg-card p-5">
@@ -21,7 +31,11 @@ export function MetadataForm({ value, onChange }: { value: MetadataDraft; onChan
         </fieldset>
         {METADATA_GROUPS.map((group) => <fieldset key={group.title} className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2">
             <legend className="px-2 font-semibold">{group.title}</legend>
-            {group.fields.map((field) => <label key={field.path} className={`flex flex-col gap-1 text-sm ${field.kind === 'multiline' ? 'md:col-span-2' : ''}`}>
+            {group.fields.map((field) => field.kind === 'organisation' ? null : field.path === 'implementation.operator' && organisations ? (
+                <LeadOrganisationField key={field.path} operator={value.fields[field.path] ?? ''} operatorOrg={value.fields['implementation.operatorOrg'] ?? ''}
+                    publisher={organisations.publisher} follows={organisations.follows} options={organisations}
+                    onChange={(next) => onChange({ ...value, fields: { ...value.fields, 'implementation.operator': next.operator, 'implementation.operatorOrg': next.operatorOrg } })} />
+            ) : <label key={field.path} className={`flex flex-col gap-1 text-sm ${field.kind === 'multiline' ? 'md:col-span-2' : ''}`}>
                 <span>{field.label}</span>
                 {field.options ? <Select value={value.fields[field.path] ?? ''} onValueChange={(next) => changeField(field.path, next)} noneLabel="Keine Angabe"
                     options={Object.entries(field.options).map(([key, label]) => ({ value: key, label }))} /> : field.kind === 'multiline' || field.kind === 'list' ? <textarea className={inputClass} rows={3} value={value.fields[field.path] ?? ''} onChange={(event) => changeField(field.path, event.target.value)} />

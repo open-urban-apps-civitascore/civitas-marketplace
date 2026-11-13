@@ -155,13 +155,13 @@ describe('applyTextEdit', () => {
         const byHand = {
             ...row(),
             contact: { website: 'bleibt', email: 'alt@musterstadt.example' },
-            implementation: { operatorOrg: 'musterstadt', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'alt' } },
+            implementation: { operatorUrl: 'https://musterstadt.example', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'alt' } },
         }
         const metadata = { contact: { email: 'neu@musterstadt.example' }, implementation: { operator: 'Stadt Musterstadt', resources: { note: 'neu' } } }
         const { index: next } = edited(applyTextEdit(index([byHand]), ENTRY_ID, '1.0.0', { ...texts, metadata }, now))
         expect(next.useCases[0].contact).toEqual({ website: 'bleibt', email: 'neu@musterstadt.example' })
-        expect(next.useCases[0].implementation).toEqual({ operatorOrg: 'musterstadt', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'neu' } })
-        expect(Object.keys(next.useCases[0].implementation)).toEqual(['operatorOrg', 'operator', 'resources'])
+        expect(next.useCases[0].implementation).toEqual({ operatorUrl: 'https://musterstadt.example', operator: 'Stadt Musterstadt', resources: { byHand: 1, note: 'neu' } })
+        expect(Object.keys(next.useCases[0].implementation)).toEqual(['operatorUrl', 'operator', 'resources'])
     })
 
     it('still takes out a block the form left empty, and calls a row with such fields unchanged', () => {
