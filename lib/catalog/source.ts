@@ -11,6 +11,7 @@ import {
     findRepoListSummary,
     getRepoListAddons,
     getRepoListMeta,
+    getRepoListOrganisations,
     getRepoListSummaries,
     repoListUrl,
 } from '@/lib/catalog/repo-list'
@@ -20,9 +21,10 @@ import type {
     CatalogMeta,
     CatalogSummary,
     DeploymentRef,
+    Organisation,
     PackageManifest,
 } from '@/lib/catalog/types'
-import { mockPackages } from '@/lib/mock-catalog'
+import { mockOrganisations, mockPackages } from '@/lib/mock-catalog'
 import { resolveEntryPath } from '@/lib/use-case-catalog/path'
 
 /**
@@ -141,6 +143,12 @@ export async function resolveCatalogEntry(id: string, options: { retryFailed?: b
 export async function getAddons(): Promise<AddonEntry[]> {
     if (isMockCatalog()) return []
     return getRepoListAddons()
+}
+
+/** The organisations behind the entries; none in a catalogue before 4.3.0. */
+export async function getOrganisations(): Promise<Organisation[]> {
+    if (isMockCatalog()) return mockOrganisations
+    return getRepoListOrganisations()
 }
 
 /** Freshness of the served catalogue, for the hint on the listing pages. */

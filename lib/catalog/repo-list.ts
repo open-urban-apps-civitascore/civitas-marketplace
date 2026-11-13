@@ -5,8 +5,10 @@ import {
     deploymentRefSchema,
     describedRowSchema,
     indexEnvelopeSchema,
+    organisationSchema,
     pinnedRowSchema,
     revokedRowSchema,
+    type Organisation,
 } from '@/lib/catalog/schema'
 import type {
     AddonEntry,
@@ -49,6 +51,7 @@ const EMPTY_INDEX: RepoListIndex = {
     addons: [],
     useCases: [],
     dataStructures: [],
+    organisations: [],
 }
 
 const DEFAULT_TTL_SECONDS = 900
@@ -212,6 +215,24 @@ function parseAddonRows(value: unknown): AddonEntry[] {
 }
 
 /**
+ * Unlike entry rows, a bad organisation drops only itself: its links then stay
+ * plain text, and the rest of the catalogue is served as usual.
+ */
+function parseOrganisations(value: unknown): Organisation[] {
+    if (!Array.isArray(value)) return []
+    const kept: Organisation[] = []
+    value.forEach((row, index) => {
+        const parsed = organisationSchema.safeParse(row)
+        if (!parsed.success || kept.some((organisation) => organisation.id === parsed.data.id)) {
+            console.warn(`[repo-list] organisations[${index}] left out: ${parsed.success ? 'duplicate code' : parsed.error.issues[0]?.message}`)
+            return
+        }
+        kept.push(parsed.data)
+    })
+    return kept
+}
+
+/**
  * Structural validation of a fetched index against `lib/catalog/schema`.
  *
  * The same schema is rendered for the catalogue repository's CI — see
@@ -231,6 +252,7 @@ export function parseRepoListIndex(value: unknown): RepoListIndex {
         addons: parseAddonRows(envelope.addons),
         useCases: parseSummaryRows(envelope.useCases, 'useCases'),
         dataStructures: parseSummaryRows(envelope.dataStructures, 'dataStructures'),
+        organisations: parseOrganisations(envelope.organisations),
     }
 }
 
@@ -336,6 +358,10 @@ export async function getRepoListSummaries(
     const { index } = await loadIndex()
     const rows = type === 'usecase' ? index.useCases : index.dataStructures
     return rows.filter((row) => !row.revoked)
+}
+
+export async function getRepoListOrganisations(): Promise<Organisation[]> {
+    return (await loadIndex()).index.organisations
 }
 
 /** One row by catalogue id, searched across both entry sections. */

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
-import { ClipboardList, ExternalLink, Handshake, PlayCircle } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronRight, ClipboardList, ExternalLink, Handshake, PlayCircle } from 'lucide-react'
 
 import { TierExplainer } from '@/components/catalog/curation-tier'
+import { buttonClass } from '@/components/ui/button'
 import { IconTile } from '@/components/ui/icon-tile'
 import { Eyebrow, Field, FieldList, NeutralBadge } from '@/components/ui/layout'
 import type { CatalogSummary } from '@/lib/catalog/types'
@@ -33,17 +35,23 @@ import {
  * The clickdummy's Nachnutzer and Aktualität stay out until the catalogue
  * carries them: an empty row there would only say that we do not know.
  *
+ * The lead organisation is a button when the catalogue lists it: the one way
+ * to its page (Ewa, 2026-11-07).
+ *
  * No actions: the install button stays in the hero, where it is still near the
  * top on a phone (this column drops below the text under `lg`).
  */
 export function UseCaseInfobox({
     entry,
     demoData,
+    leadHref,
     className,
 }: {
     entry: CatalogSummary
     /** Whether the package ships demo data; unknown (a described entry, an unreadable package) leaves the row out. */
     demoData?: boolean
+    /** The lead organisation's page, see `leadOrganisationHref`. */
+    leadHref?: string
     className?: string
 }) {
     const { implementation, curation, contact } = entry
@@ -92,7 +100,16 @@ export function UseCaseInfobox({
             </Group>
 
             <Group label="Wer dahintersteht" last={!hasCosts}>
-                <Field label={FIELD_LABELS.operator}>{operator ?? entry.maintainer}</Field>
+                <Field label={FIELD_LABELS.operator}>
+                    {leadHref ? (
+                        <Link href={leadHref} className={cn(buttonClass('secondary'), 'max-w-full whitespace-normal text-left')}>
+                            {operator ?? entry.maintainer}
+                            <ChevronRight aria-hidden className="size-4 shrink-0" />
+                        </Link>
+                    ) : (
+                        (operator ?? entry.maintainer)
+                    )}
+                </Field>
                 {/* Whoever publishes the package, or keeps a described entry, when that is someone else. */}
                 {operator && operator !== entry.maintainer && (
                     <Field label={buildUseCaseListing(entry).publisherRole}>{entry.maintainer}</Field>

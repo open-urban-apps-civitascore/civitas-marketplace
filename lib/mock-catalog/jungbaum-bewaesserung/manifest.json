@@ -5,6 +5,7 @@
   "description": "Verbindet das Baumkataster mit Bodenfeuchte-Sensoren an den Jungbäumen: eine Karte zeigt, welcher Baum Wasser braucht, ein Dashboard zeigt den Verlauf und den Rückstand. Junge Straßenbäume sterben in den ersten Sommern, wenn sie nicht gegossen werden — und der Bauhof fährt bisher feste Touren, teils zu Bäumen, die noch nass sind.",
   "version": "1.0.0",
   "maintainer": "Open Urban Apps",
+  "maintainerOrg": "openurbanapps",
   "license": "EUPL-1.2",
   "keywords": ["bodenfeuchte", "postgis", "mqtt", "sql", "sensorik"],
   "members": {

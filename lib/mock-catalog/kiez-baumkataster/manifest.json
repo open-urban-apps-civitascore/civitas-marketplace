@@ -5,6 +5,7 @@
   "description": "Baumkataster aus einer Fachverfahrens-Datenbank: SQL-Quelle mit Cron-Abruf, Geometrie-Mapping und PostGIS-Senke für den Karten-Layer.",
   "version": "1.1.0",
   "maintainer": "Open Urban Apps",
+  "maintainerOrg": "openurbanapps",
   "license": "EUPL-1.2",
   "keywords": [
     "baumkataster",

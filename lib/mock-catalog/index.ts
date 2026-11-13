@@ -1,4 +1,4 @@
-import type { PackageManifest } from '@/lib/catalog/types'
+import type { Organisation, PackageManifest } from '@/lib/catalog/types'
 
 import airQualityManifest from './air-quality-station/manifest.json'
 import airQualityArtifact from './air-quality-station/air-quality-station.datastructure.json'
@@ -137,4 +137,9 @@ export const mockPackages: MockPackage[] = [
             'bodenfeuchte.simulation.json': wateringReadingSimulation,
         },
     },
+]
+
+/** The organisations the mock rows link to, as the real index lists them. */
+export const mockOrganisations: Organisation[] = [
+    { id: 'openurbanapps', name: 'Open Urban Apps', website: 'https://openurbanapps.org' },
 ]

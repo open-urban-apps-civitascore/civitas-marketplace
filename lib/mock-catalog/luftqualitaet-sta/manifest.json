@@ -5,6 +5,7 @@
   "description": "Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat, MQTT-Quelle, Mapping, Pipeline und FROST-Senke.",
   "version": "1.2.0",
   "maintainer": "Open Urban Apps",
+  "maintainerOrg": "openurbanapps",
   "license": "EUPL-1.2",
   "keywords": [
     "umwelt",

@@ -5,6 +5,7 @@
   "description": "Zählstellen-Rohformat, normalisiertes Zielformat, MQTT-Quelle, Mapping, Pipeline und PostGIS-Senke.",
   "version": "1.7.0",
   "maintainer": "Open Urban Apps",
+  "maintainerOrg": "openurbanapps",
   "license": "EUPL-1.2",
   "keywords": [
     "verkehr",

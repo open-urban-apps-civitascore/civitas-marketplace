@@ -17,7 +17,18 @@ import { THEME_LABELS } from '@/lib/catalog/vocabulary'
  * described (no pin, nothing to install). A row without a seal shows no seal,
  * rather than a claim about one.
  */
-export function UseCaseCard({ entry, href, installed }: { entry: CatalogSummary; href: string; installed: boolean }) {
+export function UseCaseCard({
+    entry,
+    href,
+    installed,
+    hidePublisher = false,
+}: {
+    entry: CatalogSummary
+    href: string
+    installed: boolean
+    /** On the publisher's own page, which already names it. */
+    hidePublisher?: boolean
+}) {
     const theme = entry.themes?.[0]
 
     return (
@@ -58,7 +69,7 @@ export function UseCaseCard({ entry, href, installed }: { entry: CatalogSummary;
                         ) : (
                             <span />
                         )}
-                        <span className="truncate text-sm text-muted-foreground">{entry.maintainer}</span>
+                        {!hidePublisher && <span className="truncate text-sm text-muted-foreground">{entry.maintainer}</span>}
                     </div>
                 </div>
             </article>

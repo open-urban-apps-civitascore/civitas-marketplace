@@ -72,6 +72,8 @@ export const referenceSchema = z.object({
 export const implementationSchema = z.object({
     status: useCaseStatusSchema.optional(),
     operator: z.string().min(1).optional(),
+    /** Code of the organisation `operator` names; a code no organisation has stays plain text. */
+    operatorOrg: z.string().min(1).optional(),
     parties: z
         .object({
             stakeholders: z.array(z.string().min(1)).optional(),
@@ -113,6 +115,8 @@ const entryIdentityShape = {
 }
 
 const entryDescriptionShape = {
+    /** Code of the organisation `maintainer` names. */
+    maintainerOrg: z.string().min(1).optional(),
     themes: z.array(themeSchema).optional(),
     contact: contactSchema.optional(),
     curation: curationSchema.optional(),
@@ -171,6 +175,17 @@ export const catalogSummarySchema = z.union([
     pinnedRowSchema,
 ])
 
+/** Permanent: name, website and contact may change, the code never does. Same shape as a use-case id's publisher. */
+export const organisationCodeSchema = z.string().regex(new RegExp(`^${PUBLISHER_PATTERN}$`))
+
+export const organisationSchema = z.object({
+    id: organisationCodeSchema,
+    name: z.string().min(1),
+    website: z.url({ protocol: /^https$/ }).optional(),
+    /** A team address, never a person. */
+    contact: z.object({ name: z.string().min(1).optional(), email: z.email() }).optional(),
+})
+
 export const indexEnvelopeSchema = z.looseObject({
     version: z.string().min(1),
     updatedAt: z.string().min(1),
@@ -180,6 +195,7 @@ export const repoListIndexSchema = indexEnvelopeSchema.extend({
     addons: z.array(addonRowSchema).optional(),
     useCases: z.array(catalogSummarySchema).optional(),
     dataStructures: z.array(catalogSummarySchema).optional(),
+    organisations: z.array(organisationSchema).optional(),
 })
 
 export type Contact = z.infer<typeof contactSchema>
@@ -188,3 +204,4 @@ export type Resources = z.infer<typeof resourcesSchema>
 export type Reference = z.infer<typeof referenceSchema>
 export type Implementation = z.infer<typeof implementationSchema>
 export type Curation = z.infer<typeof curationSchema>
+export type Organisation = z.infer<typeof organisationSchema>

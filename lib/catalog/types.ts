@@ -17,7 +17,7 @@
  * recognising the artifact.
  */
 
-import type { Contact, Curation, Implementation, MediaItem } from '@/lib/catalog/schema'
+import type { Contact, Curation, Implementation, MediaItem, Organisation } from '@/lib/catalog/schema'
 import type { Theme } from '@/lib/catalog/vocabulary'
 
 /**
@@ -110,6 +110,10 @@ export interface PackageManifest extends CatalogManifest {
     contact?: Contact
     media?: MediaItem[]
     implementation?: Implementation
+    /** Code of the organisation `maintainer` names. */
+    maintainerOrg?: string
+    /** Organisations this share proposes for the catalogue's list; its entry adds them. */
+    organisations?: Organisation[]
 }
 
 /** A bundled data structure: name + the opaque artifact (its `$id` is the identity). */
@@ -395,6 +399,7 @@ export type {
     Curation,
     Implementation,
     MediaItem,
+    Organisation,
     Reference,
     Resources,
 } from '@/lib/catalog/schema'
@@ -407,6 +412,8 @@ export type {
  * id and version between row and fetched manifest and refuses on mismatch.
  */
 export interface CatalogSummary extends CatalogManifest {
+    /** Code of the organisation `maintainer` names, see {@link Organisation}. */
+    maintainerOrg?: string
     /**
      * Absent for local mock fixtures (which need no fetch), for tombstoned rows
      * whose historical pin data is deliberately not parsed, and for DESCRIBED
@@ -454,6 +461,8 @@ export interface AddonEntry {
     name: string
     description: string
     author: string
+    /** Code of the organisation `author` names. */
+    authorOrg?: string
     categories: string[]
     repository?: string
     iconUrl?: string
@@ -503,6 +512,7 @@ export interface RepoListIndex {
     addons: AddonEntry[]
     useCases: CatalogSummary[]
     dataStructures: CatalogSummary[]
+    organisations: Organisation[]
 }
 
 /** Freshness metadata for the "catalogue as of …" hint in the UI. */

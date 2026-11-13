@@ -395,6 +395,37 @@ describe('parseRepoListIndex', () => {
     })
 })
 
+describe('parseRepoListIndex: organisations', () => {
+    const organisation = { id: 'musterhausen', name: 'Stadt Musterhausen', website: 'https://musterhausen.example' }
+
+    it('keeps the list and the links to it, and has none in a catalogue before 4.3.0', () => {
+        const parsed = parseRepoListIndex({
+            ...indexWithUseCase({ maintainerOrg: 'openurbanapps', implementation: { operator: 'Stadt Musterhausen – Umweltamt', operatorOrg: 'musterhausen' } }),
+            organisations: [organisation, { id: 'openurbanapps', name: 'Open Urban Apps', contact: { name: 'Team', email: 'team@openurbanapps.example' } }],
+        })
+        expect(parsed.organisations.map((row) => row.id)).toEqual(['musterhausen', 'openurbanapps'])
+        expect(parsed.useCases[0]).toMatchObject({ maintainerOrg: 'openurbanapps', implementation: { operatorOrg: 'musterhausen' } })
+        expect(parseRepoListIndex(VALID_INDEX).organisations).toEqual([])
+    })
+
+    it('drops only a bad organisation, never the catalogue', () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const parsed = parseRepoListIndex({
+            ...VALID_INDEX,
+            organisations: [
+                organisation,
+                { ...organisation, name: 'Stadt Musterhausen (doppelt)' },
+                { id: 'Muster Stadt', name: 'Bad code' },
+                { id: 'ohnename' },
+                { id: 'unsicher', name: 'Unsicher', website: 'http://unsicher.example' },
+                { id: 'person', name: 'Person', contact: { name: 'Erika Mustermann' } },
+            ],
+        })
+        expect(parsed.organisations).toEqual([organisation])
+        expect(parsed.useCases).toHaveLength(1)
+    })
+})
+
 describe('expireRepoListIfOlder', () => {
     it('makes the next read fetch again when a newer index was seen, and serves the old one if that fails', async () => {
         const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(VALID_INDEX)).mockRejectedValue(new Error('network down'))

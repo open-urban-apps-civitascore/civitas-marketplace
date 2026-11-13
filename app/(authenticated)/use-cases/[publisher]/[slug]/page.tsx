@@ -14,8 +14,9 @@ import { TechnicalFacts } from '@/components/catalog/technical-facts'
 import { UseCaseGallery } from '@/components/catalog/use-case-gallery'
 import { UseCaseInfobox } from '@/components/catalog/use-case-infobox'
 import { Section } from '@/components/ui/layout'
+import { leadOrganisationHref } from '@/lib/catalog/organisations'
 import { readPackageContents } from '@/lib/catalog/package-contents'
-import { findUseCaseByPath } from '@/lib/catalog/source'
+import { findUseCaseByPath, getOrganisations } from '@/lib/catalog/source'
 import { catalogEntryHref, isCanonicalPath } from '@/lib/use-case-catalog/path'
 import { fetchCanCreateDatapool, fetchDatapools, type DatapoolListing } from '@/lib/datapools'
 import { fetchDatasetOverview, type DatasetOverview } from '@/lib/datapool-of-dataset'
@@ -67,11 +68,12 @@ export default async function UseCaseDetailPage({
     // datapools and the right to create one: a described one has no dialog to
     // choose a target in. What it holds is read from its package, kept per pin,
     // so after the first view of a version it costs nothing.
-    const [installation, datapools, canCreateDatapool, contents] = await Promise.all([
+    const [installation, datapools, canCreateDatapool, contents, organisations] = await Promise.all([
         fetchActiveInstallation(listing.id),
         listing.install ? fetchDatapools() : Promise.resolve<DatapoolListing>({ pools: [] }),
         listing.install ? fetchCanCreateDatapool() : Promise.resolve(false),
         readPackageContents(summary),
+        getOrganisations(),
     ])
     const installed = installation !== null
     // What depends on the installation waits for it, and the three reads start
@@ -228,7 +230,11 @@ export default async function UseCaseDetailPage({
                 {/* Sticky and uncapped: when it is taller than the window, the end of the
                     grid pushes it up and its lower part comes into view. */}
                 <div className="flex min-w-0 flex-col gap-6 lg:sticky lg:top-2">
-                    <UseCaseInfobox entry={summary} demoData={contents ? contents.demoStreams.length > 0 : undefined} />
+                    <UseCaseInfobox
+                        entry={summary}
+                        demoData={contents ? contents.demoStreams.length > 0 : undefined}
+                        leadHref={leadOrganisationHref(summary, organisations)}
+                    />
                 </div>
             </div>
 

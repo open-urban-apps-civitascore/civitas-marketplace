@@ -17,6 +17,8 @@ export interface AddonListing {
     categories: string[]
     /** Who publishes and maintains the add-on integration. */
     publisher: string
+    /** Code of that organisation, when the catalogue links it. */
+    publisherOrg?: string
     /** The third-party tool the add-on packages, when it wraps one. */
     wrappedTool?: { name: string; homepage?: string; license?: string }
     /** Licence of the integration itself — distinct from the wrapped tool's. */
@@ -164,6 +166,7 @@ export function parseCatalogAddon(raw: unknown): ParsedAddon | null {
         description: str(entry.details),
         categories: strList(entry.categories),
         publisher: str(entry.author) ?? 'unbekannt',
+        publisherOrg: str(entry.authorOrg),
         wrappedTool: wrappedName
             ? {
                   name: wrappedName,
