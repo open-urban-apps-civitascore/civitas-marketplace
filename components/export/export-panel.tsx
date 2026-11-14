@@ -293,7 +293,7 @@ function stamped(payload: ShareDraft, startedAt: { current: string | undefined }
     startedAt.current ??= at
     return { ...payload, savedAt: at, startedAt: startedAt.current }
 }
-function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, blocked, listing, start, onNavigate, onFallBack, onProposed, onContentRead, onDiscarded }: PanelProps & {
+function ExportEditor({ source, sources, targets, readiness, mayShare, catalogUrl, defaults, draftOwner, draft, step, blocked, listing, start, onNavigate, onFallBack, onProposed, onContentRead, onDiscarded }: PanelProps & {
     source: ExportSource
     draft?: ShareDraft
     step: WizardStep
@@ -318,6 +318,17 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
     const [demoExcluded, setDemoExcluded] = useState<ReadonlySet<string>>(() => new Set(draft?.demoExcluded ?? []))
     // Dashboards too: every one Superset has goes along unless unticked.
     const [dashboardExcluded, setDashboardExcluded] = useState<ReadonlySet<string>>(() => new Set())
+    // Further datasets that travel in the same package, each as a dataset of its own. Not kept in a draft yet.
+    const [moreDatasetIds, setMoreDatasetIds] = useState<ReadonlySet<string>>(() => new Set())
+    const otherSources = sources.filter((other) => other.id !== source.id)
+    const toggleMoreDataset = (id: string) => {
+        setMoreDatasetIds((chosen) => {
+            const next = new Set(chosen)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
     const [pending, startTransition] = useTransition()
     const [result, setResult] = useState<ExportActionResult | null>(null)
     const [preview, setPreview] = useState<ExportActionResult['preview']>()
@@ -447,6 +458,7 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
         data.set('catalogMetadata', JSON.stringify(draftMetadata(metadata)))
         data.set('demoStreams', JSON.stringify(demoChosen))
         data.set('dashboards', JSON.stringify(dashboardChosen))
+        data.set('datasetsAlongside', JSON.stringify([...moreDatasetIds]))
         if (whatChanged) data.set('follows', JSON.stringify(followsRefOf(whatChanged)))
         data.set('intent', intent)
         try {
@@ -614,6 +626,14 @@ function ExportEditor({ source, targets, readiness, mayShare, catalogUrl, defaul
                         dashboards={inventory.dashboards} dashboardExcluded={dashboardExcluded} onToggleDashboard={toggleDashboard} />
                     {lacksStructure && <Notice tone="warn" title="Es fehlt eine eigene Datenstruktur">Ohne eigene Datenstruktur lässt sich das Paket nicht teilen - die Paketprüfung verlangt mindestens eine.</Notice>}
                     {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Inhalt"><NoticeList items={inventory.warnings} /></Notice>}
+                    {otherSources.length > 0 && <fieldset className="flex flex-col gap-2 border-t pt-4">
+                        <legend className="text-sm font-medium">Weitere Datensätze ins Paket</legend>
+                        <p className="text-xs text-muted-foreground">Jeder kommt als eigener Datensatz ins Paket, gemeinsame Datenstrukturen und Datenquellen nur einmal. Demo-Daten und Dashboards kommen aus „{source.name}“.</p>
+                        {otherSources.map((other) => <label key={other.id} className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={moreDatasetIds.has(other.id)} disabled={pending} onChange={() => toggleMoreDataset(other.id)} />
+                            {other.name}
+                        </label>)}
+                    </fieldset>}
                     <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-muted-foreground">Nicht im Paket: gespeicherte Daten, der Datenpool und Zugangsdaten.</p>
                         <div className="flex flex-wrap items-center gap-3">

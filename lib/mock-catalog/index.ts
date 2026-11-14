@@ -20,6 +20,8 @@ import airStaMapping from './luftqualitaet-sta/luftmessung-zu-station.mapping.js
 import airStaPipeline from './luftqualitaet-sta/luftqualitaets-import.pipeline.json'
 import airStaSimulation from './luftqualitaet-sta/luftmessung.simulation.json'
 import airStaDashboard from './luftqualitaet-sta/luftmessung.dashboard.json'
+import airStaSharedManifest from './luftqualitaet-sta-geteilt/manifest.json'
+import airStaSharedDashboard from './luftqualitaet-sta-geteilt/testdashboard-1.dashboard.json'
 import treesManifest from './kiez-baumkataster/manifest.json'
 import treesSourceStructure from './kiez-baumkataster/baumkataster-zeile.datastructure.json'
 import treesTargetStructure from './kiez-baumkataster/kiez-baum.datastructure.json'
@@ -46,6 +48,7 @@ import wateringTreePipeline from './jungbaum-bewaesserung/kataster-import.pipeli
 import wateringValuePipeline from './jungbaum-bewaesserung/bodenfeuchte-import.pipeline.json'
 import wateringRegisterSimulation from './jungbaum-bewaesserung/jungbaumkataster.simulation.json'
 import wateringReadingSimulation from './jungbaum-bewaesserung/bodenfeuchte.simulation.json'
+import airAndTrafficManifest from './luft-und-verkehr/manifest.json'
 
 /**
  * Local catalogue fixtures: verbatim copies of the artifact-repo content
@@ -99,6 +102,22 @@ export const mockPackages: MockPackage[] = [
             'luftmessung.dashboard.json': airStaDashboard,
         },
     },
+    // Import test for a shared dashboard: the members of luftqualitaet-sta,
+    // with the platform's export of Testdashboard-1 (2026-11-12) in place of
+    // the hand-made dashboard. Not in a package repository.
+    {
+        manifest: airStaSharedManifest as unknown as PackageManifest,
+        files: {
+            'luftmessung.datastructure.json': airStaStructure,
+            'luftstation.datastructure.json': airStaTargetStructure,
+            'luftmessungs-feed.datasource.json': airStaSourceFeed,
+            'luftmessung-zu-station.mapping.json': airStaMapping,
+            'frost-observations.datasink.json': airStaSinkFrost,
+            'luftqualitaets-import.pipeline.json': airStaPipeline,
+            'luftmessung.simulation.json': airStaSimulation,
+            'testdashboard-1.dashboard.json': airStaSharedDashboard,
+        },
+    },
     // SQL-sourced, simulation-less package: the seed SQL under
     // kiez-baumkataster/seed/ is deliberately NOT a member — the source table
     // belongs to the (demo) Fachverfahren, not to the platform install.
@@ -140,6 +159,27 @@ export const mockPackages: MockPackage[] = [
             'bodenfeuchte-import.pipeline.json': wateringValuePipeline,
             'jungbaumkataster.simulation.json': wateringRegisterSimulation,
             'bodenfeuchte.simulation.json': wateringReadingSimulation,
+        },
+    },
+    // Test package with two datasets: the members of luftqualitaet-sta and of
+    // traffic-counting, each half a dataset of its own. Not in a package repository.
+    {
+        manifest: airAndTrafficManifest as unknown as PackageManifest,
+        files: {
+            'luftmessung.datastructure.json': airStaStructure,
+            'luftstation.datastructure.json': airStaTargetStructure,
+            'verkehrszaehlung.datastructure.json': trafficStructure,
+            'verkehrsmessung.datastructure.json': trafficTargetStructure,
+            'luftmessungs-feed.datasource.json': airStaSourceFeed,
+            'zaehlstellen-feed.datasource.json': trafficSourceFeed,
+            'luftmessung-zu-station.mapping.json': airStaMapping,
+            'zaehlung-zu-messung.mapping.json': trafficMapping,
+            'frost-observations.datasink.json': airStaSinkFrost,
+            'verkehrsmessung-tabelle.datasink.json': trafficSinkTable,
+            'luftqualitaets-import.pipeline.json': airStaPipeline,
+            'zaehlung-zu-messung.pipeline.json': trafficPipeline,
+            'luftmessung.simulation.json': airStaSimulation,
+            'zaehlstellen.simulation.json': trafficSimulation,
         },
     },
 ]

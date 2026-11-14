@@ -128,9 +128,12 @@ describe('exporting a use case with a map', () => {
     const pkg = transformSnapshot(snapshot, options)
 
     it('carries the named API, the styles and the layer as members', () => {
-        expect(pkg.manifest.members.apis).toEqual([{ file: 'karte.api.json' }])
+        expect(pkg.manifest.members.dataSets).toEqual([
+            { key: 'kiez-baeume', name: 'Kiez-Bäume', description: 'Bäume mit Karte' },
+        ])
+        expect(pkg.manifest.members.apis).toEqual([{ file: 'karte.api.json', dataSet: 'kiez-baeume' }])
         expect(pkg.manifest.members.styles).toHaveLength(2)
-        expect(pkg.manifest.members.layers).toEqual([{ file: 'baeume.layer.json' }])
+        expect(pkg.manifest.members.layers).toEqual([{ file: 'baeume.layer.json', dataSet: 'kiez-baeume' }])
         expect(fileJson(pkg, 'core-ir/karte.api.json')).toEqual({
             name: 'Kiez-Bäume Karte',
             slug: 'karte',

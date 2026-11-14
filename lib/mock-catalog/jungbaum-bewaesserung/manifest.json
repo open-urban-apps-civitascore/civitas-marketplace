@@ -8,6 +8,13 @@
   "license": "EUPL-1.2",
   "keywords": ["bodenfeuchte", "postgis", "mqtt", "sql", "sensorik"],
   "members": {
+    "dataSets": [
+      {
+        "key": "jungbaumbewaesserung",
+        "name": "Jungbaumbewässerung",
+        "description": "Verbindet das Baumkataster mit Bodenfeuchte-Sensoren an den Jungbäumen: eine Karte zeigt, welcher Baum Wasser braucht, ein Dashboard zeigt den Verlauf und den Rückstand."
+      }
+    ],
     "dataStructures": [
       { "file": "jungbaum-zeile.datastructure.json" },
       { "file": "jungbaum.datastructure.json" },
@@ -47,16 +54,16 @@
       }
     ],
     "mappings": [
-      { "file": "kataster-zu-jungbaum.mapping.json" },
-      { "file": "messung-zu-feuchtewert.mapping.json" }
+      { "file": "kataster-zu-jungbaum.mapping.json", "dataSet": "jungbaumbewaesserung" },
+      { "file": "messung-zu-feuchtewert.mapping.json", "dataSet": "jungbaumbewaesserung" }
     ],
     "dataSinks": [
-      { "file": "jungbaeume-tabelle.datasink.json", "parameters": [ { "field": "tableName", "label": "Tabellenname der Kartenebene" } ] },
-      { "file": "bodenfeuchte-tabelle.datasink.json", "parameters": [ { "field": "tableName", "label": "Tabellenname der Messreihe" } ] }
+      { "file": "jungbaeume-tabelle.datasink.json", "dataSet": "jungbaumbewaesserung", "parameters": [ { "field": "tableName", "label": "Tabellenname der Kartenebene" } ] },
+      { "file": "bodenfeuchte-tabelle.datasink.json", "dataSet": "jungbaumbewaesserung", "parameters": [ { "field": "tableName", "label": "Tabellenname der Messreihe" } ] }
     ],
     "pipelines": [
-      { "file": "kataster-import.pipeline.json" },
-      { "file": "bodenfeuchte-import.pipeline.json" }
+      { "file": "kataster-import.pipeline.json", "dataSet": "jungbaumbewaesserung" },
+      { "file": "bodenfeuchte-import.pipeline.json", "dataSet": "jungbaumbewaesserung" }
     ],
     "simulations": [
       { "file": "jungbaumkataster.simulation.json" },

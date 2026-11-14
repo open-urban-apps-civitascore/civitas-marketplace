@@ -1,0 +1,83 @@
+{
+  "id": "urn:openurbanapps:usecase:luft-und-verkehr",
+  "type": "usecase",
+  "displayName": "Luft und Verkehr",
+  "description": "Testpaket mit zwei Datensätzen: Luftqualität in eine FROST-Senke, Verkehrszählung in eine PostGIS-Senke, jeweils mit eigener MQTT-Quelle, Mapping und Pipeline.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": [
+    "umwelt",
+    "verkehr",
+    "test"
+  ],
+  "members": {
+    "dataSets": [
+      {
+        "key": "luftqualitaet",
+        "name": "Luftqualität",
+        "description": "Messwerte der Luftqualitäts-Stationen im SensorThings-Format."
+      },
+      {
+        "key": "verkehrszaehlung",
+        "name": "Verkehrszählung",
+        "description": "Normalisierte Messungen der Zählstellen in einer PostGIS-Tabelle."
+      }
+    ],
+    "dataStructures": [
+      { "file": "luftmessung.datastructure.json" },
+      { "file": "luftstation.datastructure.json" },
+      { "file": "verkehrszaehlung.datastructure.json" },
+      { "file": "verkehrsmessung.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "luftmessungs-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      },
+      {
+        "file": "zaehlstellen-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "luftmessung-zu-station.mapping.json", "dataSet": "luftqualitaet" },
+      { "file": "zaehlung-zu-messung.mapping.json", "dataSet": "verkehrszaehlung" }
+    ],
+    "dataSinks": [
+      { "file": "frost-observations.datasink.json", "dataSet": "luftqualitaet" },
+      {
+        "file": "verkehrsmessung-tabelle.datasink.json",
+        "dataSet": "verkehrszaehlung",
+        "parameters": [
+          {
+            "field": "tableName",
+            "label": "PostGIS-Tabellenname",
+            "description": "Name der Zieltabelle in der PostGIS-Datenbank der Instanz."
+          }
+        ]
+      }
+    ],
+    "pipelines": [
+      { "file": "luftqualitaets-import.pipeline.json", "dataSet": "luftqualitaet" },
+      { "file": "zaehlung-zu-messung.pipeline.json", "dataSet": "verkehrszaehlung" }
+    ],
+    "simulations": [
+      { "file": "luftmessung.simulation.json" },
+      { "file": "zaehlstellen.simulation.json" }
+    ]
+  },
+  "dependencies": []
+}

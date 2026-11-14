@@ -233,7 +233,9 @@ describe('the package with a dashboard', () => {
 
     it('carries the dashboard as a member, its database without address, and says what it removed', () => {
         const pkg = transformSnapshot(snapshot, options)
-        expect(pkg.manifest.members.dashboards).toEqual([{ file: 'testdashboard-1.dashboard.json' }])
+        expect(pkg.manifest.members.dashboards).toEqual([
+            { file: 'testdashboard-1.dashboard.json', dataSet: 'luftqualitaet' },
+        ])
         const member = JSON.parse(pkg.files['core-ir/testdashboard-1.dashboard.json']) as SupersetDashboardDocument
         expect(member.files[pathOf(member, 'databases/')].sqlalchemy_uri).toBe('trino://')
         expect(pkg.stripped).toContainEqual({

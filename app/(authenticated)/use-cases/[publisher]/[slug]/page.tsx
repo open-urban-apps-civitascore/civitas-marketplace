@@ -78,19 +78,26 @@ export default async function UseCaseDetailPage({
     // together. The dataset gives the pool for the link into the portal (read
     // from the dataset, not from the install record: a dataset can be moved to
     // another pool later) and the release status.
-    const [dataset, dashboards, streams]: [
-        DatasetOverview | null,
+    // A use case can have several datasets: each brings its own overview and dashboards.
+    const accessToken = installation ? await getAccessToken() : ''
+    const [datasets, dashboards, streams]: [
+        { id: string; name?: string; overview: DatasetOverview | null }[],
         InstalledDashboardLink[],
         InstallationStream[] | null,
     ] = installation
         ? await Promise.all([
-              installation.dataSetId
-                  ? fetchDatasetOverview(installation.dataSetId, await getAccessToken())
-                  : Promise.resolve(null),
-              fetchInstalledDashboards(installation.dataSetId, await getAccessToken()),
+              Promise.all(
+                  installation.dataSets.map(async (dataSet) => ({
+                      ...dataSet,
+                      overview: await fetchDatasetOverview(dataSet.id, accessToken),
+                  })),
+              ),
+              Promise.all(
+                  installation.dataSets.map((dataSet) => fetchInstalledDashboards(dataSet.id, accessToken)),
+              ).then((lists) => lists.flat()),
               readInstallationStreams(installation.id),
           ])
-        : [null, [], null]
+        : [[], [], null]
     const previewAvailable = isSimulatorConfigured()
 
     return (
@@ -209,7 +216,7 @@ export default async function UseCaseDetailPage({
                     {installation && (
                         <InstallationSection
                             installation={installation}
-                            dataset={dataset}
+                            datasets={datasets}
                             dashboards={dashboards}
                             streams={streams}
                             simulatorUiBase={simulatorUiUrl()}

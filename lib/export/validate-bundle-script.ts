@@ -125,6 +125,37 @@ for kind in MEMBER_KINDS:
             continue
         listed_files.append((kind, member["file"]))
 
+# Datasets: a package declares zero, one or several, and every member that
+# lives in a dataset names one of them by key, also when there is only one.
+# Structures, sources and simulations are shared and name none.
+DATASET_OWNED_KINDS = ("mappings", "dataSinks", "pipelines", "apis", "styles", "layers", "dashboards")
+SHARED_KINDS = ("dataStructures", "dataSources", "simulations")
+dataset_keys = set()
+for index, declaration in enumerate(members.get("dataSets") or []):
+    if not isinstance(declaration, dict):
+        fail(f"members.dataSets[{index}] is not an object")
+        continue
+    key = declaration.get("key")
+    if not isinstance(key, str) or len(key) > 32 or not API_SLUG.match(key):
+        fail(f"members.dataSets[{index}] needs a 'key': lowercase letters and digits with inner hyphens, at most 32 characters")
+    elif key in dataset_keys:
+        fail(f"members.dataSets[{index}]: key '{key}' is used twice")
+    else:
+        dataset_keys.add(key)
+    if not isinstance(declaration.get("name"), str) or not declaration.get("name"):
+        fail(f"members.dataSets[{index}] needs a 'name'")
+for kind in DATASET_OWNED_KINDS:
+    for index, member in enumerate(members.get(kind) or []):
+        ref = member.get("dataSet") if isinstance(member, dict) else None
+        if not isinstance(ref, str) or not ref:
+            fail(f"members.{kind}[{index}] must name its dataset in 'dataSet'")
+        elif ref not in dataset_keys:
+            fail(f"members.{kind}[{index}]: dataSet '{ref}' is not declared in members.dataSets")
+for kind in SHARED_KINDS:
+    for index, member in enumerate(members.get(kind) or []):
+        if isinstance(member, dict) and "dataSet" in member:
+            fail(f"members.{kind}[{index}] belongs to no dataset and must not name one")
+
 # Every listed file must exist; every JSON in core-ir/ must be listed (or be
 # the manifest) — an unlisted file would silently not travel.
 on_disk = {name for name in os.listdir(CORE) if name.endswith(".json")}

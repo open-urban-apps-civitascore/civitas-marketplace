@@ -7,7 +7,7 @@ import { resolveCatalogEntry } from '@/lib/catalog/source'
 import { isDataStructureEntry, type CatalogEntry, type UseCaseEntry } from '@/lib/catalog/types'
 import { DATAPOOL_NAME_MIN } from '@/lib/datapool-name'
 import { createDatapool, deleteDatapool, type DatapoolOption } from '@/lib/datapools'
-import { installedDataSet } from '@/lib/installation-dataset'
+import { installedDataSets } from '@/lib/installation-dataset'
 import {
     awaitRelease,
     releaseUseCase,
@@ -24,6 +24,7 @@ import {
     artifactCounts,
     buildInstallationRequest,
     clampDescription,
+    dataSetIdentity,
     describeInstallFailure,
     describeReleaseFailure,
     describeUninstallFailure,
@@ -75,7 +76,7 @@ type DataSourceMode = 'demo' | 'custom' | 'later'
 /**
  * Installs a catalogue entry through the REAL install path: catalogue source
  * (git artifact repo at its pinned ref, or the local fixtures) → user token →
- * APISIX gateway → `POST /v1/installations`. The package content is fetched
+ * APISIX gateway → `POST /v1/use-cases`. The package content is fetched
  * at install time; nothing installable is shipped with the app.
  *
  * One request installs the whole package or nothing: the platform creates
@@ -189,9 +190,17 @@ export async function installEntry(
     }
 
     const receipt = (await res.response.json()) as InstallationReceipt
-    // The dataset is a line of the journal, not a field of the answer (installedDataSet).
-    const dataSet = installedDataSet(receipt.artifacts)
-    const summary = summarizeInstallation(receipt, dataSet.name ?? entry.manifest.displayName)
+    // The datasets are lines of the journal, not fields of the answer (installedDataSets).
+    const dataSets = installedDataSets(receipt.artifacts)
+    // A dashboard goes to the dataset it names: the line whose origin is that dataset's identity.
+    const dataSetIdOf = (key: string): string | undefined =>
+        isDataStructureEntry(effectiveEntry)
+            ? undefined
+            : receipt.artifacts?.find(
+                  (line) => line.artifactType === 'DATA_SET' && line.origin === dataSetIdentity(effectiveEntry, key),
+              )?.shellId
+    const title = dataSets.length === 1 ? (dataSets[0].name ?? entry.manifest.displayName) : entry.manifest.displayName
+    const summary = summarizeInstallation(receipt, entry.manifest.displayName)
     const poolSegment = createdPool ? ` · Datenpool „${createdPool.name}“ neu angelegt` : ''
     // Before the release: the platform reads a dataset's dashboards when its
     // saga starts, and for a dataset in draft that is the release saga. A
@@ -200,13 +209,13 @@ export async function installEntry(
     // summary, never an install failure.
     const dashboardRefusals = isDataStructureEntry(effectiveEntry)
         ? ''
-        : await registerDashboards(effectiveEntry, dataSet.id, releaseRequested)
-    // Then the release, so the platform provisions while the demo data are
+        : await registerDashboards(effectiveEntry, dataSetIdOf, releaseRequested)
+    // Then the release of each dataset, so the platform provisions while the demo data are
     // still being set up. Like them, a refusal is a remark in the summary.
-    const release =
+    const releases =
         releaseRequested && !isDataStructureEntry(effectiveEntry)
-            ? await startRelease(receipt, dataSet.id)
-            : undefined
+            ? await startReleases(receipt, dataSets.map((dataSet) => dataSet.id))
+            : []
     // Demo activation happens AFTER the install committed, and its failure is a
     // warning in the summary, never an install failure: the simulator is an
     // add-on, and a dead add-on must not make a use case uninstallable.
@@ -219,15 +228,20 @@ export async function installEntry(
         dataSourceMode === 'demo' && !isDataStructureEntry(effectiveEntry)
             ? await activateDemoStreams(effectiveEntry, receipt)
             : ''
-    // Last: the saga's end, once the rest is set up.
-    const released = release ? await finishRelease(release) : undefined
-    const releaseSegment = released?.segment ?? ''
+    // Last: the end of each saga, once the rest is set up.
+    const released: { completed: boolean; segment: string }[] = []
+    for (const run of releases) released.push(await finishRelease(run))
+    const releaseSegment = released.map((run) => run.segment).join('')
+    const releaseCompleted = released.length > 0 && released.every((run) => run.completed)
     // After the saga, because only then does the platform know where Superset
     // put each dashboard.
     const dashboardSegment =
         isDataStructureEntry(effectiveEntry) || (effectiveEntry.bundle.dashboards ?? []).length === 0
             ? ''
-            : `${dashboardRefusals}${await reportDashboards(dataSet.id, released?.completed === true)}`
+            : `${dashboardRefusals}${await reportDashboards(
+                  [...new Set(effectiveEntry.bundle.dashboards?.map((dashboard) => dataSetIdOf(dashboard.dataSet)))],
+                  releaseCompleted,
+              )}`
     const installation = receipt.id ? ` · Installation ${receipt.id}` : ''
 
     // The catalogue badges and the provenance list all read from the install
@@ -242,7 +256,7 @@ export async function installEntry(
         httpStatus: 201,
         installationId: receipt.id,
         outcome: {
-            title: dataSet.name ?? entry.manifest.displayName,
+            title,
             version: entry.manifest.version,
             counts: artifactCounts(receipt),
             steps: [
@@ -301,7 +315,21 @@ type ReleaseRun =
  * A refused step ends here and says which one it was. Nothing is rolled back, because nothing is
  * wrong with the install, and the portal can go on from there.
  */
-async function startRelease(receipt: InstallationReceipt, dataSetId: string | undefined): Promise<ReleaseRun> {
+async function startReleases(receipt: InstallationReceipt, dataSetIds: (string | undefined)[]): Promise<ReleaseRun[]> {
+    if (dataSetIds.length === 0) return [await startRelease(receipt, undefined, true)]
+    const runs: ReleaseRun[] = []
+    // The structure versions and sources serve every dataset, so the first release takes them.
+    for (const [index, dataSetId] of dataSetIds.entries()) {
+        runs.push(await startRelease(receipt, dataSetId, index === 0))
+    }
+    return runs
+}
+
+async function startRelease(
+    receipt: InstallationReceipt,
+    dataSetId: string | undefined,
+    withSharedArtifacts: boolean,
+): Promise<ReleaseRun> {
     if (!dataSetId) {
         return { started: false, segment: ' · Freigabe NICHT gestartet: Antwort trägt keine Datensatz-ID' }
     }
@@ -309,7 +337,9 @@ async function startRelease(receipt: InstallationReceipt, dataSetId: string | un
     // travels as an exception and must not read as an unreachable backend.
     const accessToken = await getAccessToken()
     const idsOf = (artifactType: string) =>
-        (receipt.artifacts ?? []).flatMap((line) => (line.artifactType === artifactType && line.shellId ? [line.shellId] : []))
+        withSharedArtifacts
+            ? (receipt.artifacts ?? []).flatMap((line) => (line.artifactType === artifactType && line.shellId ? [line.shellId] : []))
+            : []
     try {
         const start = await releaseUseCase(platformApi(accessToken), {
             dataSetId,
@@ -448,17 +478,21 @@ async function activateDemoStreams(entry: UseCaseEntry, receipt: InstallationRec
  */
 async function registerDashboards(
     entry: UseCaseEntry,
-    dataSetId: string | undefined,
+    dataSetIdOf: (key: string) => string | undefined,
     released: boolean,
 ): Promise<string> {
     const dashboards = entry.bundle.dashboards ?? []
     if (dashboards.length === 0) return ''
-    if (!dataSetId) return ' · Dashboard NICHT angelegt: Antwort trägt keine Datensatz-ID'
     // Outside the try blocks, as in startRelease: a missing session ends in a
     // redirect, which must not read as a refused dashboard.
     const accessToken = await getAccessToken()
     let refusals = ''
     for (const dashboard of dashboards) {
+        const dataSetId = dataSetIdOf(dashboard.dataSet)
+        if (!dataSetId) {
+            refusals += ` · Dashboard ${dashboard.file} NICHT angelegt: Antwort trägt keinen Datensatz „${dashboard.dataSet}“`
+            continue
+        }
         let creation: DashboardCreation
         try {
             creation = dashboardCreation(dashboard, released)
@@ -491,10 +525,15 @@ async function registerDashboards(
  * from the platform: its Superset link once the saga has created it there, or
  * what it still waits for.
  */
-async function reportDashboards(dataSetId: string | undefined, releaseCompleted: boolean): Promise<string> {
-    if (!dataSetId) return ''
-    const dashboards = await fetchInstalledDashboards(dataSetId, await getAccessToken())
-    return dashboards.map((dashboard) => ` · ${dashboardStep(dashboard, releaseCompleted)}`).join('')
+async function reportDashboards(dataSetIds: (string | undefined)[], releaseCompleted: boolean): Promise<string> {
+    const accessToken = await getAccessToken()
+    let steps = ''
+    for (const dataSetId of dataSetIds) {
+        if (!dataSetId) continue
+        const dashboards = await fetchInstalledDashboards(dataSetId, accessToken)
+        steps += dashboards.map((dashboard) => ` · ${dashboardStep(dashboard, releaseCompleted)}`).join('')
+    }
+    return steps
 }
 
 /** One dashboard as a step of the install summary (installSteps turns a URL into a link). */
@@ -532,7 +571,7 @@ async function postInstallation(body: InstallationRequest): Promise<PostResult> 
     const accessToken = await getAccessToken()
 
     const response = await fetch(
-        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations`,
+        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/use-cases`,
         {
             method: 'POST',
             headers: {
@@ -579,7 +618,7 @@ export async function uninstallInstallation(
 
     const accessToken = await getAccessToken()
     const response = await fetch(
-        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${encodeURIComponent(installationId)}`,
+        `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/use-cases/${encodeURIComponent(installationId)}`,
         {
             method: 'DELETE',
             headers: { Authorization: `Bearer ${accessToken}` },

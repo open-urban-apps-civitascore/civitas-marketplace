@@ -1,8 +1,7 @@
 import { isSqlSimulation } from '@/lib/catalog/types'
 import type { BundledDataSource, BundledSimulation, SimulationStream, UseCaseEntry } from '@/lib/catalog/types'
 import { slugify } from '@/lib/export/urn'
-import type { InstallationReceipt, InstalledArtifactLine } from '@/lib/install-payload'
-import { installedDataSet } from '@/lib/installation-dataset'
+import { dataSetIdentity, type InstallationReceipt, type InstalledArtifactLine } from '@/lib/install-payload'
 import type {
     ArtifactRef,
     SampleScenario,
@@ -10,6 +9,32 @@ import type {
     SimulationOrigin,
     SimulationStatus,
 } from '@/lib/simulator/client'
+
+/**
+ * The dataset a stream's data ends up in: the one whose pipeline reads the stream's source, found
+ * by the source's title or package identity in the pipeline's nodes. A source can serve several
+ * datasets, and the simulator keeps one per stream, so the first pipeline that reads it decides.
+ * Without such a pipeline, the use case's first dataset.
+ */
+function readingDataSetLine(
+    entry: UseCaseEntry,
+    source: BundledDataSource | undefined,
+    sourceRef: string,
+    installation: InstallationReceipt | undefined,
+): InstalledArtifactLine | undefined {
+    const lines = (installation?.artifacts ?? []).filter((line) => line.artifactType === 'DATA_SET')
+    const sourceUrn = typeof source?.document.id === 'string' ? source.document.id : undefined
+    const names = (value: unknown) => value === sourceRef || (sourceUrn !== undefined && value === sourceUrn)
+    const reads = (node: unknown) =>
+        typeof node === 'object' &&
+        node !== null &&
+        (names((node as Record<string, unknown>).sourceRef) || names((node as Record<string, unknown>).lookupSourceRef))
+    const pipeline = entry.bundle.pipelines.find(
+        (candidate) => Array.isArray(candidate.model.nodes) && candidate.model.nodes.some(reads),
+    )
+    const identity = pipeline ? dataSetIdentity(entry, pipeline.dataSet) : undefined
+    return lines.find((line) => identity !== undefined && line.origin === identity) ?? lines[0]
+}
 
 /**
  * Pure planning for stage B: which simulator registrations does an install of
@@ -188,8 +213,10 @@ function describeStream({
         name: fit(entry.manifest.displayName),
         version: installation?.packageVersion ?? entry.manifest.version,
     }
-    const dataSetUrn = installation?.artifacts?.find((line) => line.artifactType === 'DATA_SET')?.urn
-    const { id: dataSetId, name: dataSetName } = installedDataSet(installation?.artifacts)
+    const dataSetLine = readingDataSetLine(entry, source, sourceRef, installation)
+    const dataSetUrn = dataSetLine?.urn
+    const dataSetId = dataSetLine?.shellId
+    const dataSetName = dataSetLine?.name
     const dataSet: ArtifactRef | undefined = dataSetName
         ? {
               name: fit(dataSetName),

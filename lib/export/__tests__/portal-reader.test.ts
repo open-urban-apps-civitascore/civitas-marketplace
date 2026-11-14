@@ -334,7 +334,7 @@ describe('readUseCase', () => {
             content: SINKS.map((sink) => (sink.id === 'sink-frost-messwerte' ? { ...sink, name: undefined } : sink)),
             last: true,
         }
-        routes['/v1/installations?size=200&page=0'] = {
+        routes['/v1/use-cases?size=200&page=0'] = {
             content: [
                 { uninstalledAt: '2026-11-01T10:00:00', artifacts: [{ artifactType: 'DATA_SINK', shellId: 'sink-frost-messwerte', name: 'Alt' }] },
                 {

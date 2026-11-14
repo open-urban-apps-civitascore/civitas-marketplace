@@ -14,6 +14,13 @@
     "frost"
   ],
   "members": {
+    "dataSets": [
+      {
+        "key": "luftqualitaet",
+        "name": "Luftqualität (SensorThings)",
+        "description": "Rohformat der Luftqualitäts-Stationen, SensorThings-Zielformat, MQTT-Quelle, Mapping, Pipeline und FROST-Senke."
+      }
+    ],
     "dataStructures": [
       { "file": "luftmessung.datastructure.json" },
       { "file": "luftstation.datastructure.json" }
@@ -31,19 +38,19 @@
       }
     ],
     "mappings": [
-      { "file": "luftmessung-zu-station.mapping.json" }
+      { "file": "luftmessung-zu-station.mapping.json", "dataSet": "luftqualitaet" }
     ],
     "dataSinks": [
-      { "file": "frost-observations.datasink.json" }
+      { "file": "frost-observations.datasink.json", "dataSet": "luftqualitaet" }
     ],
     "pipelines": [
-      { "file": "luftqualitaets-import.pipeline.json" }
+      { "file": "luftqualitaets-import.pipeline.json", "dataSet": "luftqualitaet" }
     ],
     "simulations": [
       { "file": "luftmessung.simulation.json" }
     ],
     "dashboards": [
-      { "file": "luftmessung.dashboard.json" }
+      { "file": "luftmessung.dashboard.json", "dataSet": "luftqualitaet" }
     ]
   },
   "dependencies": []

@@ -1,5 +1,5 @@
 /**
- * Reads the installations of this instance (`GET /v1/installations`) completely.
+ * Reads the installations of this instance (`GET /v1/use-cases`) completely.
  *
  * The platform answers in pages, and its default page holds 20 rows. A reader
  * that takes one page hides the older installations without a word. An
@@ -31,7 +31,7 @@ export async function readAllInstallations<Row>(accessToken: string): Promise<In
     const rows: Row[] = []
     for (let page = 0; page < MAX_PAGES; page++) {
         const res = await fetch(
-            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations?size=${PAGE_SIZE}&page=${page}`,
+            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/use-cases?size=${PAGE_SIZE}&page=${page}`,
             {
                 headers: { Authorization: `Bearer ${accessToken}` },
                 cache: 'no-store',

@@ -43,27 +43,37 @@ import { uninstallBlocker } from '@/lib/uninstall-blocker'
  */
 export function InstallationSection({
     installation,
-    dataset,
+    datasets,
     dashboards,
     streams,
     simulatorUiBase,
     map,
 }: {
     installation: ActiveInstallation
-    dataset: DatasetOverview | null
+    /** Every dataset of the use case, each with its overview (null when it could not be read). */
+    datasets: { id: string; name?: string; overview: DatasetOverview | null }[]
     dashboards: InstalledDashboardLink[]
     streams: InstallationStream[] | null
     simulatorUiBase?: string
     /** The map page, when the package publishes a layer. */
     map?: { href: string; title: string } | null
 }) {
-    const blocker = uninstallBlocker(dataset)
+    const overviews = datasets.flatMap(({ overview }) => (overview ? [overview] : []))
+    // The first dataset that stops an uninstall, with the link to it.
+    const blocked = datasets
+        .map((dataset) => ({ id: dataset.id, blocker: uninstallBlocker(dataset.overview) }))
+        .find((candidate) => candidate.blocker)
+    const blocker = blocked?.blocker
     // A release sets AVAILABLE at once; its pipeline runs only once the
     // platform has provisioned it (the pending CREATE).
-    const releasing = dataset?.pendingOperation === 'CREATE'
-    const released = dataset?.status === 'AVAILABLE' && !releasing
+    const releasingOf = (overview: DatasetOverview | null) => overview?.pendingOperation === 'CREATE'
+    const releasedOf = (overview: DatasetOverview | null) => overview?.status === 'AVAILABLE' && !releasingOf(overview)
+    const releasing = overviews.some(releasingOf)
+    const released = overviews.length > 0 && overviews.every(releasedOf)
     // Before that the sinks do not exist yet; an unknown status says nothing.
-    const awaitingRelease = dataset?.status !== undefined && !released
+    const awaitingRelease = overviews.some((overview) => overview.status !== undefined) && !released
+    // The install puts every dataset of a use case into one pool.
+    const datapool = overviews.find((overview) => overview.datapool)?.datapool
     // The restart case of the installed page: a reachable simulator without
     // streams for an installation that could have them.
     const demoMissing = streams !== null && streams.length === 0 && installation.hasDataSource
@@ -112,42 +122,43 @@ export function InstallationSection({
         )
     }
 
-    if (installation.dataSetId || dataset?.datapool) {
+    if (datasets.length > 0 || datapool) {
         groups.push(
             <FlowGroup key="platform" icon={Layers} tone="platform" title="Plattform" subtitle="CIVITAS/CORE">
                 {/* Container first, then what it contains. */}
-                {dataset?.datapool && (
+                {datapool && (
                     <FlowItem
                         icon={<FolderOpen className="size-4" />}
                         kind="Datenpool"
-                        name={dataset.datapool.name}
-                        href={datapoolHref(dataset.datapool.id)}
+                        name={datapool.name}
+                        href={datapoolHref(datapool.id)}
                         target="Portal"
                     />
                 )}
-                {installation.dataSetId && (
+                {datasets.map(({ id, name, overview }) => (
                     <FlowItem
+                        key={id}
                         icon={<Database className="size-4" />}
                         kind="Datensatz"
-                        name={installation.dataSetName ?? 'Datensatz'}
-                        href={datasetHref(installation.dataSetId)}
+                        name={name ?? 'Datensatz'}
+                        href={datasetHref(id)}
                         target="Portal"
                         badge={
-                            dataset?.status ? (
-                                <StatusPill tone={released ? 'success' : 'muted'}>
-                                    {datasetStatusLabel(dataset.status, dataset.pendingOperation)}
+                            overview?.status ? (
+                                <StatusPill tone={releasedOf(overview) ? 'success' : 'muted'}>
+                                    {datasetStatusLabel(overview.status, overview.pendingOperation)}
                                 </StatusPill>
                             ) : undefined
                         }
                         note={
-                            releasing
+                            releasingOf(overview)
                                 ? 'Die Plattform richtet Speicher und Pipeline ein, danach fließen die Daten.'
-                                : awaitingRelease
+                                : overview?.status !== undefined && !releasedOf(overview)
                                   ? 'Daten fließen erst nach der Freigabe im Portal.'
                                   : undefined
                         }
                     />
-                )}
+                ))}
             </FlowGroup>
         )
     }
@@ -200,7 +211,7 @@ export function InstallationSection({
 
     return (
         <section aria-labelledby="installation-heading" className="overflow-hidden rounded-md border bg-card">
-            <RefreshWhilePending pending={Boolean(dataset?.pendingOperation)} />
+            <RefreshWhilePending pending={overviews.some((overview) => Boolean(overview.pendingOperation))} />
             <div className="border-b px-6 py-4">
                 <h2 id="installation-heading" className="text-lg font-semibold text-foreground">
                     In dieser Instanz
@@ -220,11 +231,11 @@ export function InstallationSection({
                             <p>
                                 <span className="font-medium">{blocker.reason}</span> {blocker.remedy}
                                 {blocker.warning && <> {blocker.warning}</>}
-                                {installation.dataSetId && (
+                                {blocked && (
                                     <>
                                         {' '}
                                         <a
-                                            href={datasetHref(installation.dataSetId)}
+                                            href={datasetHref(blocked.id)}
                                             target="_blank"
                                             rel="noreferrer"
                                             className="inline-flex items-center gap-0.5 font-medium underline-offset-2 hover:underline"

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 import { buildStarterDashboard } from '@/lib/assistant/dashboard'
 import { describeGenerator } from '@/lib/assistant/describe'
-import { buildUseCaseMap } from '@/lib/assistant/map'
+import { buildUseCaseMap, PROPOSAL_DATASET_KEY } from '@/lib/assistant/map'
 import { ASSISTANT_PACKAGE_PREFIX } from '@/lib/assistant/store'
 import { compactName, deriveDisambiguator, slugify, urnSegment } from '@/lib/export/urn'
 
@@ -393,6 +393,7 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
         license: 'EUPL-1.2',
         keywords: ['assistent', domain],
         members: {
+            dataSets: [{ key: PROPOSAL_DATASET_KEY, name: title, description: proposal.description }],
             dataStructures: [{ file: 'rohformat.datastructure.json' }, { file: 'zielformat.datastructure.json' }],
             dataSources: [
                 {
@@ -402,18 +403,19 @@ export function buildUseCasePackage(proposal: UseCaseProposal, now = Date.now())
                     ],
                 },
             ],
-            mappings: [{ file: 'mapping.mapping.json' }],
+            mappings: [{ file: 'mapping.mapping.json', dataSet: PROPOSAL_DATASET_KEY }],
             dataSinks: [
                 {
                     file: 'tabelle.datasink.json',
+                    dataSet: PROPOSAL_DATASET_KEY,
                     parameters: [
                         { field: 'tableName', label: 'PostGIS-Tabellenname', description: 'Name der Zieltabelle in der PostGIS-Datenbank der Instanz.' },
                     ],
                 },
             ],
-            pipelines: [{ file: 'import.pipeline.json' }],
+            pipelines: [{ file: 'import.pipeline.json', dataSet: PROPOSAL_DATASET_KEY }],
             simulations: [{ file: 'demo.simulation.json' }],
-            ...(dashboard ? { dashboards: [{ file: 'start.dashboard.json' }] } : {}),
+            ...(dashboard ? { dashboards: [{ file: 'start.dashboard.json', dataSet: PROPOSAL_DATASET_KEY }] } : {}),
             ...(map ? map.members : {}),
         },
         dependencies: [],

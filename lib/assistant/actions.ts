@@ -45,7 +45,7 @@ export async function loadInstallOptions(): Promise<InstallOptions> {
 /**
  * Installs a confirmed structure proposal through the same path as a catalogue
  * package: the proposal becomes a catalogue entry, the entry an installation
- * request, and the request goes to `POST /v1/installations` with the user's
+ * request, and the request goes to `POST /v1/use-cases` with the user's
  * token. The platform checks the user's rights and journals it as usual.
  */
 export async function installProposal(raw: unknown): Promise<InstallResult> {
@@ -62,7 +62,7 @@ export async function installProposal(raw: unknown): Promise<InstallResult> {
         return { status: 'error', detail: `Paket nicht installierbar: ${error.message}`, httpStatus: 0 }
     }
 
-    const response = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations`, {
+    const response = await fetch(`${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/use-cases`, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${await getAccessToken()}`,

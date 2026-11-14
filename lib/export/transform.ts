@@ -1,5 +1,11 @@
 import { exportMetadataSchema, type ExportMetadata } from '@/lib/export/metadata'
-import type { BundledSimulation, InstallParameter, PackageManifest, PackageMember } from '@/lib/catalog/types'
+import type {
+    BundledSimulation,
+    DataSetDeclaration,
+    InstallParameter,
+    PackageManifest,
+    PackageMember,
+} from '@/lib/catalog/types'
 import { neutralizeDashboard, type SharedDashboard } from '@/lib/export/dashboards'
 import type { InstanceSnapshot, SnapshotMapping } from '@/lib/export/portal-reader'
 import { catalogUrn, isCatalogAuthored, isCoreUrn, logicalUrn, parseCoreUrn, slugify } from '@/lib/export/urn'
@@ -231,8 +237,46 @@ function positionsOf(styles: Record<string, unknown> | undefined): Map<string, {
     return positions
 }
 
+/** One dataset into one package; see transformSnapshots. */
 export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOptions): ExportedPackage {
-    const warnings = [...snapshot.warnings]
+    return transformSnapshots([snapshot], options)
+}
+
+/** A dataset key from its name: a slug of at most 32 characters, unique in the package. */
+function dataSetKey(name: string, taken: Set<string>): string {
+    const base = slugify(name).slice(0, 32).replace(/-+$/, '') || 'datensatz'
+    let key = base
+    for (let n = 2; taken.has(key); n++) key = `${base.slice(0, 28).replace(/-+$/, '')}-${n}`
+    return key
+}
+
+/**
+ * One or several datasets into one package. Each dataset becomes one declaration in
+ * `members.dataSets`, and its mappings, sinks, pipelines and geo members name it by key. The
+ * structures and sources that several of the datasets use travel once.
+ */
+export function transformSnapshots(snapshots: InstanceSnapshot[], options: ExportOptions): ExportedPackage {
+    const warnings = snapshots.flatMap((snapshot) => snapshot.warnings)
+
+    // ── Datasets: one declaration each, and the key every member of the dataset names ──
+    const dataSetKeys = new Map<string, string>() // portal id of the dataset → key in the package
+    const dataSetDeclarations: DataSetDeclaration[] = []
+    for (const { dataset } of snapshots) {
+        if (dataSetKeys.has(dataset.id)) continue
+        const key = dataSetKey(dataset.name, new Set(dataSetKeys.values()))
+        dataSetKeys.set(dataset.id, key)
+        dataSetDeclarations.push({ key, name: dataset.name, ...(dataset.description ? { description: dataset.description } : {}) })
+    }
+    const owned = <T>(pick: (snapshot: InstanceSnapshot) => T[] | undefined) =>
+        snapshots.flatMap((snapshot) =>
+            (pick(snapshot) ?? []).map((item) => ({ item, dataSet: dataSetKeys.get(snapshot.dataset.id) as string })),
+        )
+    const once = <T>(items: T[], identity: (item: T) => string): T[] => {
+        const seen = new Set<string>()
+        return items.filter((item) => !seen.has(identity(item)) && Boolean(seen.add(identity(item))))
+    }
+    const structures = once(snapshots.flatMap((snapshot) => snapshot.structures), (structure) => structure.modelUrn)
+    const sources = once(snapshots.flatMap((snapshot) => snapshot.sources), (source) => source.id)
     const identities: IdentityChange[] = []
     const stripped: StrippedField[] = []
     const parameters: { file: string; fields: string[] }[] = []
@@ -243,7 +287,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // ── Structures: the identity map every other member resolves against ──
     const urnMap = new Map<string, string>() // logical instance URN → package URN
     const structureMembers: PackageMember[] = []
-    for (const structure of snapshot.structures) {
+    for (const structure of structures) {
         const from = logicalUrn(structure.modelUrn)
         const kept = isCatalogAuthored(from)
         const to = kept ? from : catalogUrn(publisher, 'datastructure', domain, structure.name)
@@ -276,7 +320,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         return to ?? logicalUrn(ref)
     }
     const structureOfVersion = (versionId: string | undefined): string | undefined => {
-        const structure = snapshot.structures.find((s) => s.versionId === versionId)
+        const structure = structures.find((s) => s.versionId === versionId)
         return structure ? urnMap.get(logicalUrn(structure.modelUrn)) : undefined
     }
 
@@ -284,7 +328,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     const sourceMembers: PackageMember[] = []
     const sourceTitleByUrn = new Map<string, string>()
     const sourceTitleById = new Map<string, string>()
-    for (const source of snapshot.sources) {
+    for (const source of sources) {
         sourceTitleById.set(source.id, source.name)
         const file = nameFile(source.name, 'datasource')
         const connectionType = source.connectorType.toLowerCase()
@@ -317,7 +361,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // ── Mappings ──
     const mappingMembers: PackageMember[] = []
     const mappingUrnMap = new Map<string, string>()
-    for (const [index, mapping] of snapshot.mappings.entries()) {
+    for (const [index, { item: mapping, dataSet }] of owned((snapshot) => snapshot.mappings).entries()) {
         const title = mappingTitle(mapping, index)
         const kept = isCatalogAuthored(mapping.urn)
         const to = kept ? mapping.urn : catalogUrn(publisher, 'mapping', domain, title)
@@ -339,14 +383,14 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...(typeof mapping.document.description === 'string' ? { description: mapping.document.description } : {}),
             document: inner,
         })
-        mappingMembers.push({ file })
+        mappingMembers.push({ file, dataSet })
     }
 
     // ── Sinks ──
     const sinkMembers: PackageMember[] = []
     const sinkTitleByUrn = new Map<string, string>()
     const sinkTitleById = new Map<string, string>()
-    for (const sink of snapshot.sinks) {
+    for (const { item: sink, dataSet } of owned((snapshot) => snapshot.sinks)) {
         sinkTitleById.set(sink.id, sink.name)
         const file = nameFile(sink.name, 'datasink')
         const connectionType = sink.dataSinkType.toLowerCase()
@@ -369,7 +413,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         files[`core-ir/${file}`] = json(document)
         const strippedHere = stripped.filter((s) => s.file === file).map((s) => s.field)
         const params = installParameters(connectionType, document, strippedHere)
-        sinkMembers.push(params.length ? { file, parameters: params } : { file })
+        sinkMembers.push(params.length ? { file, dataSet, parameters: params } : { file, dataSet })
         if (params.length) parameters.push({ file, fields: params.map((p) => p.field) })
         if (sink.configurationUrn) sinkTitleByUrn.set(logicalUrn(sink.configurationUrn), sink.name)
         identities.push({ kind: 'datasink', title: sink.name, from: sink.configurationUrn && logicalUrn(sink.configurationUrn), to: id, kept: false })
@@ -377,7 +421,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
 
     // ── Pipelines: the graph references bundle siblings by title, mappings by their package URN ──
     const pipelineMembers: PackageMember[] = []
-    for (const pipeline of snapshot.pipelines) {
+    for (const { item: pipeline, dataSet } of owned((snapshot) => snapshot.pipelines)) {
         const file = nameFile(pipeline.name, 'pipeline')
         const positions = positionsOf(pipeline.styles)
         const nodes = Array.isArray(pipeline.model.nodes) ? pipeline.model.nodes : []
@@ -410,7 +454,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...(pipeline.description ? { description: pipeline.description } : {}),
             model: { ...pipeline.model, nodes: rewritten },
         })
-        pipelineMembers.push({ file })
+        pipelineMembers.push({ file, dataSet })
     }
 
     // ── Demo data: one member per scenario, named after the source it feeds ──
@@ -427,7 +471,8 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         const file = nameFile(dashboard.title, 'dashboard')
         const { document, credentialRemoved } = neutralizeDashboard(dashboard.document)
         files[`core-ir/${file}`] = json(document)
-        dashboardMembers.push({ file })
+        // The share offers the dashboards of the dataset it starts from, so they belong to it.
+        dashboardMembers.push({ file, dataSet: dataSetKeys.get(snapshots[0].dataset.id) as string })
         if (credentialRemoved) stripped.push({ file, field: 'databases: sqlalchemy_uri', reason: 'credential-in-url' })
     }
 
@@ -435,7 +480,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
     // None carries an identity in a package; the install derives theirs. A layer
     // names its sink by title and its styles by name, the way the install binds them.
     const apiMembers: PackageMember[] = []
-    for (const api of snapshot.apis ?? []) {
+    for (const { item: api, dataSet } of owned((snapshot) => snapshot.apis)) {
         const file = nameFile(api.slug, 'api')
         files[`core-ir/${file}`] = json({
             name: api.name,
@@ -444,19 +489,19 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...(api.version ? { version: api.version } : {}),
             ...(api.description ? { description: api.description } : {}),
         })
-        apiMembers.push({ file })
+        apiMembers.push({ file, dataSet })
     }
     const styleNameById = new Map<string, string>()
     const styleMembers: PackageMember[] = []
-    for (const style of snapshot.styles ?? []) {
+    for (const { item: style, dataSet } of owned((snapshot) => snapshot.styles)) {
         styleNameById.set(style.id, style.name)
         const file = nameFile(style.name, 'style')
         files[`core-ir/${file}`] = json({ name: style.name, sldContent: style.sldContent })
-        styleMembers.push({ file })
+        styleMembers.push({ file, dataSet })
     }
     // Layers name their sink by id, as pipelines in the platform form do (sinkTitleById, above).
     const layerMembers: PackageMember[] = []
-    for (const layer of snapshot.layers ?? []) {
+    for (const { item: layer, dataSet } of owned((snapshot) => snapshot.layers)) {
         const file = nameFile(layer.layerName, 'layer')
         const sinkRef = layer.dataSinkId ? sinkTitleById.get(layer.dataSinkId) : undefined
         if (!sinkRef) {
@@ -486,7 +531,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
             ...(layer.nativeBoundingBox ? { nativeBoundingBox: layer.nativeBoundingBox } : {}),
             ...(layer.latLonBoundingBox ? { latLonBoundingBox: layer.latLonBoundingBox } : {}),
         })
-        layerMembers.push({ file })
+        layerMembers.push({ file, dataSet })
     }
 
     const manifest: PackageManifest = {
@@ -500,6 +545,7 @@ export function transformSnapshot(snapshot: InstanceSnapshot, options: ExportOpt
         license: options.license,
         keywords: options.keywords,
         members: {
+            dataSets: dataSetDeclarations,
             dataStructures: structureMembers,
             dataSources: sourceMembers,
             mappings: mappingMembers,
@@ -527,8 +573,12 @@ function readme(
     parameters: { file: string; fields: string[] }[],
     stripped: StrippedField[],
 ): string {
+    // The datasets are declarations, not files: the file list leaves them out, each member names its own.
     const members = (Object.entries(manifest.members) as [string, PackageMember[] | undefined][])
-        .flatMap(([kind, list]) => (list ?? []).map((m) => `  ${m.file.padEnd(44)} <- ${kind}`))
+        .filter(([kind]) => kind !== 'dataSets')
+        .flatMap(([kind, list]) =>
+            (list ?? []).map((m) => `  ${m.file.padEnd(44)} <- ${kind}${m.dataSet ? ` (dataset ${m.dataSet})` : ''}`),
+        )
         .join('\n')
     const identityRows = identities
         .map((i) => `| ${i.title} (${i.kind}) | \`${i.to}\` | ${i.kept ? 'kept from its catalogue package' : 'derived on export'} |`)

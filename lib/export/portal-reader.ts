@@ -174,7 +174,7 @@ async function listPages<T>(accessToken: string, path: string): Promise<T[]> {
 }
 
 export async function listExportInstallations(accessToken: string): Promise<ExportInstallation[]> {
-    return listPages<ExportInstallation>(accessToken, '/v1/installations')
+    return listPages<ExportInstallation>(accessToken, '/v1/use-cases')
 }
 
 /**

@@ -1,0 +1,58 @@
+{
+  "id": "urn:openurbanapps:usecase:luftqualitaet-sta-geteilt",
+  "type": "usecase",
+  "displayName": "Luftqualität (geteilt)",
+  "description": "Testpaket: Luftqualität (SensorThings) mit dem geteilten Testdashboard-1 aus dem Plattform-Export vom 12.11.2026.",
+  "version": "1.0.0",
+  "maintainer": "Open Urban Apps",
+  "license": "EUPL-1.2",
+  "keywords": [
+    "umwelt",
+    "luftqualitaet",
+    "feinstaub",
+    "sensorthings",
+    "frost",
+    "geteilt"
+  ],
+  "members": {
+    "dataSets": [
+      {
+        "key": "luftqualitaet",
+        "name": "Luftqualität (geteilt)",
+        "description": "Testpaket: Luftqualität (SensorThings) mit dem geteilten Testdashboard-1 aus dem Plattform-Export vom 12.11.2026."
+      }
+    ],
+    "dataStructures": [
+      { "file": "luftmessung.datastructure.json" },
+      { "file": "luftstation.datastructure.json" }
+    ],
+    "dataSources": [
+      {
+        "file": "luftmessungs-feed.datasource.json",
+        "parameters": [
+          {
+            "field": "urls",
+            "label": "MQTT-Broker-URLs",
+            "description": "Broker-Adresse(n) der Ziel-Instanz; Standard ist der Plattform-Broker."
+          }
+        ]
+      }
+    ],
+    "mappings": [
+      { "file": "luftmessung-zu-station.mapping.json", "dataSet": "luftqualitaet" }
+    ],
+    "dataSinks": [
+      { "file": "frost-observations.datasink.json", "dataSet": "luftqualitaet" }
+    ],
+    "pipelines": [
+      { "file": "luftqualitaets-import.pipeline.json", "dataSet": "luftqualitaet" }
+    ],
+    "simulations": [
+      { "file": "luftmessung.simulation.json" }
+    ],
+    "dashboards": [
+      { "file": "testdashboard-1.dashboard.json", "dataSet": "luftqualitaet" }
+    ]
+  },
+  "dependencies": []
+}

@@ -77,14 +77,14 @@ async function main(): Promise<void> {
     }
 
     // The journal of the install that created the dataset: package identity -> copy.
-    const page = await call('GET', '/v1/installations?size=200')
+    const page = await call('GET', '/v1/use-cases?size=200')
     const installation = ((page.content as Json[] | undefined) ?? []).find(
         (row) => row.dataSetId === datasetId && !row.uninstalledAt,
     )
     if (!installation) {
         throw new Error(`No active installation created dataset ${datasetId}.`)
     }
-    const journal = await call('GET', `/v1/installations/${String(installation.id)}`)
+    const journal = await call('GET', `/v1/use-cases/${String(installation.id)}`)
     const copies = new Map<string, string>()
     for (const line of (journal.artifacts as Json[] | undefined) ?? []) {
         if (typeof line.origin === 'string' && typeof line.shellId === 'string') {

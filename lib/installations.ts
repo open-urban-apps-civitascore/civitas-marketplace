@@ -1,5 +1,5 @@
 import type { InstallationReceipt } from '@/lib/install-payload'
-import { installedDataSet, type DataSetLine } from '@/lib/installation-dataset'
+import { installedDataSet, installedDataSets, type DataSetLine } from '@/lib/installation-dataset'
 import {
     activeInstallationOf,
     partitionInstallations,
@@ -25,11 +25,19 @@ export function dataSetOf(row: { artifacts?: readonly DataSetLine[] }): { dataSe
     }
 }
 
+/** Every dataset the install produced, with its portal id, in the order of the journal. */
+export function dataSetsOf(row: { artifacts?: readonly DataSetLine[] }): { id: string; name?: string }[] {
+    return installedDataSets(row.artifacts).flatMap((dataSet) => (dataSet.id ? [{ ...dataSet, id: dataSet.id }] : []))
+}
+
 /** What a page needs to know about the active installation of an entry. */
 export interface ActiveInstallation {
     id: string
+    /** The first dataset, for the views that show one per installation; see `dataSets`. */
     dataSetId?: string
     dataSetName?: string
+    /** Every dataset of the use case: a package brings zero, one or several. */
+    dataSets: { id: string; name?: string }[]
     /**
      * Whether the install created a data source. Demo streams publish into
      * one, so without it an installation never has streams to miss.
@@ -39,13 +47,13 @@ export interface ActiveInstallation {
 
 /**
  * Catalogue ids of the entries this instance has ACTIVELY installed, read from
- * the platform's installations (`GET /v1/installations`). Use-case bundles and
+ * the platform's installations (`GET /v1/use-cases`). Use-case bundles and
  * single data structures both record one, under the id of their package.
  * Uninstalled installations stay in the record as history but no longer claim
  * the badge: the entry is installable again.
  *
  * Returns an empty set when the endpoint is unreachable or the signed-in role
- * lacks INSTALLATION_READ: a missing badge is a far better failure mode than a
+ * lacks USECASE_READ: a missing badge is a far better failure mode than a
  * catalogue that refuses to install anything.
  */
 export async function fetchInstalledCatalogEntryIds(): Promise<Set<string>> {
@@ -119,6 +127,7 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
         return {
             id: row.id,
             ...dataSetOf(row),
+            dataSets: dataSetsOf(row),
             hasDataSource: (row.artifacts ?? []).some((artifact) => artifact.artifactType === 'DATA_SOURCE'),
         }
     } catch {
@@ -127,7 +136,7 @@ export async function fetchActiveInstallation(entryId: string): Promise<ActiveIn
 }
 
 /**
- * One installation as the platform recorded it (`GET /v1/installations/{id}`):
+ * One installation as the platform recorded it (`GET /v1/use-cases/{id}`):
  * its dataset and one line per artifact, which is what names a demo stream
  * after the portal's artifacts. Null when it cannot be read: the streams then
  * take their names from the package, which is worse but never a reason to
@@ -139,7 +148,7 @@ export async function fetchInstallation(installationId: string): Promise<Install
 
     try {
         const res = await fetch(
-            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/installations/${encodeURIComponent(installationId)}`,
+            `${process.env.API_BASE_URL}:${process.env.API_PORT}/v1/use-cases/${encodeURIComponent(installationId)}`,
             { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' },
         )
         if (!res.ok) return null

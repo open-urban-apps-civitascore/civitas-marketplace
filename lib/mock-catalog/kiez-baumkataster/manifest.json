@@ -13,6 +13,13 @@
     "sql"
   ],
   "members": {
+    "dataSets": [
+      {
+        "key": "kiez-baumkataster",
+        "name": "Kiez-Baumkataster",
+        "description": "Baumkataster aus einer Fachverfahrens-Datenbank: SQL-Quelle mit Cron-Abruf, Geometrie-Mapping und PostGIS-Senke für den Karten-Layer."
+      }
+    ],
     "dataStructures": [
       { "file": "baumkataster-zeile.datastructure.json" },
       { "file": "kiez-baum.datastructure.json" }
@@ -21,11 +28,12 @@
       { "file": "baumkataster-db.datasource.json" }
     ],
     "mappings": [
-      { "file": "kataster-import.mapping.json" }
+      { "file": "kataster-import.mapping.json", "dataSet": "kiez-baumkataster" }
     ],
     "dataSinks": [
       {
         "file": "kiez-baeume-tabelle.datasink.json",
+        "dataSet": "kiez-baumkataster",
         "parameters": [
           {
             "field": "tableName",
@@ -36,17 +44,17 @@
       }
     ],
     "pipelines": [
-      { "file": "kataster-import.pipeline.json" }
+      { "file": "kataster-import.pipeline.json", "dataSet": "kiez-baumkataster" }
     ],
     "apis": [
-      { "file": "kiez-karte.api.json" }
+      { "file": "kiez-karte.api.json", "dataSet": "kiez-baumkataster" }
     ],
     "styles": [
-      { "file": "baeume-gruen.style.json" },
-      { "file": "baeume-orange.style.json" }
+      { "file": "baeume-gruen.style.json", "dataSet": "kiez-baumkataster" },
+      { "file": "baeume-orange.style.json", "dataSet": "kiez-baumkataster" }
     ],
     "layers": [
-      { "file": "baeume.layer.json" }
+      { "file": "baeume.layer.json", "dataSet": "kiez-baumkataster" }
     ],
     "simulations": []
   },

@@ -247,7 +247,7 @@ function InstallationCard({
 
 /**
  * True marketplace installs, as the platform recorded them
- * (GET /v1/installations): which package, when, by whom, and what each install
+ * (GET /v1/use-cases): which package, when, by whom, and what each install
  * created. Every artifact is a copy under an identity this instance minted;
  * the identity it carried in the package is kept as its origin. Both use-case
  * bundles and single data structures record an installation. Manually created
@@ -279,7 +279,7 @@ export default async function InstalledPage({
                 <p className="rounded-lg border border-error/40 bg-error/5 dark:bg-error/15 px-4 py-3 text-sm text-error">
                     Backend antwortet mit {list.status} {list.statusText}
                     {list.status === 403 &&
-                        '. Fehlt der Rolle die Berechtigung INSTALLATION_READ?'}
+                        '. Fehlt der Rolle die Berechtigung USECASE_READ?'}
                 </p>
             </div>
         )
@@ -330,7 +330,7 @@ export default async function InstalledPage({
                     {view ? (
                         <InstallationSection
                             installation={view.installation}
-                            dataset={view.dataset}
+                            datasets={view.datasets}
                             dashboards={view.dashboards}
                             streams={view.streams}
                             simulatorUiBase={simulatorUiBase}

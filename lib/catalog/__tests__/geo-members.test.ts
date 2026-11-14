@@ -23,11 +23,12 @@ const SLD =
 type Files = Record<string, Record<string, unknown>>
 
 const MEMBERS = {
+    dataSets: [{ key: 'kiez', name: 'Kiez-Bäume', description: 'Straßenbäume des Kiezes' }],
     dataStructures: [{ file: 'kiez-baum.datastructure.json' }],
-    dataSinks: [{ file: 'kiez-baeume-tabelle.datasink.json' }],
-    apis: [{ file: 'karte.api.json' }],
-    styles: [{ file: 'baeume-gruen.style.json' }],
-    layers: [{ file: 'baeume.layer.json' }],
+    dataSinks: [{ file: 'kiez-baeume-tabelle.datasink.json', dataSet: 'kiez' }],
+    apis: [{ file: 'karte.api.json', dataSet: 'kiez' }],
+    styles: [{ file: 'baeume-gruen.style.json', dataSet: 'kiez' }],
+    layers: [{ file: 'baeume.layer.json', dataSet: 'kiez' }],
 }
 
 function packageFiles(overrides: Files = {}, members: Record<string, unknown> = MEMBERS): Files {
@@ -148,10 +149,10 @@ describe('install request with geo members', () => {
         ])
     })
 
-    it('derives their identities from the package and their names', () => {
-        expect(byKind('api')[0].urn).toMatch(/^urn:core:standard:openurbanapps:api:environment:karte:[0-9a-z]{10}$/)
+    it('derives their identities from the package, their dataset and their names', () => {
+        expect(byKind('api')[0].urn).toMatch(/^urn:core:standard:openurbanapps:api:environment:kiezkarte:[0-9a-z]{10}$/)
         expect(byKind('style')[0].urn).toMatch(
-            /^urn:core:standard:openurbanapps:style:environment:baeumegruen:[0-9a-z]{10}$/,
+            /^urn:core:standard:openurbanapps:style:environment:kiezbaeumegruen:[0-9a-z]{10}$/,
         )
         expect(byKind('api')[0].name).toBe('Karte der Kiez-Bäume')
     })

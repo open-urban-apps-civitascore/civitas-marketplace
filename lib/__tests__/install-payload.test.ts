@@ -464,7 +464,7 @@ describe('describeInstallFailure', () => {
         const failure = describeInstallFailure(403, 'Forbidden', 'permission_denied')
         expect(failure.status).toBe('error')
         // The gateway does not say which one is missing, and the route may require both.
-        expect(failure.detail).toContain('INSTALLATION_CREATE')
+        expect(failure.detail).toContain('USECASE_CREATE')
         expect(failure.detail).toContain('DATASTRUCTURE_CREATE')
     })
 
@@ -476,7 +476,7 @@ describe('describeInstallFailure', () => {
 
     it('says so when the platform does not offer installations at all', () => {
         expect(describeInstallFailure(403, 'Forbidden', 'unknown_endpoint').detail).toContain(
-            'POST /v1/installations',
+            'POST /v1/use-cases',
         )
     })
 

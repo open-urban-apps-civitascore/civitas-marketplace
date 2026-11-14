@@ -42,13 +42,16 @@ export interface UseCaseMap {
     positionMapping: Record<string, unknown>
     files: Record<string, Record<string, unknown>>
     members: {
-        apis: { file: string }[]
-        styles: { file: string }[]
-        layers: { file: string }[]
+        apis: { file: string; dataSet: string }[]
+        styles: { file: string; dataSet: string }[]
+        layers: { file: string; dataSet: string }[]
     }
     layerName: string
     bbox: BoundingBox
 }
+
+/** The key under which a proposed use case declares its one dataset (lib/assistant/usecase.ts). */
+export const PROPOSAL_DATASET_KEY = 'vorschlag'
 
 const API_SLUG = 'karte'
 const LAYER_NAME = 'stationen'
@@ -131,10 +134,11 @@ export function buildUseCaseMap(input: MapInput): UseCaseMap | undefined {
         },
         positionMapping: { op: 'geoPoint', lon: `$.${lon.key}`, lat: `$.${lat.key}` },
         files,
+        // The proposal has one dataset; the use case builder declares it under this key.
         members: {
-            apis: [{ file: 'karte.api.json' }],
-            styles: [{ file: 'stationen.style.json' }],
-            layers: [{ file: 'stationen.layer.json' }],
+            apis: [{ file: 'karte.api.json', dataSet: PROPOSAL_DATASET_KEY }],
+            styles: [{ file: 'stationen.style.json', dataSet: PROPOSAL_DATASET_KEY }],
+            layers: [{ file: 'stationen.layer.json', dataSet: PROPOSAL_DATASET_KEY }],
         },
         layerName: LAYER_NAME,
         bbox,

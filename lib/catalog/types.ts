@@ -62,9 +62,28 @@ export interface PackageMember {
     /** File name inside the package's `core-ir/` directory. */
     file: string
     parameters?: InstallParameter[]
+    /**
+     * The `key` of the dataset the member belongs to. Required for the members that live in a
+     * dataset (mappings, data sinks, pipelines, APIs, styles, layers, dashboards), also when the
+     * package has only one; not allowed for structures, sources and simulations, which a package
+     * shares between its datasets.
+     */
+    dataSet?: string
+}
+
+/**
+ * One dataset of a package. A package declares zero, one or several. The `key` is the
+ * package-local handle its members name; the install derives the dataset's identity from the
+ * package id and this key, so the key must not change once published.
+ */
+export interface DataSetDeclaration {
+    key: string
+    name: string
+    description?: string
 }
 
 export interface PackageMembers {
+    dataSets?: DataSetDeclaration[]
     dataStructures: PackageMember[]
     dataSources?: PackageMember[]
     mappings?: PackageMember[]
@@ -147,6 +166,8 @@ export interface BundledMapping {
     name: string
     description?: string
     document: Record<string, unknown>
+    /** The key of the dataset the mapping belongs to (from the manifest). */
+    dataSet: string
 }
 
 /**
@@ -162,6 +183,8 @@ export interface BundledDataSink {
     document: Record<string, unknown>
     /** Fields of `document` that are instance-local install parameters. */
     parameters?: InstallParameter[]
+    /** The key of the dataset the sink belongs to (from the manifest). */
+    dataSet: string
 }
 
 /**
@@ -175,6 +198,8 @@ export interface BundledPipeline {
     name: string
     description?: string
     model: Record<string, unknown>
+    /** The key of the dataset the pipeline belongs to (from the manifest). */
+    dataSet: string
 }
 
 /**
@@ -306,6 +331,8 @@ export interface DataStructureEntry {
 export interface BundledDashboard {
     file: string
     content: Record<string, unknown>
+    /** The key of the dataset the dashboard belongs to (from the manifest). */
+    dataSet: string
 }
 
 /**
@@ -317,11 +344,15 @@ export interface BundledDashboard {
  */
 export interface BundledApi {
     document: Record<string, unknown>
+    /** The key of the dataset the API belongs to (from the manifest). */
+    dataSet: string
 }
 
 /** An SLD style: `name` (unique within the dataset) and `sldContent`, the SLD XML as text. */
 export interface BundledStyle {
     document: Record<string, unknown>
+    /** The key of the dataset the style belongs to (from the manifest). */
+    dataSet: string
 }
 
 /**
@@ -334,11 +365,15 @@ export interface BundledStyle {
  */
 export interface BundledLayer {
     document: Record<string, unknown>
+    /** The key of the dataset the layer belongs to (from the manifest). */
+    dataSet: string
 }
 
 export interface UseCaseEntry {
     manifest: CatalogManifest & { type: 'usecase' }
     bundle: {
+        /** Zero, one or several datasets; their members name them by key. */
+        dataSets: DataSetDeclaration[]
         dataStructures: BundledDataStructure[]
         dataSources: BundledDataSource[]
         mappings: BundledMapping[]

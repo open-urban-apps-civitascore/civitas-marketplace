@@ -47,7 +47,7 @@ describe('dashboardCreation', () => {
     })
 
     it('refuses a member that is no dashboard export, before anything is sent', () => {
-        expect(() => dashboardCreation({ file: 'kaputt.dashboard.json', content: { tool: 'superset' } }, true)).toThrow(
+        expect(() => dashboardCreation({ file: 'kaputt.dashboard.json', content: { tool: 'superset' }, dataSet: 'test' }, true)).toThrow(
             DashboardDocumentError,
         )
     })

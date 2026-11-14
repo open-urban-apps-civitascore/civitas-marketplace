@@ -3,6 +3,7 @@ import type {
     BundledPipeline,
     BundledSimulation,
     CatalogEntry,
+    DataSetDeclaration,
     DataStructureEntry,
     GeneratorSpec,
     PackageManifest,
@@ -79,6 +80,72 @@ function parseMembers(value: unknown, where: string): PackageMember[] {
     })
 }
 
+/** A dataset key: a slug, as the platform's named API slugs are. */
+const DATASET_KEY = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+const DATASET_KEY_MAX = 32
+
+/** The member lists whose members live in a dataset and name it; the others name none. */
+const DATASET_OWNED_LISTS = ['mappings', 'dataSinks', 'pipelines', 'apis', 'styles', 'layers', 'dashboards'] as const
+const SHARED_LISTS = ['dataStructures', 'dataSources', 'simulations'] as const
+
+/** The declared datasets of a package: each with a slug `key`, unique in the package, and a name. */
+function parseDataSets(value: unknown, where: string): DataSetDeclaration[] {
+    if (value === undefined) return []
+    if (!Array.isArray(value)) {
+        throw new CatalogIntegrityError(`${where}: members.dataSets is not an array`)
+    }
+    const keys = new Set<string>()
+    return value.map((dataSet, index) => {
+        const at = `${where}: members.dataSets[${index}]`
+        if (!isRecord(dataSet)) throw new CatalogIntegrityError(`${at} is not an object`)
+        const key = requireString(dataSet, 'key', at)
+        if (key.length > DATASET_KEY_MAX || !DATASET_KEY.test(key)) {
+            throw new CatalogIntegrityError(
+                `${at}: key '${key}' must be lowercase letters and digits with inner hyphens, at most ${DATASET_KEY_MAX} characters`,
+            )
+        }
+        if (keys.has(key)) throw new CatalogIntegrityError(`${at}: key '${key}' is used twice`)
+        keys.add(key)
+        requireString(dataSet, 'name', at)
+        if (dataSet.description !== undefined && typeof dataSet.description !== 'string') {
+            throw new CatalogIntegrityError(`${at}: description must be text`)
+        }
+        return dataSet as unknown as DataSetDeclaration
+    })
+}
+
+/**
+ * Every member that lives in a dataset names one of the declared datasets, also when the package
+ * has only one; the shared members name none. There is no implicit default dataset.
+ */
+function checkDataSetReferences(members: Record<string, unknown>, keys: Set<string>, where: string): void {
+    for (const list of DATASET_OWNED_LISTS) {
+        const entries = members[list]
+        if (!Array.isArray(entries)) continue
+        entries.forEach((member, index) => {
+            const at = `${where}: members.${list}[${index}]`
+            const dataSet = isRecord(member) ? member.dataSet : undefined
+            if (typeof dataSet !== 'string' || !dataSet) {
+                throw new CatalogIntegrityError(`${at} must name its dataset in 'dataSet'`)
+            }
+            if (!keys.has(dataSet)) {
+                throw new CatalogIntegrityError(`${at}: dataSet '${dataSet}' is not declared in members.dataSets`)
+            }
+        })
+    }
+    for (const list of SHARED_LISTS) {
+        const entries = members[list]
+        if (!Array.isArray(entries)) continue
+        entries.forEach((member, index) => {
+            if (isRecord(member) && member.dataSet !== undefined) {
+                throw new CatalogIntegrityError(
+                    `${where}: members.${list}[${index}] belongs to no dataset and must not name one`,
+                )
+            }
+        })
+    }
+}
+
 /**
  * Validates an untyped JSON value as a package document. Deliberately
  * structural (presence + primitive types), not schema-based — the follow-up
@@ -111,6 +178,8 @@ export function parsePackageManifest(value: unknown, where: string): PackageMani
     parseMembers(members.apis, `${where}: members.apis`)
     parseMembers(members.styles, `${where}: members.styles`)
     parseMembers(members.layers, `${where}: members.layers`)
+    const dataSets = parseDataSets(members.dataSets, where)
+    checkDataSetReferences(members, new Set(dataSets.map((dataSet) => dataSet.key)), where)
     return value as unknown as PackageManifest
 }
 
@@ -305,6 +374,27 @@ function optionalStrings(document: Record<string, unknown>, field: string, where
  * and styles by name, like pipeline nodes reference their siblings.
  */
 function validateGeoMembers(bundle: UseCaseEntry['bundle'], id: string): void {
+    // A dataset serves its own APIs, styles and layers from its own sinks, so each dataset is
+    // checked on its own, and a layer finds sinks and styles only in its own dataset.
+    for (const { key } of bundle.dataSets) {
+        const own = <T extends { dataSet: string }>(members: T[] | undefined) =>
+            (members ?? []).filter((member) => member.dataSet === key)
+        validateGeoMembersOfDataSet(
+            {
+                dataSinks: own(bundle.dataSinks),
+                apis: own(bundle.apis),
+                styles: own(bundle.styles),
+                layers: own(bundle.layers),
+            },
+            `${id} (dataset '${key}')`,
+        )
+    }
+}
+
+function validateGeoMembersOfDataSet(
+    bundle: Pick<UseCaseEntry['bundle'], 'dataSinks' | 'apis' | 'styles' | 'layers'>,
+    id: string,
+): void {
     const apis = bundle.apis ?? []
     const styles = bundle.styles ?? []
     const layers = bundle.layers ?? []
@@ -463,7 +553,16 @@ export function assembleCatalogEntry(
         }
     }
 
+    // The same check as parsePackageManifest, because the mock fixtures come here without it.
+    const declared = parseDataSets(manifest.members.dataSets, manifest.id)
+    checkDataSetReferences(
+        manifest.members as unknown as Record<string, unknown>,
+        new Set(declared.map((dataSet) => dataSet.key)),
+        manifest.id,
+    )
+    const dataSetOf = (member: PackageMember): string => member.dataSet as string
     const bundle: UseCaseEntry['bundle'] = {
+        dataSets: declared,
         // A structure's display name and description live in the schema itself
         // (title/description) — the package lists only the file, so there is
         // exactly one place where the name can be edited.
@@ -494,11 +593,12 @@ export function assembleCatalogEntry(
                     `${manifest.id}: mapping '${member.file}' has no document`,
                 )
             }
-            return mapping as unknown as BundledMapping
+            return { ...(mapping as unknown as BundledMapping), dataSet: dataSetOf(member) }
         }),
         dataSinks: (manifest.members.dataSinks ?? []).map((member) => ({
             document: read(member),
             parameters: member.parameters,
+            dataSet: dataSetOf(member),
         })),
         pipelines: (manifest.members.pipelines ?? []).map((member) => {
             const pipeline = read(member)
@@ -508,16 +608,17 @@ export function assembleCatalogEntry(
                     `${manifest.id}: pipeline '${member.file}' has no model`,
                 )
             }
-            return pipeline as unknown as BundledPipeline
+            return { ...(pipeline as unknown as BundledPipeline), dataSet: dataSetOf(member) }
         }),
         simulations: [],
         dashboards: (manifest.members.dashboards ?? []).map((member) => ({
             file: member.file,
             content: read(member),
+            dataSet: dataSetOf(member),
         })),
-        apis: (manifest.members.apis ?? []).map((member) => ({ document: read(member) })),
-        styles: (manifest.members.styles ?? []).map((member) => ({ document: read(member) })),
-        layers: (manifest.members.layers ?? []).map((member) => ({ document: read(member) })),
+        apis: (manifest.members.apis ?? []).map((member) => ({ document: read(member), dataSet: dataSetOf(member) })),
+        styles: (manifest.members.styles ?? []).map((member) => ({ document: read(member), dataSet: dataSetOf(member) })),
+        layers: (manifest.members.layers ?? []).map((member) => ({ document: read(member), dataSet: dataSetOf(member) })),
     }
     validateGeoMembers(bundle, manifest.id)
 

@@ -12,6 +12,13 @@
     "zaehlstellen"
   ],
   "members": {
+    "dataSets": [
+      {
+        "key": "verkehrszaehlung",
+        "name": "Verkehrszählung",
+        "description": "Zählstellen-Rohformat, normalisiertes Zielformat, MQTT-Quelle, Mapping, Pipeline und PostGIS-Senke."
+      }
+    ],
     "dataStructures": [
       { "file": "verkehrszaehlung.datastructure.json" },
       { "file": "verkehrsmessung.datastructure.json" }
@@ -29,11 +36,12 @@
       }
     ],
     "mappings": [
-      { "file": "zaehlung-zu-messung.mapping.json" }
+      { "file": "zaehlung-zu-messung.mapping.json", "dataSet": "verkehrszaehlung" }
     ],
     "dataSinks": [
       {
         "file": "verkehrsmessung-tabelle.datasink.json",
+        "dataSet": "verkehrszaehlung",
         "parameters": [
           {
             "field": "tableName",
@@ -44,13 +52,13 @@
       }
     ],
     "pipelines": [
-      { "file": "zaehlung-zu-messung.pipeline.json" }
+      { "file": "zaehlung-zu-messung.pipeline.json", "dataSet": "verkehrszaehlung" }
     ],
     "simulations": [
       { "file": "zaehlstellen.simulation.json" }
     ],
     "dashboards": [
-      { "file": "verkehrsmessung.dashboard.json" }
+      { "file": "verkehrsmessung.dashboard.json", "dataSet": "verkehrszaehlung" }
     ]
   },
   "dependencies": []

@@ -17,7 +17,7 @@ import {
     logicalUrn,
     parseCoreUrn,
 } from '@/lib/export/urn'
-import { installedDataSet } from '@/lib/installation-dataset'
+import { installedDataSets } from '@/lib/installation-dataset'
 
 /**
  * The portal caps every description at this length: `MAX_DESCRIPTION_LENGTH` in its
@@ -236,9 +236,14 @@ export interface PackageMemberRequest {
     name: string
     description?: string
     content: Record<string, unknown>
+    /**
+     * The identity of the dataset member this member belongs to. Set for the members that live
+     * in a dataset (api, mapping, datasink, pipeline, style, layer), never for the shared ones.
+     */
+    dataSetRef?: string
 }
 
-/** The body of `POST /v1/installations`. */
+/** The body of `POST /v1/use-cases`. */
 export interface InstallationRequest {
     /** Where sources and the dataset are created. Instance knowledge, so never package content. */
     datapoolId?: string
@@ -295,8 +300,9 @@ function packageMember(
     name: string,
     description: string | undefined,
     content: Record<string, unknown>,
+    dataSetRef?: string,
 ): PackageMemberRequest {
-    return { kind, urn, name, ...(description ? { description } : {}), content }
+    return { kind, urn, name, ...(description ? { description } : {}), content, ...(dataSetRef ? { dataSetRef } : {}) }
 }
 
 /**
@@ -358,6 +364,15 @@ function derivedIdentity(
     const name = compactName(title)
     const disambiguator = deriveDisambiguator(`${entry.manifest.id}#${kind}#${name}`)
     return `urn:core:standard:${namespace.owner}:${kind}:${namespace.domain}:${name}:${disambiguator}`
+}
+
+/**
+ * The identity a dataset of the package carries in the install request, by its key. The platform
+ * records it as the `origin` of the dataset's line, so the installed dataset of a key is found by
+ * it (for the dashboards, which the marketplace hands over per dataset after the install).
+ */
+export function dataSetIdentity(entry: UseCaseEntry, key: string): string {
+    return derivedIdentity(entry, packageNamespace(entry), 'dataset', key)
 }
 
 /** Title to package URN for one kind. A title two members share maps to null: it names neither. */
@@ -478,15 +493,18 @@ function requireDistinctIdentities(members: PackageMemberRequest[]): void {
  * The package format and the request differ in three places, and this function is the whole seam
  * between them:
  *
- * - A package has no dataset member: the use case IS the dataset. One is derived from the
- *   manifest, because mappings, sinks and pipelines need a dataset to belong to.
+ * - A package declares its datasets in the manifest (zero, one or several), and each member of a
+ *   dataset names it by key. The request carries one dataset member per declaration, and each
+ *   member of a dataset names the dataset member by its identity (`dataSetRef`).
  * - Pipeline nodes may name a source, sink or mapping by its TITLE. The platform resolves
  *   references by URN only, so a title is translated to the package URN of the sibling it names.
- *   A value that already is a URN passes through untouched.
+ *   Sinks and mappings are looked up in the pipeline's own dataset, so two datasets may each have
+ *   a sink of the same title; sources serve every dataset. A value that already is a URN passes
+ *   through untouched.
  * - Dataset, pipeline and the geo members (API, style, layer) carry no identity in a package.
- *   Theirs is derived from the package id and their name, so the same package always sends the
- *   same URNs. A layer names its sink by title and its styles by name, translated like a
- *   pipeline's references.
+ *   Theirs is derived from the package id and their key or name, so the same package always sends
+ *   the same URNs. A layer names its sink by title and its styles by name, translated like a
+ *   pipeline's references, in its own dataset.
  *
  * Everything else travels as authored: the platform strips the documents' own labels itself and
  * binds every reference to the copy it makes.
@@ -547,13 +565,23 @@ export function buildInstallationRequest(
             withoutFields(source.document, RETIRED_SOURCE_FIELDS),
         )
     })
-    const dataset = packageMember(
-        'dataset',
-        derivedIdentity(entry, namespace, 'dataset', entry.manifest.displayName),
-        entry.manifest.displayName,
-        requiredDescription(entry.manifest.description),
-        // Publishing as open data is the operator's decision, never a package default.
-        { openDataAccess: false },
+    // One dataset member per declaration. Its identity derives from the package and the key,
+    // which the package must never change; its name and description are the declaration's.
+    const dataSetIdentities = new Map(bundle.dataSets.map((dataSet) => [dataSet.key, dataSetIdentity(entry, dataSet.key)]))
+    const dataSetRef = (key: string): string => {
+        const identity = dataSetIdentities.get(key)
+        if (!identity) throw new InstallPayloadError(`Das Paket nennt den Datensatz „${key}“, deklariert ihn aber nicht.`)
+        return identity
+    }
+    const dataSets = bundle.dataSets.map((dataSet) =>
+        packageMember(
+            'dataset',
+            dataSetRef(dataSet.key),
+            dataSet.name,
+            requiredDescription(dataSet.description),
+            // Publishing as open data is the operator's decision, never a package default.
+            { openDataAccess: false },
+        ),
     )
     const mappings = bundle.mappings.map((mapping) =>
         packageMember(
@@ -562,6 +590,7 @@ export function buildInstallationRequest(
             mapping.name,
             clampDescription(mapping.description),
             mapping.document,
+            dataSetRef(mapping.dataSet),
         ),
     )
     const sinks = bundle.dataSinks.map((sink) => {
@@ -572,14 +601,19 @@ export function buildInstallationRequest(
             title,
             clampDescription(sink.document.description),
             sink.document,
+            dataSetRef(sink.dataSet),
         )
     })
 
-    const handles = {
-        datasource: handleIndex(sources),
-        mapping: handleIndex(mappings),
-        datasink: handleIndex(sinks),
-    }
+    // Sources serve every dataset; mappings and sinks are looked up in the referring dataset.
+    const inDataSet = (members: PackageMemberRequest[], key: string) =>
+        members.filter((member) => member.dataSetRef === dataSetRef(key))
+    const sourceHandles = handleIndex(sources)
+    const handlesOf = (key: string) => ({
+        datasource: sourceHandles,
+        mapping: handleIndex(inDataSet(mappings, key)),
+        datasink: handleIndex(inDataSet(sinks, key)),
+    })
     const pipelines = bundle.pipelines.map((pipeline) => {
         // An exported pipeline may carry the identity it had; an authored one carries none.
         const authored = pipeline.model.id
@@ -590,38 +624,58 @@ export function buildInstallationRequest(
                 : derivedIdentity(entry, namespace, 'pipeline', pipeline.name),
             pipeline.name,
             clampDescription(pipeline.description),
-            withResolvedReferences(pipeline, handles),
+            withResolvedReferences(pipeline, handlesOf(pipeline.dataSet)),
+            dataSetRef(pipeline.dataSet),
         )
     })
 
-    // The geo members: the dataset's named APIs, and the styles and map layers that publish its
+    // The geo members: each dataset's named APIs, and the styles and map layers that publish its
     // sinks. None carries an identity in a package; theirs derives from the package and their name,
-    // like a pipeline's. A layer's sink and style references are bound by title and name.
+    // like a pipeline's. A layer's sink and style references are bound by title and name, in the
+    // layer's own dataset.
     const apis = (bundle.apis ?? []).map((api) => {
         const slug = String(api.document.slug)
         const name = typeof api.document.name === 'string' && api.document.name ? api.document.name : slug
-        return packageMember('api', derivedIdentity(entry, namespace, 'api', slug), name, undefined, api.document)
+        return packageMember(
+            'api',
+            derivedIdentity(entry, namespace, 'api', `${api.dataSet}-${slug}`),
+            name,
+            undefined,
+            api.document,
+            dataSetRef(api.dataSet),
+        )
     })
     const styles = (bundle.styles ?? []).map((style) => {
         const name = String(style.document.name)
-        return packageMember('style', derivedIdentity(entry, namespace, 'style', name), name, undefined, style.document)
+        return packageMember(
+            'style',
+            derivedIdentity(entry, namespace, 'style', `${style.dataSet}-${name}`),
+            name,
+            undefined,
+            style.document,
+            dataSetRef(style.dataSet),
+        )
     })
-    const styleHandles = handleIndex(styles)
     const layers = (bundle.layers ?? []).map((layer) => {
         const layerName = String(layer.document.layerName)
         return packageMember(
             'layer',
-            derivedIdentity(entry, namespace, 'layer', layerName),
+            derivedIdentity(entry, namespace, 'layer', `${layer.dataSet}-${layerName}`),
             layerName,
             undefined,
-            withResolvedLayerReferences(layer.document, handles.datasink, styleHandles),
+            withResolvedLayerReferences(
+                layer.document,
+                handlesOf(layer.dataSet).datasink,
+                handleIndex(inDataSet(styles, layer.dataSet)),
+            ),
+            dataSetRef(layer.dataSet),
         )
     })
 
     const members = [
         ...structures,
         ...sources,
-        dataset,
+        ...dataSets,
         ...apis,
         ...mappings,
         ...sinks,
@@ -634,9 +688,9 @@ export function buildInstallationRequest(
 }
 
 /**
- * What `POST /v1/installations` answers, and `GET /v1/installations/{id}` returns later: the
- * installation and one line per artifact it made. The dataset is one of those lines (`DATA_SET`),
- * not a field of the installation: read it with installedDataSet.
+ * What `POST /v1/use-cases` answers, and `GET /v1/use-cases/{id}` returns later: the use case
+ * and one line per artifact it made. The datasets are lines too (`DATA_SET`), not fields of the
+ * use case: read them with installedDataSets.
  */
 export interface InstallationReceipt {
     id?: string
@@ -692,7 +746,10 @@ export function summarizeInstallation(receipt: InstallationReceipt, fallbackName
     const geo = GEO_SUMMARY_KINDS.filter(([type]) => count(type) > 0)
         .map(([type, label]) => ` · ${count(type)} ${label}`)
         .join('')
-    return `Dataset „${installedDataSet(lines).name ?? fallbackName}“ als Entwurf angelegt · ${counts}${geo}`
+    const dataSets = installedDataSets(lines)
+    const names = dataSets.map((dataSet) => `„${dataSet.name ?? fallbackName}“`).join(', ')
+    const head = dataSets.length === 1 ? `Dataset ${names}` : `${dataSets.length} Datasets ${names}`
+    return `${head} als Entwurf angelegt · ${counts}${geo}`
 }
 
 /** What an install made, one entry per kind, for the success view. */
@@ -820,10 +877,10 @@ export function describeInstallFailure(
 ): FailureDescription {
     return describeFailure(httpStatus, statusText, body, {
         unserved:
-            'Diese Plattform-Version bietet die Installation von Paketen nicht an (POST /v1/installations).',
+            'Diese Plattform-Version bietet die Installation von Paketen nicht an (POST /v1/use-cases).',
         // The gateway does not say which permission is missing, and the route of
         // some platform versions requires DATASTRUCTURE_CREATE as well.
-        denied: 'Zugriff verweigert: Ihrer Rolle fehlt eine Berechtigung für diese Installation. Prüfen Sie INSTALLATION_CREATE und DATASTRUCTURE_CREATE.',
+        denied: 'Zugriff verweigert: Ihrer Rolle fehlt eine Berechtigung für diese Installation. Prüfen Sie USECASE_CREATE und DATASTRUCTURE_CREATE.',
     })
 }
 

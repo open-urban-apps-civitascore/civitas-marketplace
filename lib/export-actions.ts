@@ -56,7 +56,7 @@ import { parseExportMetadata } from '@/lib/export/metadata'
 import { getCatalogSummaries } from '@/lib/catalog/source'
 import { catalogEntryPath, matchesEntryPath } from '@/lib/use-case-catalog/path'
 import { checkPackage } from '@/lib/export/package-check'
-import { PortalReadError, readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
+import { PortalReadError, isSafeDatasetId, readUseCase, type InstanceSnapshot } from '@/lib/export/portal-reader'
 import {
     catalogFloor,
     catalogStatusIn,
@@ -74,7 +74,7 @@ import {
     type CatalogInspection,
     type CatalogStatus,
 } from '@/lib/export/status'
-import { isUnnamedMapping, mappingTitle, transformSnapshot, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
+import { isUnnamedMapping, mappingTitle, transformSnapshots, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import { collectSharedDashboards, dashboardChoices, type DashboardChoice } from '@/lib/export/dashboards'
 import { datasourceHref } from '@/lib/portal-links'
 import { demoSources, draftFor, draftRegistrations, isGeneratedId, simulationMembers, type DemoSource } from '@/lib/export/simulations'
@@ -124,7 +124,10 @@ export interface ExportActionResult {
 
 interface ExportForm {
     intent: ExportIntent
+    /** The dataset the share starts from: its demo data, dashboards and draft belong to it. */
     datasetId: string
+    /** Further datasets that travel in the same package, each as a dataset of its own. */
+    moreDatasetIds: string[]
     targetKey: string
     demoStreams: string[]
     /** The platform's ids of the dashboards to share (lib/export/dashboards.ts). */
@@ -179,6 +182,9 @@ function parseForm(formData: FormData): ExportForm | string {
     if (!demoStreams) return 'Demo-Daten: ungültige Auswahl.'
     const dashboards = parseIdList(field(formData, 'dashboards'))
     if (!dashboards) return 'Dashboards: ungültige Auswahl.'
+    // The form field is lowercase "datasets" on purpose: the wording check refuses the English "Dataset" in texts.
+    const moreDatasetIds = parseIdList(field(formData, 'datasetsAlongside'))
+    if (!moreDatasetIds || !moreDatasetIds.every(isSafeDatasetId)) return 'Weitere Datensätze: ungültige Auswahl.'
     // Checked from the preview on, so the Steckbrief asks for the change note, not the last step.
     const follows = parseFollows(field(formData, 'follows'))
     if (follows === null) return 'Die Angabe zum nicht angenommenen Vorschlag ist ungültig - bitte die Seite neu laden.'
@@ -188,6 +194,7 @@ function parseForm(formData: FormData): ExportForm | string {
     return {
         intent,
         datasetId,
+        moreDatasetIds: moreDatasetIds.filter((id) => id !== datasetId),
         targetKey,
         demoStreams,
         dashboards,
@@ -231,18 +238,21 @@ async function buildPackage(
     exportedBy: string | undefined,
 ): Promise<ExportedPackage> {
     const snapshot = await readUseCase(accessToken, form.datasetId)
+    // Each further dataset travels as a dataset of its own; shared structures and sources once.
+    const more = await Promise.all(form.moreDatasetIds.map((id) => readUseCase(accessToken, id)))
+    const snapshots = [snapshot, ...more]
     // Drafts need no simulator; only streams made there are read back.
     const demo = form.demoStreams.some((id) => !isGeneratedId(id)) ? await readSimulations() : { details: [] }
     const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
     // The platform exports each chosen dashboard; one that fails is left out with a warning.
     const shared = await collectSharedDashboards(accessToken, snapshot.dataset.id, form.dashboards)
-    const pkg = transformSnapshot(snapshot, {
+    const pkg = transformSnapshots(snapshots, {
         ...form.options,
         simulations,
         dashboards: shared.dashboards,
         provenance: {
-            datasetId: snapshot.dataset.id,
-            datasetName: snapshot.dataset.name,
+            datasetId: snapshots.map((s) => s.dataset.id).join(', '),
+            datasetName: snapshots.map((s) => s.dataset.name).join(', '),
             instance: thisInstance(),
             exportedBy,
             exportedAt: new Date().toISOString().slice(0, 10),
