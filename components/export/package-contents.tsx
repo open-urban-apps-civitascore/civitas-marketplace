@@ -372,7 +372,7 @@ function flatten(record: Record<string, unknown>, prefix = ''): [string, unknown
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
 
 function cellText(value: unknown): string {
-    if (typeof value === 'number') return value.toLocaleString('de-DE', { maximumFractionDigits: 2 })
+    if (typeof value === 'number') return value.toLocaleString('de-DE', { maximumFractionDigits: 2, useGrouping: false })
     if (typeof value === 'string' && ISO_TIME.test(value)) {
         const time = new Date(value)
         if (!Number.isNaN(time.getTime())) return time.toLocaleTimeString('de-DE')

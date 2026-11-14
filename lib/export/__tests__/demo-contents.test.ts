@@ -46,6 +46,11 @@ describe('drafted demo data in „Was kommt ins Paket?“', () => {
         expect(said).toContain('Im Simulator anpassen Legt sie dort ausgeschaltet an. Was du dort änderst, kommt beim Einreichen ins Paket.')
     })
 
+    it('shows years and ids without a thousands separator', () => {
+        const said = text(render({ sources: [{ ...FEED, sample: [{ baujahr: 1987, baumId: 1234, hoehe: 9.5 }] }], simulatorUi: UI }))
+        expect(said).toContain('baujahr baumId hoehe 1987 1234 9,5')
+    })
+
     it('can be unticked like a stream, and then is not offered for adjusting', () => {
         const html = render({ sources: [FEED], simulatorUi: UI }, { excluded: [generatedId('src-feed')] })
         expect(html).not.toMatch(/checked=""/)
