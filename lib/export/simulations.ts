@@ -278,18 +278,32 @@ export function simulationMembers(
     details: SimulationDetail[],
     chosen: ReadonlySet<string>,
 ): { simulations: BundledSimulation[]; warnings: string[] } {
+    return simulationMembersOf([snapshot], details, chosen)
+}
+
+/**
+ * The same for a package of several datasets: the chosen streams of every
+ * dataset's sources, with stream names unique across the package. A chosen id
+ * that feeds none of the sources is named once.
+ */
+export function simulationMembersOf(
+    snapshots: InstanceSnapshot[],
+    details: SimulationDetail[],
+    chosen: ReadonlySet<string>,
+): { simulations: BundledSimulation[]; warnings: string[] } {
     const simulations: BundledSimulation[] = []
     const warnings: string[] = []
     const byId = new Map(details.map((detail) => [detail.id, detail]))
 
-    const sources = demoSources(snapshot, details)
-    const feeding = new Set(sources.flatMap((demo) => demo.streams.map((stream) => stream.id)))
+    const sources = snapshots.flatMap((snapshot) => demoSources(snapshot, details).map((demo) => ({ snapshot, demo })))
+    const feeding = new Set(sources.flatMap(({ demo }) => demo.streams.map((stream) => stream.id)))
     const missing = [...chosen].filter((id) => !feeding.has(id) && !isGeneratedId(id))
     if (missing.length) {
-        warnings.push(`${missing.length === 1 ? 'Ein gewählter Datenstrom gehört' : `${missing.length} gewählte Datenströme gehören`} nicht (mehr) zu diesem Datensatz und ${missing.length === 1 ? 'fehlt' : 'fehlen'} im Paket: ${missing.join(', ')}`)
+        const where = snapshots.length === 1 ? 'zu diesem Datensatz' : 'zu einem Datensatz des Pakets'
+        warnings.push(`${missing.length === 1 ? 'Ein gewählter Datenstrom gehört' : `${missing.length} gewählte Datenströme gehören`} nicht (mehr) ${where} und ${missing.length === 1 ? 'fehlt' : 'fehlen'} im Paket: ${missing.join(', ')}`)
     }
     const taken = new Set<string>()
-    for (const demo of sources) {
+    for (const { snapshot, demo } of sources) {
         const picked = demo.streams.filter((stream) => chosen.has(stream.id)).map((stream) => byId.get(stream.id) as SimulationDetail)
         const source = snapshot.sources.find((candidate) => candidate.id === demo.id) as SnapshotSource
         if (!picked.length) {

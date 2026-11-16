@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { checkPackage } from '@/lib/export/package-check'
 import type { InstanceSnapshot } from '@/lib/export/portal-reader'
-import { demoSources, draftRegistrations, generatedId, simulationMembers, topicMatches } from '@/lib/export/simulations'
+import { demoSources, draftRegistrations, generatedId, simulationMembers, simulationMembersOf, topicMatches } from '@/lib/export/simulations'
 import { transformSnapshot, type ExportOptions } from '@/lib/export/transform'
 import type { SimulationDetail, SimulationInput } from '@/lib/simulator/client'
 
@@ -181,6 +181,29 @@ describe('simulationMembers', () => {
         expect(checkPackage(pkg.files)).toEqual([
             expect.stringContaining("Die Installation würde die Demo-Daten ablehnen (abwählen hilft): urn:openurbanapps:usecase:x: simulation 'bodenfeuchte-feed.simulation.json': topicBase 'woanders' does not match"),
         ])
+    })
+})
+
+describe('simulationMembersOf', () => {
+    const LUFT = 'urn:core:platform:civitas:datastructure:environment:luftmessung:jkl1234567:1.0.0'
+    // A second dataset whose MQTT feed the stream for the other topic serves.
+    const luft: InstanceSnapshot = {
+        dataset: { id: 'ds-luft', name: 'Luftqualität' },
+        structures: [{
+            versionId: 'v-luft', dataStructureId: 's-luft', name: 'Luftmessung', modelUrn: LUFT,
+            model: { $id: LUFT, title: 'Luftmessung', type: 'object', properties: { pm25: { type: 'number' } } },
+        }],
+        sources: [{
+            id: 'src-luft', name: 'Luftmessungs-Feed', connectorType: 'MQTT', structureVersionId: 'v-luft',
+            configuration: { urls: ['tcp://broker:1883'], topics: ['openurbanapps/luft/+'] },
+        }],
+        sinks: [], pipelines: [], mappings: [], warnings: [],
+    }
+
+    it('takes the chosen streams of every dataset, and names a stray choice once', () => {
+        const { simulations, warnings } = simulationMembersOf([snapshot(), luft], details, new Set(['inst-copy--bf-001', 'unrelated', 'gone']))
+        expect(simulations.map((simulation) => simulation.sourceRef)).toEqual(['Bodenfeuchte-Feed', 'Luftmessungs-Feed'])
+        expect(warnings).toEqual(['Ein gewählter Datenstrom gehört nicht (mehr) zu einem Datensatz des Pakets und fehlt im Paket: gone'])
     })
 })
 

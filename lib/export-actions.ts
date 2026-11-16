@@ -77,7 +77,7 @@ import {
 import { isUnnamedMapping, mappingTitle, transformSnapshots, type ExportedPackage, type ExportOptions } from '@/lib/export/transform'
 import { collectSharedDashboards, dashboardChoices, type DashboardChoice } from '@/lib/export/dashboards'
 import { datasourceHref } from '@/lib/portal-links'
-import { demoSources, draftFor, draftRegistrations, isGeneratedId, simulationMembers, type DemoSource } from '@/lib/export/simulations'
+import { demoSources, draftFor, draftRegistrations, isGeneratedId, simulationMembersOf, type DemoSource } from '@/lib/export/simulations'
 import {
     deleteSimulation,
     fetchSample,
@@ -243,7 +243,8 @@ async function buildPackage(
     const snapshots = [snapshot, ...more]
     // Drafts need no simulator; only streams made there are read back.
     const demo = form.demoStreams.some((id) => !isGeneratedId(id)) ? await readSimulations() : { details: [] }
-    const { simulations, warnings } = simulationMembers(snapshot, demo.details, new Set(form.demoStreams))
+    // The chosen streams of every dataset in the package, not only of the first.
+    const { simulations, warnings } = simulationMembersOf(snapshots, demo.details, new Set(form.demoStreams))
     // The platform exports each chosen dashboard; one that fails is left out with a warning.
     const shared = await collectSharedDashboards(accessToken, snapshot.dataset.id, form.dashboards)
     const pkg = transformSnapshots(snapshots, {

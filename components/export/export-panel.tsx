@@ -42,7 +42,7 @@ import { useCaseSlugPattern } from '@/lib/catalog/use-case-id'
 import { THEME_LABELS, type Theme } from '@/lib/catalog/vocabulary'
 import { DiscardDraftDialog } from '@/components/export/delete-share-dialog'
 import { MetadataForm } from '@/components/export/metadata-form'
-import { PackageContents } from '@/components/export/package-contents'
+import { MoreDatasetDemo, PackageContents } from '@/components/export/package-contents'
 import { ShareSteps } from '@/components/export/share-steps'
 import { BusySentence, InProgressLink, ListingLine, StageNoticeView } from '@/components/export/source-picker'
 import { useShareListingReload, useShareView } from '@/components/export/share-listing-provider'
@@ -329,6 +329,20 @@ function ExportEditor({ source, sources, targets, readiness, mayShare, catalogUr
             return next
         })
     }
+    // The contents of a further dataset, read once it is ticked: its demo data are chosen like the first one's.
+    const [moreInventories, setMoreInventories] = useState<Readonly<Record<string, Awaited<ReturnType<typeof inspectExportSource>>>>>({})
+    const unreadMore = [...moreDatasetIds].filter((id) => !(id in moreInventories)).join(',')
+    useEffect(() => {
+        if (!unreadMore) return
+        let cancelled = false
+        for (const id of unreadMore.split(',')) {
+            inspectExportSource(id)
+                .then((value) => { if (!cancelled) setMoreInventories((read) => ({ ...read, [id]: value })) })
+                .catch(() => { if (!cancelled) setMoreInventories((read) => ({ ...read, [id]: { artifacts: [], warnings: [], error: 'Die Anfrage an den Server ist fehlgeschlagen.' } })) })
+        }
+        return () => { cancelled = true }
+    }, [unreadMore])
+    const reloadMore = (id: string) => setMoreInventories((read) => Object.fromEntries(Object.entries(read).filter(([key]) => key !== id)))
     const [pending, startTransition] = useTransition()
     const [result, setResult] = useState<ExportActionResult | null>(null)
     const [preview, setPreview] = useState<ExportActionResult['preview']>()
@@ -548,7 +562,9 @@ function ExportEditor({ source, sources, targets, readiness, mayShare, catalogUr
         return () => window.removeEventListener('beforeunload', warn)
     }, [pending])
     const reloadInventory = () => { setInventory(null); setInventoryAttempt((n) => n + 1) }
-    const demoChosen = (inventory?.demo?.sources ?? []).filter((demoSource) => !demoSource.problem)
+    // The first dataset's demo data and those of every ticked further dataset.
+    const demoInventories = [inventory, ...[...moreDatasetIds].map((id) => moreInventories[id])]
+    const demoChosen = demoInventories.flatMap((read) => read?.demo?.sources ?? []).filter((demoSource) => !demoSource.problem)
         .flatMap((demoSource) => [...demoSource.streams.map((stream) => stream.id), ...(demoSource.generated ? [demoSource.generated.id] : [])])
         .filter((id) => !demoExcluded.has(id))
     const toggleDemo = (id: string) => {
@@ -628,11 +644,20 @@ function ExportEditor({ source, sources, targets, readiness, mayShare, catalogUr
                     {!!inventory.warnings.length && <Notice tone="warn" title="Hinweise zum Inhalt"><NoticeList items={inventory.warnings} /></Notice>}
                     {otherSources.length > 0 && <fieldset className="flex flex-col gap-2 border-t pt-4">
                         <legend className="text-sm font-medium">Weitere Datensätze ins Paket</legend>
-                        <p className="text-xs text-muted-foreground">Jeder kommt als eigener Datensatz ins Paket, gemeinsame Datenstrukturen und Datenquellen nur einmal. Demo-Daten und Dashboards kommen aus „{source.name}“.</p>
-                        {otherSources.map((other) => <label key={other.id} className="flex items-center gap-2 text-sm">
-                            <input type="checkbox" checked={moreDatasetIds.has(other.id)} disabled={pending} onChange={() => toggleMoreDataset(other.id)} />
-                            {other.name}
-                        </label>)}
+                        <p className="text-xs text-muted-foreground">Jeder kommt als eigener Datensatz ins Paket, gemeinsame Datenstrukturen und Datenquellen nur einmal. Seine Demo-Daten wählst du darunter aus. Dashboards kommen nur aus „{source.name}“.</p>
+                        {otherSources.map((other) => {
+                            const ticked = moreDatasetIds.has(other.id)
+                            const read = ticked ? moreInventories[other.id] : undefined
+                            return <div key={other.id} className="flex flex-col gap-2">
+                                <label className="flex items-center gap-2 text-sm">
+                                    <input type="checkbox" checked={ticked} disabled={pending} onChange={() => toggleMoreDataset(other.id)} />
+                                    {other.name}
+                                </label>
+                                {ticked && (!read ? <Pending>Demo-Daten von „{other.name}“ werden gelesen …</Pending>
+                                    : read.error ? <Notice tone="error" title={`„${other.name}“ ließ sich nicht lesen`} action={<Button onClick={() => reloadMore(other.id)}>Erneut laden</Button>}>{read.error}</Notice>
+                                    : read.demo && <MoreDatasetDemo source={other} demo={read.demo} excluded={demoExcluded} onToggle={toggleDemo} onReload={() => reloadMore(other.id)} />)}
+                            </div>
+                        })}
                     </fieldset>}
                     <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-muted-foreground">Nicht im Paket: gespeicherte Daten, der Datenpool und Zugangsdaten.</p>

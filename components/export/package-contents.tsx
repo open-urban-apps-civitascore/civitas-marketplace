@@ -199,6 +199,28 @@ function useAdjustInSimulator(datasetId: string, onReload: () => void): DemoAdju
     return { onAdjust, pending, notice }
 }
 
+/** The demo data of a further dataset in the package, chosen the same way as the first dataset's. */
+export function MoreDatasetDemo({
+    source,
+    demo,
+    excluded,
+    onToggle,
+    onReload,
+}: {
+    source: ExportSource
+    demo: DemoInventory
+    excluded: ReadonlySet<string>
+    onToggle: (streamId: string) => void
+    onReload: () => void
+}) {
+    const adjust = useAdjustInSimulator(source.id, onReload)
+    return (
+        <Flow>
+            <DemoGroup demo={demo} excluded={excluded} onToggle={onToggle} onReload={onReload} adjust={adjust} />
+        </Flow>
+    )
+}
+
 /** Optional demo data: the simulator's streams that feed the dataset's sources, or drafts, ticked to take them along. */
 export function DemoGroup({
     demo,
