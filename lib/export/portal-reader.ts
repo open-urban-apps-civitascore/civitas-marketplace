@@ -161,6 +161,20 @@ interface Page<T> {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
 
+/**
+ * The content of a mapping as a package carries it, from the platform's mapping output: title,
+ * description, both structures and the rules. The output's own identities (`mappingId`,
+ * `versionedUrn`, `version`) and the editor's `positions` belong to this instance and stay out
+ * of a shared package.
+ */
+function mappingDocument(output: Record<string, unknown>): Record<string, unknown> {
+    const document: Record<string, unknown> = {}
+    for (const key of ['title', 'description', 'source', 'target', 'fields'] as const) {
+        if (output[key] !== undefined && output[key] !== null) document[key] = output[key]
+    }
+    return document
+}
+
 async function listPages<T>(accessToken: string, path: string): Promise<T[]> {
     const rows: T[] = []
     for (let page = 0; ; page++) {
@@ -571,16 +585,28 @@ export async function readUseCase(accessToken: string, datasetId: string): Promi
             if (isRecord(node) && isCoreUrn(node.mappingRef)) mappingUrns.add(node.mappingRef)
         }
     }
+    // The platform lists a dataset's mappings with their logical URN and serves the content of
+    // one by its id; it has no lookup by URN.
     const mappings: SnapshotMapping[] = []
+    const mappingIds = new Map<string, string>()
+    if (mappingUrns.size > 0) {
+        const listed = (await getJson<unknown[]>(accessToken, `/v1/datasets/${datasetId}/mappings`)) ?? []
+        for (const summary of Array.isArray(listed) ? listed : []) {
+            if (isRecord(summary) && typeof summary.logicalUrn === 'string' && typeof summary.mappingId === 'string') {
+                mappingIds.set(logicalUrn(summary.logicalUrn), summary.mappingId)
+            }
+        }
+    }
     for (const urn of mappingUrns) {
-        const document = await getJson<Record<string, unknown>>(
-            accessToken,
-            `/v1/datasets/${datasetId}/mappings?urn=${encodeURIComponent(urn)}`,
-        )
-        if (!document) {
+        const id = mappingIds.get(logicalUrn(urn))
+        const output = id
+            ? await getJson<Record<string, unknown>>(accessToken, `/v1/datasets/${datasetId}/mappings/${encodeURIComponent(id)}`)
+            : undefined
+        if (!output) {
             warnings.push(`Mapping ${urn} ist referenziert, aber nicht lesbar - ausgelassen`)
             continue
         }
+        const document = mappingDocument(output)
         mappings.push({ urn: logicalUrn(urn), document })
         // A mapping may name a structure no source or sink of this dataset references.
         for (const side of ['source', 'target'] as const) {

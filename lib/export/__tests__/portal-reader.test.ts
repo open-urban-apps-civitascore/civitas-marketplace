@@ -173,13 +173,24 @@ function instanceRoutes(structures: FakeStructure[] = STRUCTURES): Record<string
             dataSinkIds: [pipeline.sink],
         }
     }
+    // As the platform serves them: a list with the logical URN, the content by id, with the
+    // instance's own identities and the editor's positions.
+    routes[`/v1/datasets/${DATASET}/mappings`] = MAPPINGS.map((mapping) => ({
+        mappingId: `m-${mapping.key}`,
+        logicalUrn: urnOf('mapping', mapping.key),
+        title: mapping.title,
+    }))
     for (const mapping of MAPPINGS) {
-        const urn = urnOf('mapping', mapping.key, '1.0.0')
-        routes[`/v1/datasets/${DATASET}/mappings?urn=${encodeURIComponent(urn)}`] = {
+        routes[`/v1/datasets/${DATASET}/mappings/m-${mapping.key}`] = {
+            mappingId: `m-${mapping.key}`,
+            logicalUrn: urnOf('mapping', mapping.key),
+            versionedUrn: urnOf('mapping', mapping.key, '1.0.0'),
+            version: '1.0.0',
             title: mapping.title,
             source: mapping.source,
             target: mapping.target,
-            fields: [],
+            fields: {},
+            positions: {},
         }
     }
     for (const { id, name, key, versions } of structures) {
@@ -254,6 +265,18 @@ describe('readUseCase', () => {
             'sink-frost-messwerte': 'v-beobachtung',
         })
         expect(snapshot.mappings).toHaveLength(4)
+    })
+
+    it("keeps a mapping's content and leaves the instance's identities and positions out", async () => {
+        fakePortal(instanceRoutes())
+        const snapshot = await readUseCase('token', DATASET)
+        const mapping = snapshot.mappings.find((m) => m.urn === urnOf('mapping', 'katasterzujungbaum'))
+        expect(mapping?.document).toEqual({
+            title: 'Kataster → Jungbaum',
+            source: structure('jungbaumzeile'),
+            target: structure('jungbaum'),
+            fields: {},
+        })
     })
 
     it('never asks for the version list the platform refuses, and reads each version once', async () => {
