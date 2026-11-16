@@ -13,6 +13,7 @@ describe('artifactCounts', () => {
             ],
         })
         expect(counts).toEqual([
+            { count: 0, label: 'Datensätze' },
             { count: 2, label: 'Strukturen' },
             { count: 1, label: 'Quelle' },
             { count: 0, label: 'Mappings' },

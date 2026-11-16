@@ -304,7 +304,8 @@ const RELEASE_WAIT: WaitOptions = {
 const reasonOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 type ReleaseRun =
-    | { started: true; dataSetId: string; released: ReleaseCounts }
+    // `sharedWith`: the dataset whose release took the shared structures and sources along.
+    | { started: true; dataSetId: string; name: string; sharedWith?: string; released: ReleaseCounts }
     | { started: false; segment: string }
 
 /**
@@ -317,10 +318,14 @@ type ReleaseRun =
  */
 async function startReleases(receipt: InstallationReceipt, dataSetIds: (string | undefined)[]): Promise<ReleaseRun[]> {
     if (dataSetIds.length === 0) return [await startRelease(receipt, undefined, true)]
+    // Each message names its dataset, so two releases can be told apart.
+    const nameOf = (id: string | undefined) =>
+        (receipt.artifacts ?? []).find((line) => line.artifactType === 'DATA_SET' && line.shellId === id)?.name ?? 'Datensatz'
     const runs: ReleaseRun[] = []
     // The structure versions and sources serve every dataset, so the first release takes them.
     for (const [index, dataSetId] of dataSetIds.entries()) {
-        runs.push(await startRelease(receipt, dataSetId, index === 0))
+        const sharedWith = index === 0 ? undefined : nameOf(dataSetIds[0])
+        runs.push(await startRelease(receipt, dataSetId, index === 0, nameOf(dataSetId), sharedWith))
     }
     return runs
 }
@@ -329,6 +334,8 @@ async function startRelease(
     receipt: InstallationReceipt,
     dataSetId: string | undefined,
     withSharedArtifacts: boolean,
+    name = 'Datensatz',
+    sharedWith?: string,
 ): Promise<ReleaseRun> {
     if (!dataSetId) {
         return { started: false, segment: ' · Freigabe NICHT gestartet: Antwort trägt keine Datensatz-ID' }
@@ -348,11 +355,11 @@ async function startRelease(
         })
         if (start.state === 'refused') {
             const { status, statusText, text } = start.answer
-            return { started: false, segment: describeReleaseFailure(start.step, status, statusText, text) }
+            return { started: false, segment: describeReleaseFailure(start.step, status, statusText, text, name) }
         }
-        return { started: true, dataSetId, released: start.released }
+        return { started: true, dataSetId, name, ...(sharedWith ? { sharedWith } : {}), released: start.released }
     } catch (error) {
-        return { started: false, segment: ` · Freigabe NICHT gestartet: Portal-Backend nicht erreichbar (${reasonOf(error)})` }
+        return { started: false, segment: ` · Freigabe von „${name}“ NICHT gestartet: Portal-Backend nicht erreichbar (${reasonOf(error)})` }
     }
 }
 
@@ -362,27 +369,31 @@ async function startRelease(
  */
 async function finishRelease(run: ReleaseRun): Promise<{ completed: boolean; segment: string }> {
     if (!run.started) return { completed: false, segment: run.segment }
+    const of = `von „${run.name}“`
     const accessToken = await getAccessToken()
     let outcome: SagaOutcome
     try {
         outcome = await awaitRelease(platformApi(accessToken), run.dataSetId, RELEASE_WAIT)
     } catch (error) {
-        return { completed: false, segment: ` · Freigabe gestartet, ihr Ende ließ sich NICHT abfragen (${reasonOf(error)})` }
+        return { completed: false, segment: ` · Freigabe ${of} gestartet, ihr Ende ließ sich NICHT abfragen (${reasonOf(error)})` }
     }
     const { versions, sources } = run.released
-    const released = `${versions} Strukturversion(en), ${sources} Quelle(n) und den Datensatz freigegeben`
+    // A later dataset finds the shared structures and sources already released with the first one.
+    const released = run.sharedWith
+        ? `Datensatz freigegeben (Strukturen und Quellen schon mit „${run.sharedWith}“)`
+        : `${versions} Strukturversion(en), ${sources} Quelle(n) und den Datensatz freigegeben`
     switch (outcome) {
         case 'completed':
-            return { completed: true, segment: ` · Freigabe abgeschlossen: ${released}, die Plattform hat Speicher, Pipelines und APIs eingerichtet` }
+            return { completed: true, segment: ` · Freigabe ${of} abgeschlossen: ${released}, die Plattform hat Speicher, Pipelines und APIs eingerichtet` }
         case 'failed':
             return {
                 completed: false,
-                segment: ` · Freigabe NICHT abgeschlossen: ${released}, aber die Plattform hat das Einrichten abgebrochen und den Datensatz zurückgesetzt (bereit zur Freigabe). Die Ursache steht im Log des Portal-Backends („Saga CREATE failed“)`,
+                segment: ` · Freigabe ${of} NICHT abgeschlossen: ${released}, aber die Plattform hat das Einrichten abgebrochen und den Datensatz zurückgesetzt (bereit zur Freigabe). Die Ursache steht im Log des Portal-Backends („Saga CREATE failed“)`,
             }
         case 'pending':
             return {
                 completed: false,
-                segment: ` · Freigabe gestartet: ${released}. Nach ${RELEASE_WAIT.timeoutMs / 1000} s richtet die Plattform Speicher und Pipelines noch ein`,
+                segment: ` · Freigabe ${of} gestartet: ${released}. Nach ${RELEASE_WAIT.timeoutMs / 1000} s richtet die Plattform Speicher und Pipelines noch ein`,
             }
     }
 }

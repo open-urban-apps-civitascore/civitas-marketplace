@@ -17,6 +17,7 @@ describe('summarisePackage', () => {
 
     it('lists the parts in the order the data passes them, named as the package names them', () => {
         expect(contents.parts.map((part) => [part.label, part.names.length])).toEqual([
+            ['Datensatz', 1],
             ['Datenquellen', 2],
             ['Mappings', 2],
             ['Datenstrukturen', 4],

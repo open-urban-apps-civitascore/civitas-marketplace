@@ -759,6 +759,8 @@ export interface ArtifactCount {
 }
 
 const COUNTED_KINDS: [artifactType: string, singular: string, plural: string, always: boolean][] = [
+    // First, and always: a package brings 0, 1 or several datasets, and how many is news.
+    ['DATA_SET', 'Datensatz', 'Datensätze', true],
     ['DATA_STRUCTURE', 'Struktur', 'Strukturen', true],
     ['DATA_SOURCE', 'Quelle', 'Quellen', true],
     ['MAPPING', 'Mapping', 'Mappings', true],
@@ -910,13 +912,15 @@ const ARTIFACT_RELEASE_STEPS = {
  * The summary segment for a release after install that did not go through. Which step refused
  * decides what is left: a refused version or source leaves the dataset a draft with part of what
  * it needs released, a refused stage leaves the draft, a refused release a dataset that is already
- * staged (READY). The portal continues from any of them.
+ * staged (READY). The portal continues from any of them. With several datasets the segment names
+ * the one whose release it is about.
  */
 export function describeReleaseFailure(
     step: 'version' | 'source' | 'stage' | 'release',
     httpStatus: number,
     statusText: string,
     body: string,
+    dataSetName?: string,
 ): string {
     const failure = readFailure(body)
     const artifact = step === 'stage' || step === 'release' ? undefined : ARTIFACT_RELEASE_STEPS[step]
@@ -924,11 +928,12 @@ export function describeReleaseFailure(
         httpStatus === 403 && failure.reason === 'permission_denied'
             ? `Ihrer Rolle fehlt das Recht, ${artifact?.right ?? 'Datensätze'} freizugeben`
             : (failure.detail ?? failure.reason ?? `${httpStatus} ${statusText}`.trim())
+    const of = dataSetName ? ` von „${dataSetName}“` : ''
     if (artifact) {
-        return ` · Freigabe NICHT gestartet, ${artifact.label} abgelehnt (${httpStatus}): ${said.replace(/\.+$/, '')}. Der Datensatz bleibt ein Entwurf, was noch fehlt, lässt sich im Portal freigeben`
+        return ` · Freigabe${of} NICHT gestartet, ${artifact.label} abgelehnt (${httpStatus}): ${said.replace(/\.+$/, '')}. Der Datensatz bleibt ein Entwurf, was noch fehlt, lässt sich im Portal freigeben`
     }
     const left = step === 'stage' ? 'Der Datensatz bleibt ein Entwurf' : 'Der Datensatz ist bereit zur Freigabe'
-    return ` · Freigabe NICHT gestartet (${httpStatus}): ${said.replace(/\.+$/, '')}. ${left}, freigeben lässt er sich im Portal`
+    return ` · Freigabe${of} NICHT gestartet (${httpStatus}): ${said.replace(/\.+$/, '')}. ${left}, freigeben lässt er sich im Portal`
 }
 
 export function describeUninstallFailure(

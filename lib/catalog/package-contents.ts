@@ -13,7 +13,7 @@ import { ARTIFACT_KINDS } from '@/lib/ui/artifact-kinds'
  * kept, so the next view tries again.
  */
 
-type PartType = keyof typeof ARTIFACT_KINDS | 'dashboard'
+type PartType = keyof typeof ARTIFACT_KINDS | 'dataset' | 'dashboard'
 
 export interface PackagePart {
     type: PartType
@@ -40,6 +40,8 @@ export interface PackageContents {
 }
 
 const DASHBOARD = { one: 'Dashboard', many: 'Dashboards', order: 99 }
+// First: every other part belongs to a dataset or serves them, so the datasets frame the list.
+const DATASET = { one: 'Datensatz', many: 'Datensätze', order: 0 }
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
 
@@ -47,6 +49,7 @@ const text = (value: unknown): string | undefined => (typeof value === 'string' 
 export function summarisePackage(entry: UseCaseEntry): PackageContents {
     const { bundle } = entry
     const named: { type: PartType; names: string[] }[] = [
+        { type: 'dataset', names: bundle.dataSets.map((dataSet) => dataSet.name) },
         { type: 'source', names: bundle.dataSources.map((source) => text(source.document.title) ?? 'Datenquelle') },
         { type: 'mapping', names: bundle.mappings.map((mapping) => mapping.name) },
         { type: 'structure', names: bundle.dataStructures.map((structure) => structure.name) },
@@ -57,12 +60,12 @@ export function summarisePackage(entry: UseCaseEntry): PackageContents {
         { type: 'style', names: (bundle.styles ?? []).map((style) => text(style.document.name) ?? 'Stil') },
         { type: 'dashboard', names: (bundle.dashboards ?? []).map((dashboard) => dashboardTitle(dashboard.content)) },
     ]
-    const order = (type: PartType) => (type === 'dashboard' ? DASHBOARD.order : ARTIFACT_KINDS[type].order)
+    const kindOf = (type: PartType) => (type === 'dashboard' ? DASHBOARD : type === 'dataset' ? DATASET : ARTIFACT_KINDS[type])
     const parts = named
         .filter((part) => part.names.length > 0)
-        .sort((a, b) => order(a.type) - order(b.type))
+        .sort((a, b) => kindOf(a.type).order - kindOf(b.type).order)
         .map((part) => {
-            const kind = part.type === 'dashboard' ? DASHBOARD : ARTIFACT_KINDS[part.type]
+            const kind = kindOf(part.type)
             return { ...part, label: part.names.length === 1 ? kind.one : kind.many, one: kind.one }
         })
 
