@@ -5,16 +5,6 @@
   "description": "Zählstellen und ihre Zählungen. Die Feldnamen entsprechen dem Geräteformat des Datenquellen-Simulators, damit der Passthrough-Pfad (PostGIS-Senke) ohne Mapping funktioniert.",
   "$ref": "#/$defs/Messung",
   "$defs": {
-    "Zaehlstelle": {
-      "type": "object",
-      "properties": {
-        "counterId": { "type": "string", "description": "Eindeutige Kennung der Zählstelle" },
-        "name": { "type": "string", "description": "Anzeigename, z. B. Straße/Abschnitt" },
-        "lat": { "type": "number", "description": "Breitengrad (WGS84)" },
-        "lon": { "type": "number", "description": "Längengrad (WGS84)" }
-      },
-      "required": ["counterId", "lat", "lon"]
-    },
     "Messung": {
       "type": "object",
       "properties": {

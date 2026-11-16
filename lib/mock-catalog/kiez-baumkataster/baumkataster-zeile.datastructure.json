@@ -3,6 +3,7 @@
   "$id": "urn:core:standard:openurbanapps:datastructure:environment:baumkatasterzeile:ny4qd9zowt",
   "title": "Baumkataster-Zeile (Rohformat)",
   "description": "Eine Zeile der Kataster-Tabelle des Fachverfahrens: snake_case-Spalten, Koordinaten als getrennte lon/lat-Werte (WGS84). Die Pipeline liest die Tabelle per Cron vollständig — Dedup übernimmt der UPSERT der Senke.",
+  "$ref": "#/$defs/BaumkatasterZeile",
   "$defs": {
     "BaumkatasterZeile": {
       "type": "object",

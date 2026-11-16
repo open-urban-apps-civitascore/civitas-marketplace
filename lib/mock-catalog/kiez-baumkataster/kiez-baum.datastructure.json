@@ -3,6 +3,7 @@
   "$id": "urn:core:standard:openurbanapps:datastructure:environment:kiezbaum:f1i2sjhgvq",
   "title": "Kiez-Baum (Zielformat)",
   "description": "Normalisierter Baum mit Geometrie: sprechende Feldnamen, baumId als Primärschlüssel (UPSERT-Anker, da die SQL-Quelle je Lauf die ganze Tabelle liest) und position als Point-Geometrie — die Datenbasis des Karten-Layers.",
+  "$ref": "#/$defs/KiezBaum",
   "$defs": {
     "KiezBaum": {
       "type": "object",
