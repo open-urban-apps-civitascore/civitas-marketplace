@@ -1,5 +1,5 @@
 # 1. Base image — corepack provides the pnpm version pinned in package.json
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN corepack enable
 
 # 2. Install dependencies (pnpm — the repo has no package-lock.json)
