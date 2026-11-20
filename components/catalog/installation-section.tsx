@@ -258,7 +258,7 @@ export function InstallationSection({
                     <UninstallButton
                         installationId={installation.id}
                         size="md"
-                        disabled={blocker !== null}
+                        disabled={Boolean(blocker)}
                         describedBy={blocker ? 'uninstall-blocker' : undefined}
                     />
                 </div>
