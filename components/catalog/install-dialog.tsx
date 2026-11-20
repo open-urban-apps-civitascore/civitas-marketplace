@@ -49,7 +49,6 @@ export type InstallAcknowledgement = 'experimental' | 'unreviewed'
 const STEPS = ['Datenquelle', 'Ziel und Freigabe', 'Prüfen'] as const
 
 const STEP_HINTS: Record<number, string | undefined> = {
-    0: 'Woher kommen die Daten? Zum Ausprobieren brauchen Sie noch keine eigenen.',
     2: 'Alles auf einen Blick - erst nach Ihrer Bestätigung wird etwas angelegt.',
 }
 
@@ -384,8 +383,8 @@ export function InstallDialog({
  * One choice of a step as a radio, the clickdummy's pattern: a native radio
  * group gives arrow keys and one tab stop for free. The checked choice gets
  * the primary tint; the featured one (the demo start) is tinted always, as a
- * recommendation. What a choice needs filled in shows right under it once it
- * is chosen.
+ * recommendation. What a choice needs filled in shows inside its card, under
+ * the description, once it is chosen.
  */
 function Choice({
     name,
@@ -407,22 +406,24 @@ function Choice({
     children?: ReactNode
 }) {
     return (
-        <div className="flex flex-col gap-2">
-            <label
-                className={cn(
-                    'flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60',
-                    featured
-                        ? 'border-emerald-300 bg-emerald-50/60 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:has-[:checked]:border-emerald-600'
-                        : 'has-[:checked]:border-primary has-[:checked]:bg-primary/5',
-                )}
-            >
+        <div
+            className={cn(
+                'rounded-md border text-sm',
+                featured
+                    ? 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/30'
+                    : checked && 'border-primary bg-primary/5',
+                featured && checked && 'border-emerald-500 bg-emerald-50 dark:border-emerald-600',
+                disabled && 'opacity-60',
+            )}
+        >
+            <label className={cn('flex items-start gap-2.5 p-3', disabled ? 'cursor-not-allowed' : 'cursor-pointer')}>
                 <input
                     type="radio"
                     name={name}
                     checked={checked}
                     disabled={disabled}
                     onChange={onSelect}
-                    className={cn('mt-0.5', featured ? 'accent-emerald-600' : 'accent-primary')}
+                    className={cn('mt-0.5 size-4 shrink-0', featured ? 'accent-emerald-600' : 'accent-primary')}
                 />
                 <span className="flex flex-col gap-0.5">
                     <span className="flex flex-wrap items-center gap-2">
@@ -437,8 +438,19 @@ function Choice({
                     <span className="text-xs leading-relaxed text-muted-foreground">{description}</span>
                 </span>
             </label>
-            {checked && children && <div className="ml-6">{children}</div>}
+            {/* Under the title: the card's padding, the radio and the gap beside it. */}
+            {checked && children && <div className="pb-3 pl-[2.375rem] pr-3">{children}</div>}
         </div>
+    )
+}
+
+/** A step's question over its choices, with a sentence of context if it needs one. */
+function Question({ title, hint }: { title: string; hint?: string }) {
+    return (
+        <legend className="mb-2">
+            <span className="block text-sm font-semibold text-foreground">{title}</span>
+            {hint && <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{hint}</span>}
+        </legend>
     )
 }
 
@@ -457,7 +469,7 @@ function DataSourceStep({
 }) {
     return (
         <fieldset className="flex flex-col gap-2">
-            <legend className="sr-only">Datenquelle</legend>
+            <Question title="Woher kommen die Daten?" hint="Zum Ausprobieren brauchen Sie noch keine eigenen." />
             <Choice
                 name="dataSource"
                 checked={mode === 'demo'}
@@ -534,11 +546,10 @@ function TargetStep({
     return (
         <div className="flex flex-col gap-6">
             <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-sm text-muted-foreground">
-                    In welchem Datenpool soll der Anwendungsfall angelegt werden? Datenquellen und
-                    Datensatz gehören danach zu diesem Pool. Über ihn werden auch die
-                    Zugriffsrechte vergeben.
-                </legend>
+                <Question
+                    title="In welchem Datenpool soll der Anwendungsfall angelegt werden?"
+                    hint="Datenquellen und Datensatz gehören danach zu diesem Pool. Über ihn werden auch die Zugriffsrechte vergeben."
+                />
                 <Choice
                     name="datapoolMode"
                     checked={datapoolMode === 'new'}
@@ -596,9 +607,7 @@ function TargetStep({
             </fieldset>
 
             <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-sm text-muted-foreground">
-                    Wie soll der Anwendungsfall nach der Installation stehen?
-                </legend>
+                <Question title="Wie soll der Anwendungsfall nach der Installation stehen?" />
                 <Choice
                     name="releaseMode"
                     checked={releaseMode === 'draft'}
