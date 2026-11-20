@@ -120,6 +120,8 @@ describe('resolveBrokerOverride', () => {
 })
 
 const TRAFFIC = 'urn:openurbanapps:usecase:verkehrszaehlung'
+/** Read from the fixture, so copying a newer package in does not break these tests. */
+const TRAFFIC_VERSION = mockPackages.find((candidate) => candidate.manifest.id === TRAFFIC)!.manifest.version
 const POOL = '3f1c2a9e-6d0b-4c57-9a41-0e5b7d2c8f10'
 
 function entryOf(id: string): CatalogEntry {
@@ -172,7 +174,7 @@ describe('buildInstallationRequest', () => {
         expect(request.datapoolId).toBe(POOL)
         expect(request.package).toMatchObject({
             id: TRAFFIC,
-            version: '1.6.0',
+            version: TRAFFIC_VERSION,
             title: 'Verkehrszählung',
         })
     })
@@ -304,10 +306,10 @@ describe('buildInstallationRequest', () => {
         // The platform refuses these three kinds without a description, and one missing sentence
         // is no reason to fail a whole install.
         expect(membersOf(request, 'datastructure')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.6.0',
+            `Aus Paket Verkehrszählung ${TRAFFIC_VERSION}`,
         )
         expect(membersOf(request, 'datasource')[0].description).toBe(
-            'Aus Paket Verkehrszählung 1.6.0',
+            `Aus Paket Verkehrszählung ${TRAFFIC_VERSION}`,
         )
     })
 
