@@ -1,5 +1,6 @@
-# 1. Base image — corepack provides the pnpm version pinned in package.json
-FROM node:20-alpine AS base
+# 1. Base image — corepack provides the pnpm version pinned in package.json.
+#    Exact Node release: a Node security fix arrives by raising this number.
+FROM node:22.23.5-alpine AS base
 RUN corepack enable
 
 # 2. Install dependencies (pnpm — the repo has no package-lock.json)
