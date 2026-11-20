@@ -119,8 +119,9 @@ function InstallationCard({
 }) {
     return (
         <div className="overflow-hidden rounded-xl border bg-card">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b bg-muted/50 px-4 py-3">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            {/* Two columns from sm up: a long name wraps in its own column, so date and buttons never move. */}
+            <div className="grid gap-x-4 gap-y-2 border-b bg-muted/50 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                     <span className="font-medium text-foreground">
                         {installation.dataSetName ?? installation.packageId ?? NO_VALUE}
                     </span>
@@ -141,8 +142,8 @@ function InstallationCard({
                         </span>
                     )}
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 sm:justify-end">
+                    <div className="whitespace-nowrap text-xs text-muted-foreground">
                         {dateFormat.format(new Date(installation.createdAt))}
                         {installation.createdBy && (
                             <span title={installation.createdBy}>
