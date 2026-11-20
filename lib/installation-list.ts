@@ -71,3 +71,30 @@ export function activeInstallationOf<
 >(rows: Row[], packageId: string): Row | null {
     return rows.find((row) => row.packageId === packageId && !row.uninstalledAt) ?? null
 }
+
+/**
+ * The name an installation goes by on the page "Installiert" and in its
+ * overview. A use case installs a dataset, and the dataset names it. A data
+ * structure installs none, but its package holds the structure alone, so the
+ * one artifact names it. The package id comes after that, and the record's own
+ * id last, so the heading is never empty.
+ */
+export function installationTitle(row: {
+    id: string
+    packageId?: string
+    dataSetName?: string
+    artifacts?: { name?: string }[]
+}): string {
+    const artifacts = row.artifacts ?? []
+    const onlyArtifactName = artifacts.length === 1 ? artifacts[0].name : undefined
+    return row.dataSetName || onlyArtifactName || row.packageId || row.id
+}
+
+/**
+ * Whether the platform recorded what the install did with each artifact:
+ * created it, or reused one that was already there. Where it records nothing,
+ * the page "Installiert" leaves the column out instead of showing it empty.
+ */
+export function recordsArtifactActions(artifacts: { action?: string | null }[]): boolean {
+    return artifacts.some((artifact) => Boolean(artifact.action))
+}

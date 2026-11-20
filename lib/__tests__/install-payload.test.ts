@@ -120,8 +120,6 @@ describe('resolveBrokerOverride', () => {
 })
 
 const TRAFFIC = 'urn:openurbanapps:usecase:verkehrszaehlung'
-/** Read from the fixture, so copying a newer package in does not break these tests. */
-const TRAFFIC_VERSION = mockPackages.find((candidate) => candidate.manifest.id === TRAFFIC)!.manifest.version
 const POOL = '3f1c2a9e-6d0b-4c57-9a41-0e5b7d2c8f10'
 
 function entryOf(id: string): CatalogEntry {
@@ -170,11 +168,13 @@ function referencesOf(member: PackageMemberRequest): string[] {
 
 describe('buildInstallationRequest', () => {
     it('sends the package header and the chosen datapool', () => {
-        const request = buildInstallationRequest(bundleOf(TRAFFIC), POOL)
+        const entry = bundleOf(TRAFFIC)
+        const request = buildInstallationRequest(entry, POOL)
         expect(request.datapoolId).toBe(POOL)
         expect(request.package).toMatchObject({
             id: TRAFFIC,
-            version: TRAFFIC_VERSION,
+            // From the fixture, which moves with every release of the package.
+            version: entry.manifest.version,
             title: 'Verkehrszählung',
         })
     })
@@ -305,12 +305,9 @@ describe('buildInstallationRequest', () => {
         const request = buildInstallationRequest(entry, POOL)
         // The platform refuses these three kinds without a description, and one missing sentence
         // is no reason to fail a whole install.
-        expect(membersOf(request, 'datastructure')[0].description).toBe(
-            `Aus Paket Verkehrszählung ${TRAFFIC_VERSION}`,
-        )
-        expect(membersOf(request, 'datasource')[0].description).toBe(
-            `Aus Paket Verkehrszählung ${TRAFFIC_VERSION}`,
-        )
+        const provenance = `Aus Paket Verkehrszählung ${entry.manifest.version}`
+        expect(membersOf(request, 'datastructure')[0].description).toBe(provenance)
+        expect(membersOf(request, 'datasource')[0].description).toBe(provenance)
     })
 
     it('sends the same request for the same package, every time', () => {
@@ -463,10 +460,12 @@ describe('describeInstallFailure', () => {
         })
     })
 
-    it('names the missing permission when the gateway denies the install', () => {
+    it('names the permissions to check when the gateway denies the install', () => {
         const failure = describeInstallFailure(403, 'Forbidden', 'permission_denied')
         expect(failure.status).toBe('error')
+        // The gateway does not say which one is missing, and the route may require both.
         expect(failure.detail).toContain('INSTALLATION_CREATE')
+        expect(failure.detail).toContain('DATASTRUCTURE_CREATE')
     })
 
     it('keeps the backend’s sentence when the backend itself refuses', () => {

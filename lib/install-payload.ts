@@ -821,7 +821,9 @@ export function describeInstallFailure(
     return describeFailure(httpStatus, statusText, body, {
         unserved:
             'Diese Plattform-Version bietet die Installation von Paketen nicht an (POST /v1/installations).',
-        denied: 'Zugriff verweigert: Ihrer Rolle fehlt die Berechtigung INSTALLATION_CREATE.',
+        // The gateway does not say which permission is missing, and the route of
+        // some platform versions requires DATASTRUCTURE_CREATE as well.
+        denied: 'Zugriff verweigert: Ihrer Rolle fehlt eine Berechtigung für diese Installation. Prüfen Sie INSTALLATION_CREATE und DATASTRUCTURE_CREATE.',
     })
 }
 
