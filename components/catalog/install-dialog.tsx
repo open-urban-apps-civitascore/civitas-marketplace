@@ -412,7 +412,7 @@ function Choice({
                 className={cn(
                     'flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60',
                     featured
-                        ? 'border-emerald-300 bg-emerald-50/60 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:has-[:checked]:border-emerald-600'
+                        ? 'border-emerald-300 bg-emerald-50/60 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:has-[:checked]:border-emerald-600 dark:has-[:checked]:bg-emerald-950/60'
                         : 'has-[:checked]:border-primary has-[:checked]:bg-primary/5',
                 )}
             >
